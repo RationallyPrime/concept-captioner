@@ -42,6 +42,12 @@ provider or to the Hub from Swift.
   (`http://localhost@evil.example/`), IPv6 brackets, trailing dots, mixed case, embedded
   whitespace or `\u` escapes, and make both sides use the same parsed host. The Python
   reference (`models.py`, `urlsplit().hostname`) is the behaviour to match; add tests.
+- `Resolve.swift` `kind: vllm` (medium, confirmed by a second automated review): the stored vLLM
+  key is still attached to any job-file `base_url` that passes the https-or-private rule. Tighten
+  in both languages: attach the vLLM key only when the job's host equals the host the user
+  configured (Settings in the app, `VLLM_BASE_URL` in Python); otherwise send no key. Reject
+  `Authorization`, `x-api-key`, `x-goog-api-key` and similar in a job file's `settings` /
+  extra headers. Python reference first (`models.py`), then Swift, tests for both.
 
 ## Not done yet
 

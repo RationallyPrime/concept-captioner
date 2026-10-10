@@ -31,6 +31,9 @@ separate repository, so nothing here needs to be tidy.
    OpenAI kind never takes a custom base URL; custom OpenAI-compatible servers are the vLLM kind
    with their own key; a custom base URL is https, or plain http only to local or private hosts.
    A job file is data that may have been downloaded; it must never be able to redirect a stored key.
+   Tightening requested by review after the push, for both languages: the vLLM key is attached
+   only when the job's host equals the user-configured vLLM host; otherwise no key is sent; and
+   authorization-style headers in a job file's extra settings are rejected.
 2. The Swift resolver must support the three gateways the Python package already does
    (OpenRouter, Vercel AI Gateway, Pydantic AI Gateway), each with a fixed host and its own key,
    because one gateway key is the default path for the app's users.
