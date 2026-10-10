@@ -1,8 +1,8 @@
 # Handoff, 2026-10-10
 
-Read `CLAUDE.md` and `docs/v0.2-plan.md` first. Nothing in this tree is committed yet; head is
-`v0.1.0`. Commits wait for the history rebuild at the end of this file; everything else does not
-wait for anyone.
+Read `CLAUDE.md` and `docs/v0.2-plan.md` first. This repository is the lab notebook: commit and
+push to `main` freely and often, as-is. The curated, narrative history is re-staged later in a
+separate repository, so nothing here needs to be tidy.
 
 ## What exists
 
@@ -62,8 +62,8 @@ carry on with the rest.
 
 When both streams work, run the end-to-end experiment yourself: the same images captioned
 trigger-only and concept-boundary, two LoRAs, an inference grid that shows the difference, and
-write it up. Then prepare the history rebuild: from `v0.1.0`, a proposed sequence of narrative
-commits, each building and passing its tests, ending in a tree identical to the verified one,
-with a one-page decision sheet per commit (what, why, alternatives rejected). The walkthrough of
-those sheets is done together with Hákon before anything is pushed; preparing them is not. The
-exploration record is kept alongside, not erased.
+write it up. Then prepare the history rebuild for the second repository: from `v0.1.0`, a
+proposed sequence of narrative commits, each building and passing its tests, ending in a tree
+identical to the verified one, with a one-page decision sheet per commit (what, why, alternatives
+rejected). The walkthrough of those sheets is done together with Hákon before that repository is
+published; preparing them is not. This repository stays as the exploration record.

@@ -16,7 +16,8 @@ the spec and say so.
 - The GPU rule: one GPU means caption then train, sequentially; two or more means captioning on
   GPU 0 and training on the rest, concurrently; double-booking is refused.
 - Placeholder triggers only (NORA7 / IVAN9); no real names anywhere.
-- Nothing is committed to git; Hákon re-stages the history later.
+- Commit and push to this repository freely; the curated history is re-staged in a second
+  repository later.
 
 ## What must be shown to work, in order
 
