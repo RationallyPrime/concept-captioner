@@ -11,5 +11,11 @@ build/
 # Jobs and outputs are user data and live beside datasets, not in this repo
 *.local.yaml
 captions/
-_receipts/
 *.jsonl
+
+# macOS
+.DS_Store
+
+# Swift
+.build/
+app/build/

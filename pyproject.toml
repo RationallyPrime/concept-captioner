@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "concept-captioner"
-version = "0.1.0"
-description = "Concept-boundary captioning for diffusion LoRA training: injectable model endpoints, injectable caption profiles, Hugging Face datasets in and out."
+version = "0.2.0"
+description = "Concept-boundary captioning for diffusion LoRA training: any pydantic-ai model, Agent Skills instructions, Hugging Face datasets in and out."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 authors = [{ name = "Hákon Freyr Gunnarsson" }]
-keywords = ["captioning", "lora", "diffusion", "dataset", "huggingface", "minimax-h3", "flux", "ltx"]
+keywords = ["captioning", "lora", "diffusion", "dataset", "huggingface", "pydantic-ai", "minimax-h3", "flux", "ltx"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
@@ -23,16 +23,13 @@ classifiers = [
 ]
 dependencies = [
   "pydantic>=2.7,<3",
+  "pydantic-ai-slim[openai,google,anthropic,openrouter]>=2.55,<3",
   "PyYAML>=6.0,<7",
   "Pillow>=10.4,<13",
-  "httpx>=0.27,<1",
 ]
 
 [project.optional-dependencies]
-gemini = ["google-genai>=1.30,<2"]
 hf = ["datasets>=3.0,<5", "huggingface_hub>=0.25,<2"]
-local = ["torch>=2.3", "transformers>=4.45", "accelerate>=0.30"]
-all = ["concept-captioner[gemini,hf,local]"]
 dev = ["pytest>=8.4,<10", "pytest-asyncio>=0.24,<2", "ruff>=0.12,<1"]
 
 [project.scripts]

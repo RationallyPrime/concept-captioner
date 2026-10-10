@@ -1,8 +1,8 @@
-"""The Job: the only place a concept, a trigger, or a subject mapping exists.
+"""The Job: concepts, per-sample subject mappings, the skill and profile, the endpoints.
 
-The package ships this schema and a synthetic example. A real job is user data that lives beside
-the dataset it describes (or inside the Hugging Face dataset repo, see ``sources.hf``). The
-package itself has no notion of any particular person, style, object or motion.
+A job is user data that lives beside the dataset it describes (or inside the Hugging Face
+dataset repo, see ``sources.hf``). The package itself has no notion of any particular person,
+style, object or motion.
 """
 
 from __future__ import annotations
@@ -18,6 +18,8 @@ from .types import ConfigurationError
 TargetConcept = Literal[
     "facial_identity", "full_identity", "style", "object", "motion", "character_design", "custom"
 ]
+ThinkingLevel = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
+OutputMode = Literal["native", "tool", "prompted"]
 
 
 def _literal_text(value: str, what: str) -> str:
@@ -64,39 +66,50 @@ class Concept(BaseModel):
 
 
 class EndpointSpec(BaseModel):
-    """``kind`` plus adapter options. Secrets are never fields; adapters read the environment."""
+    """A pydantic-ai model: ``kind`` is the provider prefix, exactly as pydantic-ai spells it.
 
-    model_config = ConfigDict(extra="allow")
+    Secrets are never fields; each provider reads its own environment variable.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     kind: str
     model: str
-    concurrency: int = 4
-    min_interval: float = 0.0
-    retries: int = 4
+    base_url: str | None = None
+    output_mode: OutputMode = "native"
+    settings: dict[str, Any] = Field(default_factory=dict)
+    concurrency: int = Field(default=4, ge=1, le=64)
+
+    @field_validator("kind", "model")
+    @classmethod
+    def _nonblank(cls, value: str) -> str:
+        return _literal_text(value, "endpoint kind/model")
+
+    @property
+    def spec(self) -> str:
+        return f"{self.kind}:{self.model}"
 
 
 class Endpoints(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     captioner: EndpointSpec
-    critic: EndpointSpec | None = None  # defaults to the captioner; a different family is better
+    critic: EndpointSpec | None = None  # absent: no critic pass
 
 
 class Job(BaseModel):
-    """A captioning job: concepts, per-sample subject mappings, profile, endpoints, thresholds."""
+    """A captioning job: concepts, per-sample subject mappings, skill, profile, endpoints."""
 
     model_config = ConfigDict(extra="forbid")
 
-    profile: str = "h3-still"
+    skill: str | None = None  # a skill directory; None: the bundled default
+    profile: str = "h3-still"  # a profile in the skill, or a path to a .md file
     concepts: list[Concept]
     samples: dict[str, dict[str, str] | None] = Field(default_factory=dict)
     single_subject_only: bool = False
     endpoints: Endpoints | None = None
-    minimum_caption_words: int = Field(default=1, ge=1, le=2000)
-    max_caption_attempts: int = Field(default=3, ge=1, le=10)
-    captioner_thinking: Literal["none", "low", "medium", "high"] = "low"
-    critic_thinking: Literal["none", "low", "medium", "high"] = "high"
-    require_model_match: bool = True
+    captioner_thinking: ThinkingLevel = "low"
+    critic_thinking: ThinkingLevel = "high"
     policy_overrides: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -107,18 +120,21 @@ class Job(BaseModel):
         if len(set(triggers)) != len(triggers):
             raise ValueError("concept triggers must be unique")
         for sample_id, mapping in self.samples.items():
-            if mapping is None:
-                continue
-            if not mapping:
-                raise ValueError(f"sample {sample_id!r}: mapping must name at least one trigger")
-            unknown = set(mapping) - set(triggers)
-            if unknown:
-                raise ValueError(f"sample {sample_id!r}: unknown triggers {sorted(unknown)}")
-            if any(not isinstance(v, str) or not v.strip() for v in mapping.values()):
-                raise ValueError(f"sample {sample_id!r}: each trigger needs a locator sentence")
-            if self.single_subject_only and len(mapping) != 1:
-                raise ValueError("single_subject_only jobs map exactly one trigger per sample")
+            self._check_mapping(sample_id, mapping)
         return self
+
+    def _check_mapping(self, sample_id: str, mapping: dict[str, str] | None) -> None:
+        if mapping is None:
+            return
+        if not mapping:
+            raise ValueError(f"sample {sample_id!r}: mapping must name at least one trigger")
+        unknown = set(mapping) - set(self.triggers)
+        if unknown:
+            raise ValueError(f"sample {sample_id!r}: unknown triggers {sorted(unknown)}")
+        if any(not isinstance(v, str) or not v.strip() for v in mapping.values()):
+            raise ValueError(f"sample {sample_id!r}: each trigger needs a locator sentence")
+        if self.single_subject_only and len(mapping) != 1:
+            raise ValueError("single_subject_only jobs map exactly one trigger per sample")
 
     @property
     def triggers(self) -> list[str]:
@@ -132,6 +148,14 @@ class Job(BaseModel):
 
     def mapping_for(self, sample_id: str) -> dict[str, str] | None:
         return self.samples.get(sample_id)
+
+    def unmapped(self, sample_ids: list[str]) -> list[str]:
+        """Sample ids with no mapping: held for review, never captioned."""
+        return [sid for sid in sample_ids if self.samples.get(sid) is None]
+
+    def set_mapping(self, sample_id: str, mapping: dict[str, str] | None) -> None:
+        self._check_mapping(sample_id, mapping)
+        self.samples[sample_id] = mapping
 
     def sample_view(self, mapping: dict[str, str]) -> dict[str, Any]:
         """What the model sees for one sample: only the mapped concepts and their locators."""
@@ -162,3 +186,6 @@ class Job(BaseModel):
 
     def dump(self) -> str:
         return yaml.safe_dump(self.model_dump(mode="json", exclude_none=True), sort_keys=False)
+
+    def save(self, path: str | Path) -> None:
+        Path(path).write_text(self.dump(), encoding="utf-8")

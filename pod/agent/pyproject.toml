@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "podagent"
+version = "0.1.0"
+description = "Control agent that runs on a concept-captioner GPU pod: starts and stops vLLM, TensorBoard, trainers and dataset transfers over an authenticated HTTP API."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.30,<1",
+  "pydantic>=2.7,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4,<10",
+  "pytest-asyncio>=0.24,<2",
+  "httpx>=0.27,<1",
+  "ruff>=0.12,<1",
+]
+# On the pod the agent venv also carries tensorboard (service + preferred events reader),
+# huggingface_hub and datasets (for scripts/pull_dataset.py and push_lora.py).
+pod = [
+  "tensorboard>=2.17,<3",
+  "huggingface_hub>=0.25,<2",
+  "datasets>=3.0,<5",
+  "Pillow>=10.4,<13",
+]
+
+[project.scripts]
+podagent = "podagent.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/podagent"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501", "RUF001", "RUF012"]

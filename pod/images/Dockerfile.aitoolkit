@@ -1,0 +1,72 @@
+# concept-captioner pod image with ostris/ai-toolkit (the MiniMax H3 / FLUX path). POD-SPEC §6.1.
+# Build context: the repository root (nothing is copied from it; the base image carries everything).
+#
+#   docker buildx build --platform=linux/amd64 -f pod/images/Dockerfile.aitoolkit \
+#       --build-arg BASE_IMAGE=concept-captioner-pod-base:dev \
+#       -t concept-captioner-pod-aitoolkit:dev .
+#
+# Trainer entry used by scripts/launch_aitoolkit.py:
+#   /opt/venvs/aitoolkit/bin/python /opt/ai-toolkit/run.py <run>/config.yaml
+# The UI (Node, port 8675) is not built: the agent drives run.py headless.
+ARG BASE_IMAGE=concept-captioner-pod-base:dev
+# amd64 like the base (see Dockerfile.base for why the platform is stated on the FROM itself).
+FROM --platform=linux/amd64 ${BASE_IMAGE}
+
+LABEL org.opencontainers.image.title="concept-captioner-pod-aitoolkit" \
+      org.opencontainers.image.description="concept-captioner pod base plus ostris/ai-toolkit in /opt/venvs/aitoolkit"
+
+# --- pins (images/README.md keeps the record) -------------------------------------------------------
+# ostris/ai-toolkit at f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47 ("Version bump", 2026-10-10): the
+# release commit at the top of main when this was written. Everything below is copied from that
+# commit's docker/Dockerfile and manager/spec.py (upstream's own "linux cu130" spec), so this venv is
+# the configuration upstream tests, not a guess:
+#   torch 2.13.0 / torchvision 0.28.0 / torchaudio 2.11.0 from the cu130 index  (CUDA 13 wheels:
+#     the pod's driver must be R580 or newer — see images/README.md; cu126 is the only other
+#     upstream-supported build and it has no Blackwell kernels, so it is not used)
+#   requirements.txt at the commit (diffusers pinned to a commit inside it; torchao 0.10.0 is only
+#     on PyPI, which is why the PyTorch index is an *extra* index searched with unsafe-best-match
+#     and not uv's --torch-backend, which would route torchao to the PyTorch index exclusively)
+#   setuptools 69.5.1 re-pinned afterwards, exactly as upstream does
+#   accelerators: torchcodec 0.15.0 (+cu130), NATTEN 0.21.7 built for torch 2.13/cu130 from
+#     whl.natten.org, flash-attn 2.8.3 prebuilt for torch 2.13/cu130/cp312 (mjun0812 v0.9.47)
+ARG AI_TOOLKIT_REPO=https://github.com/ostris/ai-toolkit.git
+ARG AI_TOOLKIT_COMMIT=f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47
+ARG AI_TOOLKIT_CUDA=cu130
+ARG TORCH_VERSION=2.13.0
+ARG TORCHVISION_VERSION=0.28.0
+ARG TORCHAUDIO_VERSION=2.11.0
+ARG TORCHCODEC_VERSION=0.15.0
+ARG SETUPTOOLS_VERSION=69.5.1
+ARG NATTEN_SPEC="natten==0.21.7+torch2130cu130"
+ARG FLASH_ATTN_WHEEL="https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.47/flash_attn-2.8.3+cu130torch2.13-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl"
+
+# A shallow fetch of exactly the pinned commit (GitHub serves reachable commits by sha). The .git
+# directory stays: it is one tree deep and ai-toolkit reads the sha for its version string.
+RUN git init -q /opt/ai-toolkit \
+ && git -C /opt/ai-toolkit remote add origin "${AI_TOOLKIT_REPO}" \
+ && git -C /opt/ai-toolkit fetch -q --depth 1 origin "${AI_TOOLKIT_COMMIT}" \
+ && git -C /opt/ai-toolkit checkout -q --detach FETCH_HEAD \
+ && git -C /opt/ai-toolkit log -1 --format='ai-toolkit %H %cs %s' \
+ && test -f /opt/ai-toolkit/run.py \
+ && test -f /opt/ai-toolkit/requirements.txt
+
+# Same order as upstream: torch first, then the requirements with torch held at the pin (otherwise
+# a transitive `torch` from timm/peft/accelerate can backtrack it), then setuptools, then the
+# accelerators. The +cu130 local versions can only be satisfied from the cu130 index; the explicit
+# pins on every line keep uv from ever re-resolving the stack. The import check at the end is the
+# one upstream's Dockerfile runs, plus the version assertion; it needs no GPU.
+RUN set -eux \
+ && PIP="uv pip install --python /opt/venvs/aitoolkit/bin/python --extra-index-url https://download.pytorch.org/whl/${AI_TOOLKIT_CUDA} --index-strategy unsafe-best-match" \
+ && TORCH="torch==${TORCH_VERSION}+${AI_TOOLKIT_CUDA} torchvision==${TORCHVISION_VERSION}+${AI_TOOLKIT_CUDA} torchaudio==${TORCHAUDIO_VERSION}+${AI_TOOLKIT_CUDA}" \
+ && uv venv --python "${POD_PYTHON}" /opt/venvs/aitoolkit \
+ && $PIP $TORCH \
+ && $PIP $TORCH "torchcodec==${TORCHCODEC_VERSION}+${AI_TOOLKIT_CUDA}" -r /opt/ai-toolkit/requirements.txt \
+ && uv pip install --python /opt/venvs/aitoolkit/bin/python "setuptools==${SETUPTOOLS_VERSION}" \
+ && $PIP $TORCH "torchcodec==${TORCHCODEC_VERSION}+${AI_TOOLKIT_CUDA}" \
+      --find-links https://whl.natten.org "${NATTEN_SPEC}" "${FLASH_ATTN_WHEEL}" \
+ && /opt/venvs/aitoolkit/bin/python -c "import torch, flash_attn, natten, torchcodec, diffusers, transformers; v = torch.__version__; assert v == '${TORCH_VERSION}+${AI_TOOLKIT_CUDA}', v; print('torch', v, 'flash_attn', flash_attn.__version__, 'natten', natten.__version__, 'torchcodec', torchcodec.__version__, 'diffusers', diffusers.__version__, 'transformers', transformers.__version__)" \
+ && uv pip freeze --python /opt/venvs/aitoolkit/bin/python > /opt/venvs/aitoolkit/freeze.txt
+
+# VERIFY on a pod (POD-SPEC §4.2): the config keys for the MiniMax H3 family at this commit, whether
+# `trigger_word` is still honoured, and whether run.py writes TensorBoard event files natively.
+# Those belong to scripts/launch_aitoolkit.py; nothing in this image depends on the answers.

@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "podctl"
+version = "0.1.0"
+description = "Terminal client for the concept-captioner pod agent HTTP API."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = ["httpx>=0.27,<1"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.4,<10", "ruff>=0.12,<1"]
+
+[project.scripts]
+podctl = "podctl.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/podctl"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501", "RUF001", "RUF012"]

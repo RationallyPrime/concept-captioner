@@ -1,0 +1,68 @@
+# concept-captioner pod image with the Lightricks LTX-2 trainer. POD-SPEC §6.1.
+# Build context: the repository root (nothing is copied from it; the base image carries everything).
+#
+#   docker buildx build --platform=linux/amd64 -f pod/images/Dockerfile.ltx \
+#       --build-arg BASE_IMAGE=concept-captioner-pod-base:dev \
+#       -t concept-captioner-pod-ltx:dev .
+#
+# Entry points used by scripts/launch_ltx.py (both present at the pinned commit, checked below):
+#   /opt/venvs/ltx/bin/python /opt/ltx-2/packages/ltx-trainer/scripts/process_dataset.py …
+#   /opt/venvs/ltx/bin/python /opt/ltx-2/packages/ltx-trainer/scripts/train.py <run>/config.yaml
+# The wrapper resolves them as $LTX_TRAINER_DIR/scripts/{process_dataset,train}.py, so this image
+# sets LTX_TRAINER_DIR (below) to the trainer package, not the workspace root the wrapper defaults
+# to, and the build asserts that the paths the wrapper computes are the files that exist.
+# Their arguments and config keys are marked VERIFY in POD-SPEC §4.3 and belong to the wrapper.
+ARG BASE_IMAGE=concept-captioner-pod-base:dev
+# amd64 like the base (see Dockerfile.base for why the platform is stated on the FROM itself).
+FROM --platform=linux/amd64 ${BASE_IMAGE}
+
+LABEL org.opencontainers.image.title="concept-captioner-pod-ltx" \
+      org.opencontainers.image.description="concept-captioner pod base plus the Lightricks LTX-2 trainer in /opt/venvs/ltx"
+
+# --- pins (images/README.md keeps the record) -------------------------------------------------------
+# Lightricks/LTX-2 at 9ec55f9f22798a3198d9c923856824821bc3317e ("Automated PR - 2026-10-02"): the top
+# of main when this was written; the packages inside call themselves 1.4.2. It is a uv workspace
+# (packages/ltx-core, ltx-pipelines, ltx-trainer; ltx-kernels is excluded upstream because it
+# compiles CUDA) with no committed lock file, so `uv lock` runs here first and the lock stays at
+# /opt/ltx-2/uv.lock as the record of what was resolved. `uv sync --all-packages --all-extras` is the
+# upstream README's `uv sync --extra natten` for every member: ltx-core's `natten` extra is the one
+# place the trainer stack pins torch exactly (torch==2.13.0 plus NATTEN 0.21.7 built for torch
+# 2.13/cu132), and without it torch would float to the newest 2.x on the index. The packages declare
+# the cu132 PyTorch index themselves (tool.uv.index), so these are CUDA 13.2 wheels: the pod's
+# driver must be R580 or newer (see images/README.md). --no-dev leaves out the dev groups (the
+# root's pulls a full CUDA 13.2 toolkit); the `kernels` group is opt-in upstream and stays off.
+ARG LTX2_REPO=https://github.com/Lightricks/LTX-2.git
+ARG LTX2_COMMIT=9ec55f9f22798a3198d9c923856824821bc3317e
+ARG LTX2_TORCH="2.13.0+cu132"
+
+# Where scripts/launch_ltx.py finds the trainer: it joins this with scripts/process_dataset.py and
+# scripts/train.py (LTX_PREPROCESS_SCRIPT / LTX_TRAIN_SCRIPT override either one). The agent passes
+# its own environment through to every service it starts (podagent.supervisor.child_env), so an
+# ENV here is what the wrapper sees when the app starts trainer-ltx. Without it the wrapper's
+# default (/opt/ltx-2, the workspace root) points at files that do not exist.
+ENV LTX_TRAINER_DIR=/opt/ltx-2/packages/ltx-trainer
+
+# A shallow fetch of exactly the pinned commit (GitHub serves reachable commits by sha).
+RUN git init -q /opt/ltx-2 \
+ && git -C /opt/ltx-2 remote add origin "${LTX2_REPO}" \
+ && git -C /opt/ltx-2 fetch -q --depth 1 origin "${LTX2_COMMIT}" \
+ && git -C /opt/ltx-2 checkout -q --detach FETCH_HEAD \
+ && git -C /opt/ltx-2 log -1 --format='LTX-2 %H %cs %s' \
+ && test -f /opt/ltx-2/pyproject.toml \
+ && test -f "${LTX_TRAINER_DIR}/scripts/train.py" \
+ && test -f "${LTX_TRAINER_DIR}/scripts/process_dataset.py" \
+ && /opt/venvs/agent/bin/python -I -c "import importlib.util as u; s = u.spec_from_file_location('launch_ltx', '/opt/pod/scripts/launch_ltx.py'); m = u.module_from_spec(s); s.loader.exec_module(m); paths = [m.preprocess_script(), m.train_script()]; missing = [str(p) for p in paths if not p.is_file()]; assert not missing, f'launch_ltx.py resolves missing entrypoints: {missing}'; print('launch_ltx.py entrypoints:', *paths)"
+
+# UV_PROJECT_ENVIRONMENT puts the workspace's environment at /opt/venvs/ltx instead of .venv; the
+# members are installed editable (uv's default), so the code at /opt/ltx-2 is what runs. The check
+# at the end asserts the exact torch build and that the natten extra really landed; it needs no GPU.
+RUN uv lock --directory /opt/ltx-2 \
+ && UV_PROJECT_ENVIRONMENT=/opt/venvs/ltx uv sync --directory /opt/ltx-2 --frozen \
+      --python "${POD_PYTHON}" --all-packages --all-extras --no-dev \
+ && /opt/venvs/ltx/bin/python -c "import torch, importlib.metadata as m; v = torch.__version__; assert v == '${LTX2_TORCH}', v; print('ltx-trainer', m.version('ltx-trainer'), 'ltx-core', m.version('ltx-core'), 'torch', v, 'natten', m.version('natten'))" \
+ && uv pip freeze --python /opt/venvs/ltx/bin/python > /opt/venvs/ltx/freeze.txt
+
+# VERIFY on a pod (POD-SPEC §4.2): the preprocessing arguments (resolution buckets, caption field),
+# the trainer config keys, where checkpoints land and whether it logs to TensorBoard natively. The
+# trainer README recommends 80 GB of VRAM for the standard configs and ships a low-VRAM (INT8)
+# variant for 32 GB cards; which one the wrapper writes is the wrapper's decision.

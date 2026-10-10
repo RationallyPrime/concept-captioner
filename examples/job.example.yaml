@@ -1,5 +1,7 @@
 # Example job. Every value here is fictional. A real job lives next to your dataset, not in this repo.
-profile: h3-still            # h3-still | flux-image | ltx-image | plain | ./path/to/profile-dir
+
+# skill: ./my-captioning-skill   # an Agent Skills directory; omit for the bundled default
+profile: h3-still                 # a profile in the skill (h3-still | flux-image | ltx-image | plain) or a path to a .md
 
 concepts:
   - trigger: NORA7
@@ -31,7 +33,7 @@ concepts:
       hair_color_and_styling: Describe visible presentation, including color when clear.
 
 # sample id -> trigger -> locator. A locator is how the captioner binds a trigger to one visible person.
-# null holds a sample for review without any provider call. Never guess a mapping.
+# null holds a sample for review without any model call. Never guess a mapping.
 samples:
   solo.png:
     NORA7: The only person in the crop.
@@ -43,16 +45,16 @@ samples:
 single_subject_only: false
 captioner_thinking: low
 critic_thinking: high
-require_model_match: true
-minimum_caption_words: 1
-max_caption_attempts: 3
 
-# Endpoints are kind + options. Secrets come from the environment, never from here.
+# Endpoints are pydantic-ai models: kind is the provider prefix. Keys come from the environment
+# (GOOGLE_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, VLLM_API_KEY), never from here.
 endpoints:
   captioner:
-    kind: gemini
+    kind: google
     model: gemini-3.8-flash
-  critic:
-    kind: openai
+  critic:                         # optional; omit it and no critic runs
+    kind: vllm
     model: Qwen/Qwen3-VL-32B-Instruct
     base_url: http://localhost:8000/v1
+  # critic: { kind: anthropic,  model: claude-opus-5-5 }
+  # critic: { kind: openrouter, model: anthropic/claude-sonnet-4-6, output_mode: prompted }

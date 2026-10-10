@@ -1,9 +1,0 @@
-# A user-supplied caption profile. Load with: --profile ./examples/profile-example
-name: tagged-prose
-media: image
-# Python format string applied to the model's body text when wrapping.
-wrapper: "{body}"
-# Regex (DOTALL, fullmatch) that extracts the descriptive body from a caption. Optional.
-pattern: "^(?P<body>[^\\n]+)$"
-# Regexes that must not appear in the body.
-forbid: ["\\[Shot ", "<Picture ", "overall_soundscape:"]

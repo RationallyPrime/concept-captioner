@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import io
+import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from PIL import Image, ImageDraw
+from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from concept_captioner.job import Concept, Job
-from concept_captioner.profiles import load_profile
-from concept_captioner.schemas import Claim, CritiqueResult, PrimaryResult
-from concept_captioner.types import Request
+from concept_captioner.models import Resolved
+from concept_captioner.schemas import Caption, Critique
 
 
 def synthetic_png(seed: int, size: tuple[int, int] = (256, 256)) -> bytes:
@@ -34,8 +37,10 @@ def images(tmp_path: Path) -> Path:
 @pytest.fixture
 def job() -> Job:
     return Job(
-        profile="h3-still",
-        concepts=[Concept(trigger="NORA7", class_noun="woman"), Concept(trigger="IVAN9", class_noun="man")],
+        concepts=[
+            Concept(trigger="NORA7", class_noun="woman"),
+            Concept(trigger="IVAN9", class_noun="man"),
+        ],
         samples={
             "solo.png": {"NORA7": "The only person in the crop."},
             "pair.png": {"NORA7": "The woman on the left.", "IVAN9": "The man on the right."},
@@ -44,52 +49,50 @@ def job() -> Job:
     )
 
 
-@pytest.fixture
-def profile():
-    return load_profile("h3-still")
+def mapped_triggers(messages: list[ModelMessage]) -> list[str]:
+    """Read the mapped triggers back out of the ACTIVE JOB CONFIGURATION in the instructions."""
+    instructions = messages[0].instructions or ""
+    view = json.loads(instructions.split("ACTIVE JOB CONFIGURATION\n", 1)[1].split("\n", 1)[0])
+    return list(view["inputs"]["subject_mapping"])
 
 
 def h3(body: str) -> str:
-    return f"integrated_multimodal_description: [Shot 1] {body}\n\noverall_soundscape: N/A\n\nnon_diegetic_music: N/A"
-
-
-def good_caption_for(request: Request) -> str:
-    """Pick a caption that names exactly the mapped triggers (read from the job view in the prompt)."""
-    mapped = []
-    for trigger in ("NORA7", "IVAN9"):
-        if '"subject_mapping": {' in request.system and f'"{trigger}":' in request.system.split("ACTIVE JOB CONFIGURATION")[-1]:
-            mapped.append(trigger)
-    if mapped == ["NORA7", "IVAN9"]:
-        return h3("A color photograph frames NORA7, a woman on the left, beside IVAN9, a man on the right. She wears a yellow cardigan; he wears a black jacket. Soft daylight.")
-    return h3("A color photograph frames NORA7, a woman, seated by a window in a blue blouse with her blonde hair down, looking at the camera with a neutral expression. Soft window light.")
-
-
-def primary_responder(request: Request):
-    if request.response_schema is PrimaryResult:
-        caption = good_caption_for(request)
-        count = 2 if "IVAN9" in caption else 1
-        return PrimaryResult(caption=caption, human_subject_count=count, mapped_subjects_usable=True)
-    if request.response_schema is CritiqueResult:
-        count = 2 if "IVAN9" in request.system else 1
-        return approving_critique(count)
-    raise AssertionError("unexpected request")
-
-
-def approving_critique(count: int = 1, **overrides) -> CritiqueResult:
-    base = dict(
-        approved=True,
-        claims=[Claim(claim="a woman is seated by a window", verified=True)],
-        human_subject_count=count,
-        mapped_subjects_usable=True,
-        ambiguity_reason=None,
-        concept_boundary_violation=False,
-        unsupported_inference=False,
-        subject_ambiguity=False,
-        image_caption_mismatch=False,
-        another_person_described_as_trigger=False,
-        trigger_subject_visible_but_unbound=False,
-        quoted_text_present=False,
-        reasons=["triggers bound correctly", "all claims verified"],
+    return (
+        f"integrated_multimodal_description: [Shot 1] {body}\n\n"
+        "overall_soundscape: N/A\n\nnon_diegetic_music: N/A"
     )
-    base.update(overrides)
-    return CritiqueResult(**base)
+
+
+def good_caption(messages: list[ModelMessage]) -> str:
+    mapped = mapped_triggers(messages)
+    if mapped == ["NORA7", "IVAN9"]:
+        return h3(
+            "A photograph frames NORA7, a woman on the left, beside IVAN9, a man on the right."
+        )
+    return h3("A photograph frames NORA7, a woman, seated by a window in a blue blouse.")
+
+
+def function_model(
+    respond: Callable[[list[ModelMessage], AgentInfo], object], *, model_name: str = "fake"
+) -> Resolved:
+    """A Resolved wrapping a FunctionModel whose responder returns a pydantic object or a str."""
+
+    def fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        out = respond(messages, info)
+        text = out if isinstance(out, str) else out.model_dump_json()
+        return ModelResponse(parts=[TextPart(text)], model_name=model_name)
+
+    return Resolved(
+        model=FunctionModel(fn, model_name=model_name),
+        settings={},
+        output_mode="native",
+        requested=model_name,
+    )
+
+
+def captioner_ok(messages: list[ModelMessage], info: AgentInfo) -> Caption:
+    return Caption(caption=good_caption(messages))
+
+
+def critic_ok(messages: list[ModelMessage], info: AgentInfo) -> Critique:
+    return Critique(approved=True, notes=["looks right"])

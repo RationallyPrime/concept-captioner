@@ -1,12 +1,9 @@
 """Hugging Face datasets as source and sink.
 
-Read any dataset with an image column; write captions back as a text column and push to the
-Hub. The token comes from ``HF_TOKEN`` or the cached ``huggingface-cli login``; it is never a
-config field. ``job.yaml`` can be stored in the dataset repo so the identity semantics travel
-with the images they describe (``push_job``/``fetch_job``).
-
-Receipts are stored as a JSON-string column (``<caption_column>_receipt``) so an audit trail
-survives the round trip without a second repo.
+Read any dataset with an image column; write captions back as a text column plus a JSON-string
+column of response records, and push to the Hub. The token comes from ``HF_TOKEN`` or the
+cached ``hf auth login``; it is never a config field. ``job.yaml`` can be stored in the dataset
+repo so the mappings travel with the images they describe (``push_job``/``fetch_job``).
 """
 
 from __future__ import annotations
@@ -14,12 +11,13 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-from ..security import optional_env_secret
 from ..types import ConfigurationError, Sample
+from .local import IMAGE_SUFFIXES, LocalFolderSource
 
 
 def _require_datasets():
@@ -31,7 +29,7 @@ def _require_datasets():
 
 
 def _token(explicit: str | None) -> str | None:
-    return explicit or optional_env_secret("HF_TOKEN") or optional_env_secret("HUGGINGFACE_HUB_TOKEN")
+    return explicit or os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN") or None
 
 
 def _sample_id(row: dict[str, Any], index: int, id_column: str | None) -> str:
@@ -48,7 +46,7 @@ def _encode(image: Any) -> tuple[bytes, str]:
     if isinstance(image, dict) and image.get("bytes"):
         data = image["bytes"]
         suffix = Path(image.get("path") or "").suffix.lower() or ".png"
-        return data, suffix if suffix in {".png", ".jpg", ".jpeg", ".webp"} else ".png"
+        return data, suffix if suffix in IMAGE_SUFFIXES else ".png"
     from PIL import Image
 
     if isinstance(image, dict) and image.get("path"):
@@ -109,13 +107,17 @@ class HFDatasetSource:
 
 
 class HFDatasetSink:
-    """Buffer captions in memory, then write them into the dataset and push once."""
+    """Buffer captions in memory, then write them into a dataset and push once.
+
+    With an ``HFDatasetSource`` the caption columns are added to that dataset (the originating
+    repo by default). With a ``LocalFolderSource`` a new dataset is built from the folder.
+    """
 
     name = "hf"
 
     def __init__(
         self,
-        source: HFDatasetSource,
+        source: HFDatasetSource | LocalFolderSource,
         *,
         target_repo_id: str | None = None,
         caption_column: str = "caption",
@@ -124,61 +126,73 @@ class HFDatasetSink:
         token: str | None = None,
         push: bool = True,
     ) -> None:
+        _require_datasets()
         self.source = source
-        self.target_repo_id = target_repo_id or source.repo_id
+        if target_repo_id is None:
+            if isinstance(source, HFDatasetSource):
+                target_repo_id = source.repo_id
+            else:
+                raise ConfigurationError("a folder source needs an explicit target repo id")
+        self.target_repo_id = target_repo_id
         self.caption_column = caption_column
+        self.record_column = f"{caption_column}_response"
         self.private = private
         self.commit_message = commit_message
         self._token = _token(token)
         self._push = push
         self._captions: dict[str, str] = {}
-        self._receipts: dict[str, dict[str, Any]] = {}
-        existing = source.dataset
+        self._records: dict[str, dict[str, Any]] = {}
         self._existing_captions: dict[str, str] = {}
-        if caption_column in existing.column_names:
+        self._existing_records: dict[str, dict[str, Any]] = {}
+        if isinstance(source, HFDatasetSource):
+            existing = source.dataset
             ids = source.sample_ids
-            for sample_id, caption in zip(ids, existing[caption_column], strict=True):
-                if caption:
-                    self._existing_captions[sample_id] = caption
-        receipt_column = f"{caption_column}_receipt"
-        self._existing_receipts: dict[str, dict[str, Any]] = {}
-        if receipt_column in existing.column_names:
-            ids = source.sample_ids
-            for sample_id, receipt in zip(ids, existing[receipt_column], strict=True):
-                if receipt:
-                    with contextlib.suppress(TypeError, json.JSONDecodeError):
-                        self._existing_receipts[sample_id] = json.loads(receipt)
+            if caption_column in existing.column_names:
+                for sample_id, caption in zip(ids, existing[caption_column], strict=True):
+                    if caption:
+                        self._existing_captions[sample_id] = caption
+            if self.record_column in existing.column_names:
+                for sample_id, record in zip(ids, existing[self.record_column], strict=True):
+                    if record:
+                        with contextlib.suppress(TypeError, json.JSONDecodeError):
+                            self._existing_records[sample_id] = json.loads(record)
 
-    async def existing(self, sample_id: str) -> tuple[str, dict[str, Any]] | None:
-        caption = self._captions.get(sample_id) or self._existing_captions.get(sample_id)
-        if caption is None:
-            return None
-        return caption, self._receipts.get(sample_id) or self._existing_receipts.get(sample_id, {})
+    async def exists(self, sample_id: str) -> bool:
+        return sample_id in self._captions or sample_id in self._existing_captions
 
-    async def write_receipt(self, sample_id: str, receipt: dict[str, Any]) -> None:
-        self._receipts[sample_id] = receipt
+    async def record(self, sample_id: str) -> dict[str, Any] | None:
+        return self._records.get(sample_id) or self._existing_records.get(sample_id)
 
-    async def commit(self, sample_id: str, caption: str, receipt: dict[str, Any]) -> None:
-        self._captions[sample_id] = caption
-        self._receipts[sample_id] = receipt
+    async def write(self, sample_id: str, caption: str | None, record: dict[str, Any]) -> None:
+        self._records[sample_id] = record
+        if caption is not None:
+            self._captions[sample_id] = caption
 
     def materialize(self):
-        """Return the dataset with caption and receipt columns filled."""
-        ids = self.source.sample_ids
-        captions = [
-            self._captions.get(i) or self._existing_captions.get(i) or "" for i in ids
-        ]
-        receipts = [
-            json.dumps(self._receipts.get(i) or self._existing_receipts.get(i) or {}, ensure_ascii=False)
+        """Return the dataset with the caption and record columns filled."""
+        if isinstance(self.source, HFDatasetSource):
+            ids = self.source.sample_ids
+            dataset = self.source.dataset
+            for column in (self.caption_column, self.record_column):
+                if column in dataset.column_names:
+                    dataset = dataset.remove_columns(column)
+        else:
+            from datasets import Dataset, Image
+
+            files = self.source.files
+            ids = [p.name for p in files]
+            dataset = Dataset.from_dict(
+                {"image": [str(p) for p in files], "file_name": ids}
+            ).cast_column("image", Image())
+        captions = [self._captions.get(i) or self._existing_captions.get(i) or "" for i in ids]
+        records = [
+            json.dumps(
+                self._records.get(i) or self._existing_records.get(i) or {}, ensure_ascii=False
+            )
             for i in ids
         ]
-        dataset = self.source.dataset
-        receipt_column = f"{self.caption_column}_receipt"
-        for column in (self.caption_column, receipt_column):
-            if column in dataset.column_names:
-                dataset = dataset.remove_columns(column)
         dataset = dataset.add_column(self.caption_column, captions)
-        return dataset.add_column(receipt_column, receipts)
+        return dataset.add_column(self.record_column, records)
 
     async def finalize(self) -> dict[str, Any]:
         dataset = self.materialize()
@@ -189,9 +203,10 @@ class HFDatasetSink:
             "pushed": False,
         }
         if self._push:
+            split = self.source.split if isinstance(self.source, HFDatasetSource) else "train"
             dataset.push_to_hub(
                 self.target_repo_id,
-                split=self.source.split,
+                split=split,
                 token=self._token,
                 private=self.private,
                 commit_message=self.commit_message,
@@ -200,8 +215,14 @@ class HFDatasetSink:
         return summary
 
 
-def push_job(repo_id: str, job_path: str | Path, *, token: str | None = None, path_in_repo: str = "concept-captioner/job.yaml") -> str:
-    """Store the job file inside the dataset repo so the data carries its own semantics."""
+def push_job(
+    repo_id: str,
+    job_path: str | Path,
+    *,
+    token: str | None = None,
+    path_in_repo: str = "concept-captioner/job.yaml",
+) -> str:
+    """Store the job file inside the dataset repo so the data carries its own mappings."""
     _require_datasets()
     from huggingface_hub import HfApi
 
@@ -216,14 +237,23 @@ def push_job(repo_id: str, job_path: str | Path, *, token: str | None = None, pa
     return str(info)
 
 
-def fetch_job(repo_id: str, *, token: str | None = None, path_in_repo: str = "concept-captioner/job.yaml") -> Path:
+def fetch_job(
+    repo_id: str, *, token: str | None = None, path_in_repo: str = "concept-captioner/job.yaml"
+) -> Path:
     _require_datasets()
     from huggingface_hub import hf_hub_download
 
     return Path(hf_hub_download(repo_id, path_in_repo, repo_type="dataset", token=_token(token)))
 
 
-def pull_images(repo_id: str, destination: str | Path, *, split: str = "train", image_column: str = "image", token: str | None = None) -> int:
+def pull_images(
+    repo_id: str,
+    destination: str | Path,
+    *,
+    split: str = "train",
+    image_column: str = "image",
+    token: str | None = None,
+) -> int:
     """Download a dataset's images to a folder (sidecar workflow), returning the count."""
     source = HFDatasetSource(repo_id, split=split, image_column=image_column, token=token)
     out = Path(destination)
@@ -232,7 +262,11 @@ def pull_images(repo_id: str, destination: str | Path, *, split: str = "train", 
     for index, row in enumerate(source.dataset):
         data, suffix = _encode(row[image_column])
         sample_id = _sample_id(row, index, None)
-        name = Path(sample_id).stem + suffix if Path(sample_id).suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"} else sample_id
+        name = (
+            sample_id
+            if Path(sample_id).suffix.lower() in IMAGE_SUFFIXES
+            else Path(sample_id).stem + suffix
+        )
         (out / name).write_bytes(data)
         written += 1
     return written

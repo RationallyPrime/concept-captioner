@@ -1,0 +1,21 @@
+# Fake-mode agent image for compose.fake.yaml: no CUDA, no trainers. Build context: repo root.
+FROM python:3.12-slim
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+# tini is PID 1 here as on the real images (entrypoint.sh): it reaps the orphans the supervisor
+# tracks by process group.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends tini \
+ && rm -rf /var/lib/apt/lists/*
+# Only what the package build needs, as in Dockerfile.base: the whole pod/agent directory would
+# drag the developer's .venv (hundreds of MB of macOS wheels), caches and tests into the layer.
+COPY pod/agent/pyproject.toml pod/agent/README.md /opt/src/agent/
+COPY pod/agent/src/ /opt/src/agent/src/
+RUN pip install --no-cache-dir /opt/src/agent \
+ && mkdir -p /opt/venvs/agent/bin \
+ && ln -s /usr/local/bin/python /opt/venvs/agent/bin/python
+COPY pod/images/entrypoint.sh /opt/pod/entrypoint.sh
+COPY pod/scripts/*.py /opt/pod/scripts/
+RUN chmod +x /opt/pod/entrypoint.sh
+# Same three HTTP ports as Dockerfile.base; compose.fake.yaml publishes all of them.
+EXPOSE 8800 8000 6006
+ENTRYPOINT ["/opt/pod/entrypoint.sh"]

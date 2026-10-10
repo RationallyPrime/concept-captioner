@@ -1,0 +1,10 @@
+--swiftversion 6.0
+--indent 4
+--maxwidth 120
+--wraparguments before-first
+--wrapparameters before-first
+--wrapcollections before-first
+--commas always
+--stripunusedargs closure-only
+--disable wrapMultilineStatementBraces
+--exclude .build, Sources/ConceptCore/Resources

@@ -1,7 +1,8 @@
 """Where samples come from and where captions go.
 
-``ImageSource`` yields ``Sample`` objects; ``CaptionSink`` receives the caption and the receipt
-for a sample id, and can say whether a sample already has a result (for resume).
+``ImageSource`` yields ``Sample`` objects. ``CaptionSink`` receives a caption (or ``None`` for
+a sample that produced none) and the response record for that sample, and can say whether a
+sample already has a caption and what its record says.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from ..types import Sample
 class ImageSource(Protocol):
     name: str
 
-    async def samples(self) -> AsyncIterator[Sample]: ...
+    def samples(self) -> AsyncIterator[Sample]: ...
 
     async def count(self) -> int: ...
 
@@ -25,13 +26,17 @@ class ImageSource(Protocol):
 class CaptionSink(Protocol):
     name: str
 
-    async def existing(self, sample_id: str) -> tuple[str, dict[str, Any]] | None:
-        """Return (caption, receipt) if this sample already has a committed result."""
+    async def exists(self, sample_id: str) -> bool:
+        """True if this sample already has a caption."""
         ...
 
-    async def write_receipt(self, sample_id: str, receipt: dict[str, Any]) -> None: ...
+    async def record(self, sample_id: str) -> dict[str, Any] | None:
+        """The stored response record for this sample, if any."""
+        ...
 
-    async def commit(self, sample_id: str, caption: str, receipt: dict[str, Any]) -> None: ...
+    async def write(self, sample_id: str, caption: str | None, record: dict[str, Any]) -> None:
+        """Store the caption (when there is one) and the record."""
+        ...
 
     async def finalize(self) -> dict[str, Any]:
         """Flush anything buffered (e.g. push a dataset) and return a summary."""

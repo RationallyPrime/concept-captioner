@@ -1,4 +1,8 @@
-"""Build the visual derivative that leaves the machine: metadata-stripped, size-capped, ICC kept."""
+"""Build the image bytes that leave the machine: resized under provider limits and re-encoded.
+
+Re-encoding drops EXIF/IPTC/XMP as a side effect (the ICC profile is kept). The resize exists
+because providers reject large images and charge more tokens for them.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +10,7 @@ import io
 
 from PIL import Image, ImageOps
 
-from .types import ConfigurationError, ImageRef
+from .types import ConfigurationError
 
 
 def provider_image(
@@ -15,8 +19,8 @@ def provider_image(
     suffix: str,
     max_bytes: int = 8 * 1024 * 1024,
     max_side: int = 3072,
-) -> ImageRef:
-    """Re-encode in memory without EXIF/IPTC/XMP. Original bytes are never sent as-is."""
+) -> tuple[bytes, str]:
+    """Return ``(bytes, media_type)`` for the request."""
     if max_bytes <= 0 or max_side <= 0:
         raise ConfigurationError("image limits must be positive")
     with Image.open(io.BytesIO(data)) as opened:
@@ -32,19 +36,16 @@ def provider_image(
             out = io.BytesIO()
             if use_jpeg:
                 image.save(out, format="JPEG", quality=95, subsampling=0, optimize=True, **common)
-                mime = "image/jpeg"
+                media_type = "image/jpeg"
             else:
                 image.save(out, format="PNG", optimize=True, **common)
-                mime = "image/png"
+                media_type = "image/png"
             payload = out.getvalue()
             if len(payload) <= max_bytes:
-                return ImageRef(payload, mime)
+                return payload, media_type
             w, h = image.size
             if w == 1 and h == 1:
                 raise ConfigurationError("image could not be encoded below the byte cap")
-            image = image.resize((max(1, int(w * 0.8)), max(1, int(h * 0.8))), Image.Resampling.LANCZOS)
-
-
-def image_dimensions(data: bytes) -> tuple[int, int]:
-    with Image.open(io.BytesIO(data)) as image:
-        return image.size
+            image = image.resize(
+                (max(1, int(w * 0.8)), max(1, int(h * 0.8))), Image.Resampling.LANCZOS
+            )
