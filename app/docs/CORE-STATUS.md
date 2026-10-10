@@ -35,6 +35,13 @@ provider or to the Hub from Swift.
   level; non-reasoning models reject the parameter and some values exist only on some models.
   Send it only where the model accepts it, or let the request fail with a clear message.
 - `GeminiClient.swift` ~101 (low): `medium` thinking is not accepted by every Gemini model.
+- `Resolve.swift` (unverified, from an automated review of the pushed commit; no details were
+  delivered): a possible parser differential in the base-URL safety check, i.e. the code that
+  decides "loopback / private / single-label host" could parse a URL differently from the HTTP
+  client that later sends the request. Check with adversarial inputs: userinfo
+  (`http://localhost@evil.example/`), IPv6 brackets, trailing dots, mixed case, embedded
+  whitespace or `\u` escapes, and make both sides use the same parsed host. The Python
+  reference (`models.py`, `urlsplit().hostname`) is the behaviour to match; add tests.
 
 ## Not done yet
 
