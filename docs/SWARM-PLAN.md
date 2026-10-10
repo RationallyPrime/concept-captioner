@@ -110,9 +110,13 @@ Current boundary: the app and GPU code have independent acceptance at `ad5c94c`;
 Swift package passed 234 offline tests, strict lint/format and a refreshed unsigned bundle.
 Real Swift Hub upload/verify/download and native RunPod catalog/volume reads also passed.
 The pod owner has built/pushed all three images and proved authenticated control on one and
-two GPUs; real captioning/training, public distribution and final cost remain in progress.
-Local narrative-history candidates and decision sheets are being prepared against the accepted
-snapshot; equality to the eventual hardware/experiment tree is still pending.
+two GPUs. Real Python and Swift caption requests passed; the first tiny FLUX run produced
+checkpoints, readable curves and a downloaded Hub LoRA. Caption quality has not passed the
+experiment's boundary review. LTX training, concurrent device isolation, public distribution
+and final cost remain in progress. Four local narrative commits and their decision sheets
+were tested and accepted against the app snapshot; equality to the eventual hardware/experiment
+tree is still pending. The paired experiment configs have independent offline acceptance;
+neither treatment has been trained.
 
 Connect the Mac to the verified agent through the provider proxy. Demonstrate the full shared
 data flow, user-configured endpoint/key behavior, observable failures, cancellation, cost
