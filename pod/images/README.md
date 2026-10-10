@@ -1,9 +1,10 @@
 # images
 
-Container images for the pod (POD-SPEC §6). Docker is not available on the development
-machine: these files are reviewed by eye and built in CI or on a build host with
-`docker buildx build --platform=linux/amd64`. Nothing here has been built or run on a pod yet;
-the list of things to confirm when that happens is at the end.
+Container images for the pod (POD-SPEC §6). All three CUDA images have been built and pushed
+on cx53 with `docker buildx build --platform=linux/amd64`; the base image has passed an
+anonymous pull. Live agent, vLLM and tiny FLUX execution are recorded in
+`../docs/POD-STATUS.md`, alongside the pending LTX and publication checks. Docker is not
+available on the development Mac, so builds use the existing build host.
 
 | file | purpose |
 | --- | --- |

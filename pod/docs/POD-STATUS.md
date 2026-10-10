@@ -1,210 +1,251 @@
 # POD-STATUS
 
-Tracks what of `POD-SPEC.md` exists. Updated by whoever lands a work unit; one line per unit.
-Last full pass: 2026-10-10, every tree green (commands in "How the numbers were produced").
+Current verification state as of 2026-10-10 19:18 UTC. Source, fake execution, live functional
+execution and caption quality are separate evidence below. The requested seven live
+checks are in progress; this file does not claim the complete pod handoff yet.
 
-| unit | id | paths | state | notes |
-| --- | --- | --- | --- | --- |
-| Spec and skeleton | `arch` | `docs/POD-SPEC.md`, `agent/`, `podctl/`, `images/`, `scripts/` | done 2026-10-10 | layout, pyprojects, settings, auth, error envelope, `__main__` (exits 2 without a usable token); `agent/tests/test_health.py` 5 tests |
-| GPU inventory | `gpus` | `agent/src/podagent/gpus.py`, `agent/tests/test_gpus.py` | done 2026-10-10 | `parse_nvidia_smi` on 1/2/4-GPU fixtures, CRLF, `[N/A]` uuid, malformed lines named; `NvidiaSmiBackend` runs a fixed argv with a 10 s timeout and answers `[]` + warning on missing binary / timeout / nonzero exit / bad output; `FakeBackend(n)`; 31 tests. Known limit: a GPU name containing a comma is rejected as malformed (MIG-style names) |
-| Topology plan | `plan` | `agent/src/podagent/plan.py`, `agent/tests/test_plan.py` | done 2026-10-10 | the §2.5 table for 0/1/2/4 GPUs × caption/train/both, `gpu_count` override, 400 on zero GPUs or neither side, every cell of the rule asserted; 79 tests (parametrised), route tests included |
-| Service catalog | `catalog` | `agent/src/podagent/catalog.py`, `agent/tests/test_catalog.py` | done 2026-10-10 | six `ServiceSpec`s; pydantic params with `extra="forbid"` plus a second workspace-path step (`validate`); argv per §3.1–3.5 element-for-element; secrets only in env, stripped from `run.json` and the fake argv, redacted by `public()`; `fake_argv`; 145 tests |
-| Supervisor + fake service | `supervisor` | `agent/src/podagent/supervisor.py`, `fakeservice.py`, `agent/tests/test_supervisor.py` | done 2026-10-10 | real `podagent.fakeservice` children: start/status/logs/stop, `CUDA_VISIBLE_DEVICES` per service (`""` for 0-GPU services), check order of §2.6, double-booking refused, exit-code capture (`exited`/`failed`/`stopped`), SIGTERM → SIGKILL on the process group, log truncated per start, backwards `tail_file`, shutdown hook; 29 tests |
-| Events reader | `events` | `agent/src/podagent/events.py`, `agent/tests/test_events.py` | done 2026-10-10 | minimal tfrecord + protobuf reader (`simple_value` and TF2 `tensor`), truncated/corrupt tail tolerated, newest file wins ties, `tensorboard`'s `EventAccumulator` used when importable with fallback; 34 tests, 1 of them (`test_parity_with_tensorboard_reader`) skipped when `tensorboard` is not installed, as in the dev venv |
-| API wiring + tests | `api` | `agent/src/podagent/app.py`, `agent/tests/test_api.py` | done 2026-10-10 | every route of §2 over `TestClient`; bearer on every route incl. unmatched paths and non-JSON bodies (401 first, from the headers alone, before the body is read); 1 MiB body cap and chunked bodies → `413 payload_too_large`; `stop` `timeout_s` capped at 90 (proxy cutoff); every error code of §2.2 in the one envelope; topology end-to-end on 1, 2 and 4 fake GPUs incl. the explicit-`gpus` override; `/docs`, `/redoc`, `/openapi.json` off; lifespan shutdown stops children; 134 tests |
-| Transfer scripts | `scripts-transfer` | `scripts/pull_dataset.py`, `scripts/push_lora.py`, `scripts/tests/test_pull_dataset.py`, `test_push_lora.py` | done 2026-10-10 (Hub mocked) | imagefolder (`metadata.jsonl`/`.csv`, flattening, collisions, `--split` by folder) and `datasets` paths, atomic `DIR.partial` swap, `manifest.json`, `job.yaml`, `--require-captions`; push: newest `.safetensors` (or all), samples, `run.json`/`config.yaml`, generated model card, `push.json`; `python -I … --help` import-free; 34 + 15 tests. Never run against the real Hub |
-| Trainer wrappers | `scripts-trainers` | `scripts/launch_aitoolkit.py`, `scripts/launch_ltx.py`, `scripts/tests/test_launch_wrappers.py` | done 2026-10-10 (trainer mocked) | RunConfig validation copied from §4.1, native config per §4.3 (`--dry-run` writes it), `extra` deep-merge, tee with `\r` redraw splitting, `scraped/loss` + `scraped/lr` scraper, `push_on_finish`, exit-code propagation, LTX preprocess + resume, post-merge check that `extra` cannot point the trainer outside the workspace, tee stops the trainer when the tee itself fails; 153 tests. Every trainer key, entrypoint and flag still carries `# VERIFY` (§4.2); nothing has run against a real checkout |
-| Images | `images` | `images/Dockerfile.{base,aitoolkit,ltx,fake}`, `entrypoint.sh`, `compose.fake.yaml`, `images/README.md` | written, not built | base: `nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04` by digest, uv 0.12.21, CPython 3.12.14, `/opt/venvs/vllm` (vLLM 0.31.0 +cu129), `/opt/venvs/agent` (`podagent[pod]` + `concept-captioner[hf]`), scripts `--help` checked at build; aitoolkit `f7a1fb9a` (cu130), LTX-2 `9ec55f9f` (cu132) → trainer images need an R580+ driver; every pin dated in `images/README.md`. Docker is not available on the dev machine: reviewed by eye only, zero builds |
-| podctl | `podctl` | `podctl/src/podctl/{cli,client}.py`, `podctl/tests/test_cli.py` | done 2026-10-10 | all eleven §8 commands, tables and `--json`, `--wait` and `--follow` loops, exit codes 0/1/2/3/130, gateway 502/503/504 → 3, `MockTransport` only; 95 tests |
-| Status doc + pod README | `status-doc` | `docs/POD-STATUS.md`, `README.md` | done 2026-10-10 | this file and `pod/README.md`; spec drift staged below, `POD-SPEC.md` edit pending (see "Spec drift") |
+## Implementation and local verification
 
-## Foundation repair, 2026-10-10
+The agent, GPU inventory, topology plan, fixed service catalog, supervisor, event reader,
+transfer scripts, both trainer wrappers, podctl and all four Dockerfiles are implemented.
+The source contract is `POD-SPEC.md`; running code determines actual behavior. The first
+handoff had only fake/mock verification. That historical limitation was superseded by the
+builds and live receipts recorded here.
 
-The existing vLLM allowlist was verified against its catalog/API tests. LTX preprocess arguments
-now use one stdlib validator at the API and in the isolated wrapper, rejecting path, device and
-column overrides before a run is prepared or a subprocess starts. The images copy the validator
-into the wrapper's source-relative layout. `podctl` classifies proxy Cloudflare 520-526 responses
-without an agent error envelope as unreachable (exit 3); actual agent envelopes still exit 1.
-Fake scripts: 238 passed; podctl: 113 passed; lint and formatting clean in both trees.
-Agent: 557 passed, 1 skipped (TensorBoard absent), with an inherited Starlette/httpx warning;
-Ruff and formatting clean. The parent independently accepted the foundation after 15 API
-preprocess tests, 33 wrapper preprocessing tests, and 21 proxy tests passed. Published to main
-as `52bedeea032aaa08a7923249bc06c127795f00d2` (2026-10-10).
-No Docker image or real pod claim is established by this repair.
+| tree | latest local result | scope |
+| --- | --- | --- |
+| agent | 570 passed, 1 skipped | catalog/API, actual fake subprocess lifecycle, GPU fixtures, topology, auth, TensorBoard proxy and event reader; skipped optional TensorBoard parity in the development venv |
+| scripts | 240 passed | wrapper validation/config/preprocess, mocked trainer launches and Hub transfer; isolated `python -I` entrypoints |
+| podctl | 113 passed | CLI/client, gateway classification, logs/wait semantics |
 
-## How the numbers were produced
+Ruff and formatting passed for all three trees. The inherited Starlette/httpx warning does
+not change these results. Commands use each package's existing development venv; scripts
+run with `../agent/.venv/bin/python -m pytest tests -q`. These local counts establish source
+behavior, not CUDA execution.
 
-2026-10-10, macOS, CPython 3.13.12 in the dev venvs (the images use 3.12.14; both packages
-declare `>= 3.11`). No network, no GPU, no Docker.
+Three independently accepted changes are published:
 
-```bash
-cd pod/agent  && uv venv && uv pip install -e ".[dev]" && pytest -q && ruff check . && ruff format --check .
-#   461 passed, 1 skipped (tensorboard absent); ruff clean, 21 files formatted
-cd pod/podctl && uv venv && uv pip install -e ".[dev]" && pytest -q && ruff check . && ruff format --check .
-#   95 passed; ruff clean, 5 files formatted
-cd pod/scripts && ../agent/.venv/bin/python -m pytest tests -q        # needs huggingface_hub, datasets, Pillow
-             && ../agent/.venv/bin/ruff check . && ../agent/.venv/bin/ruff format --check .
-#   202 passed; ruff clean, 8 files formatted
+- `52bedeea032aaa08a7923249bc06c127795f00d2`: existing vLLM allowlist verified; one stdlib
+  LTX preprocess validator at API and isolated script boundaries; invalid flags are rejected
+  before run preparation, writes or subprocesses. Cloudflare proxy 520–526 without an agent
+  envelope is unreachable (podctl exit 3). Parent independently ran 15 API preprocess,
+  33 wrapper preprocess and 21 proxy checks.
+- `c325cb411331062e1de80b2b0271f16c2c188dbb`: TensorBoard binds loopback and uses the
+  authenticated agent `/tensorboard/` proxy. Bearer first navigation supplies a scoped
+  HttpOnly cookie, Secure on real pods; cookie authentication cannot reach control routes.
+  Credentials are not forwarded upstream and port 6006 is internal. LTX resolves the
+  supported Hub source into controlled workspace paths automatically. Parent independently
+  ran 6 TensorBoard API and 10 Hub/download wrapper checks.
+- `92136b16e2b280a638908b3293be730f8f303bb9`: actual vLLM 0.31.0+cu129 rejected obsolete
+  `--disable-log-requests`. An exhaustive installed-wheel source probe of 2,771 Python files,
+  with the current `enable_log_requests` as positive control, also found no hyphen/underscore
+  forms of `--swap-space`, `--max-seq-len-to-capture` or `--disable-mm-preprocessor-cache`.
+  The four flags now return API 422 before process, logs or GPU booking. Parent independently
+  checked 8 focused cases including all four pre-spawn API rejections. The unsuccessful
+  CPU-only CLI help probe is not used as the absence witness.
+
+## Images and fake compose
+
+All three CUDA images built and pushed on cx53 from accepted source `92136b1`, with that
+OCI revision label. Registry references share the tag `v0.1.0-verify20261010`:
+
+| image | final registry digest | bytes | publication |
+| --- | --- | --- | --- |
+| `ghcr.io/rationallyprime/concept-captioner-pod-base` | `sha256:e49e9d2de028ed8185d037b9dcf86ff8652a37923de660b26eb16c51d92c387a` | 10,290,568,891 | public; actual anonymous Docker pull succeeded with an empty isolated config |
+| `ghcr.io/rationallyprime/concept-captioner-pod-aitoolkit` | `sha256:6fcdd6259987203bed61913dd8585eae60a18dc28b184e2545b202fe9c4baf7b` | 14,147,141,514 | pushed, currently private; visibility/anonymous pull pending |
+| `ghcr.io/rationallyprime/concept-captioner-pod-ltx` | `sha256:61f90e3d40dec8cb3d2886ecad5787656276672a7bb1d4729e28353f17044945` | 13,874,943,964 | pushed, currently private; visibility/anonymous pull pending |
+
+The initial live ai-toolkit proofs below used accepted source `c325cb4` under the same tag,
+with supported vLLM arguments. Their ai-toolkit digest was
+`sha256:56330d8c426efd6a1c8c939c8a0d0cbf6032e956edaf1d61716885f242d0a32d`.
+The tag was then rebuilt to the final digests above. Current LTX uses the final image.
+
+Build import checks passed: base CPython 3.12.14, vLLM 0.31.0+cu129, torch 2.13.0+cu129,
+FlashInfer 0.7.0.post1 cache; ai-toolkit torch 2.13.0+cu130, flash-attn 2.8.3, natten 0.21.7,
+torchcodec 0.15.0+cu130, diffusers 0.39.0.dev0 and transformers 5.5.3; LTX trainer/core 1.4.2,
+torch 2.13.0+cu132 and natten 0.21.7+torch2130cu132. The final ai-toolkit installed setuptools
+84.0.0 after upstream dependency resolution; the real entrypoint and tiny training succeeded.
+Driver observations are on CUDA 13.2 hosts. R570 compatibility has not been live tested.
+
+The fake image built and compose answered health 200 / unauthenticated health 401, two
+fake GPUs, concurrent plan caption GPU0/trainer GPU1, authenticated TensorBoard 200 with
+scoped cookie, and service stop. cx53 host port 8000 was already occupied, so this isolated
+proof mapped localhost 38800/38000. Compose exposes only 8800/8000; TensorBoard stays
+loopback through `/tensorboard/`. Fake execution proves control integration, not GPU memory.
+
+The signed-in Chrome settings change made the base package public; REST read-back and
+anonymous Docker pull verified it. The next browser attempt found the Mac locked. Trainer
+visibility remains a concrete external blocker, with settings at
+`https://github.com/users/RationallyPrime/packages/container/concept-captioner-pod-aitoolkit/settings`
+and the corresponding `concept-captioner-pod-ltx/settings` path.
+
+## Live resources and cost state
+
+Task-created durable volume `nydku2wmvd` is 200 GB Standard in EU-RO-1, freshly read back.
+Its published rate is $0.07/GB/month ($14/month), including after compute stops. Checkpoints
+and datasets remain on that volume; no volume or output has been terminated/deleted.
+
+| pod | hardware actually observed | compute rate | state at this update |
+| --- | --- | --- | --- |
+| `iqs4zrmjf097hf` | 1 × RTX PRO 4500 Blackwell; 32,623 MiB VRAM, 62 GB RAM, 12 vCPU, CUDA 13.2 | $0.72/hour | running useful LTX model preprocessing/training work |
+| `q833ws7hsuyrqn` | 2 × RTX PRO 4500 Blackwell; distinct GPU UUIDs, 32,623 MiB each, 125 GB RAM, 56 vCPU, CUDA 13.2 | $1.44/hour | stopped; fresh `EXITED` read-back after first bounded two-GPU API proof |
+
+Each has 50 GB container disk, published active-disk rate $0.10/GB/month ($5/month).
+The one-GPU pod was created 18:30:26Z, initial container boot 18:37:21Z, first proxy health
+18:39:08Z. The preceding 64 GB reserved-RAM request failed capacity and created no pod.
+The two-GPU pod was created 18:34:47Z and stopped after its useful proof at approximately
+18:40:51Z. The one-GPU pod was stopped and read back `EXITED` at 19:06:34Z, then updated to
+the final LTX image and restarted for this queued trainer proof; agent boot logged 19:11:54Z.
+
+At 19:16 UTC the billing API returned no finalized pod billing records for either exact pod
+in the 17:00–20:00 aligned window. This is reporting delay, not a claim of free compute.
+The exact volume already has one recorded 18:00–19:00 charge of $0.01944444514811039.
+Final settled compute totals and final stopped receipts remain pending. Rate fields on an
+`EXITED` pod are not evidence that its GPU is still billing.
+
+## Agent, topology and VRAM proof
+
+Both live agents passed authenticated health, inventory, plan, service status, logs and
+TensorBoard start/stop. One GPU selected sequential GPU0. Two GPUs selected caption GPU0 /
+trainer GPU1. Real TensorBoard 2.21 binds `127.0.0.1:6006` under `/tensorboard`; its agent
+proxy answered 200 and issued an HttpOnly/Secure/SameSite=strict cookie scoped to that
+subtree. Cookie-only health answered 401. Both children stopped with `group_alive=false`.
+
+Single-GPU normal lifecycle releases were measured: vLLM stopped to 2 MiB idle before
+FLUX; FLUX exit returned to 2 MiB before the next vLLM; the second vLLM stop also returned
+2 MiB before pod stop. Actual concurrent vLLM/trainer device isolation on the two-GPU pod
+is still pending. The manual API-server crash/subreaper recovery check is also pending.
+
+## Captioning: functional proof and rejected quality outputs
+
+Qwen/Qwen2.5-VL-3B-Instruct served through the authenticated vLLM proxy. Python wrote all
+five public DreamBooth bear_plushie photo sidecars in 82.79 seconds. The native Swift client
+separately returned HTTP 200 and parsed a structured synthetic image caption. Working
+settings: context 16,384, max sequences 2, GPU memory fraction 0.7, eager execution and
+batched tokens 4,096. Observed active VRAM was 21,888 MiB. The earlier 8,192-token context
+failed because the complete bundled prompt needed 9,452 input tokens.
+
+Qwen/Qwen3-VL-8B-Instruct, revision `0c351dd01ed87e9c1b53cbc748cba10e6187ff3b`, then
+served on the same 32 GB GPU: context 16,384, max sequences 2, memory fraction 0.85, eager
+and batched tokens 4,096. Actual loaded model memory was 16.69 GiB; observed GPU memory
+26,520–26,524 MiB. Five drafts took 26.28 seconds; a same-model critic took 38.92 seconds
+(4 written, 1 rejected); one bounded focused-policy retry wrote five in 21.10 seconds.
+
+The 3B drafts and all three 8B batches fail the requested concept boundary or visible pose/accessory evidence;
+none is accepted as comparative training data. Exact outputs and Job variants were retained
+in the separate notes experiment. The actual focused HTTP request witness records 22,161
+text characters, `ACTIVE JOB CONFIGURATION`, the full held-trait/no-transcription rules,
+focused overrides and one image. The instructions were present; no missing-Job source
+defect was found. HTTP success and caption quality are separate outcomes.
+
+A bounded stronger-model pass is queued after both tiny trainer proofs: official BF16
+Qwen/Qwen3-VL-32B-Instruct revision `0cfaf48183f594c314753d30a4c4974bc75f3ccb`, 66,714,912,872
+weight bytes, on an available suitable 80 GB GPU. The official FP8 variant is 35,516,966,184
+bytes and cannot fit the current single 32 GB GPU. No stronger-model pod has been created.
+
+## Dataset, FLUX checkpoints and curves
+
+Private functional dataset `RationallyPrime/concept-captioner-pod-proof-20261010`, commit
+`4b3ce9f99229dd2c8fea58c5f8045633d59ea94a`, has four synthetic shape images with only
+NORA7/IVAN9 fixtures. It is separate from native Swift smoke and the five-photo concept
+experiment. Local Job validation passed; real agent pull fetched 4 images / 4 captions and
+`concept-captioner/job.yaml` into `/workspace/datasets/tiny-proof`.
+
+Run `tiny-flux-proof-20261010` used gated `black-forest-labs/FLUX.1-dev` successfully,
+two steps, rank 2, resolution 256, batch 1, RunConfig sampling seed 42, lr 0.0001, sampling off.
+Training RNG was not explicitly set: pinned ai-toolkit reads `extra.train.training_seed`; the
+paired experiment sets that field separately. The ordinary
+wrapper config quantizes, uses adamw8bit, bf16 and gradient checkpointing; no extra override
+was required. It exited 0 at 18:53:51Z and saved step-1/final safetensors plus optimizer state.
+Agent events read two TensorBoard files and three loss/lr points: last step 2, loss
+0.0503100008, lr 0.0001. Sampled active VRAM was 16,988 MiB; post-exit usage was 2 MiB.
+This does not establish 512px/rank16 capacity or a measured training peak.
+
+Agent `push-lora` uploaded both checkpoints, run/config and generated model card to private
+`RationallyPrime/concept-captioner-tiny-flux-proof-20261010`, commit
+`0f50ab0e343fd9aced140990778c19250393d802`. Both files were downloaded from that commit and
+independently accepted by the parent: 21,610,744 bytes each, 988 tensors, valid rank-2
+safetensors headers. SHA256 final:
+`e9b60bdce2c72e18d81ef0f691de9b119136ed9f5d31d625e12aa769f5c54dd9`;
+step 1: `867ef5a8bf24de84499f7ead0eac5026e0ac6faf8c2925b3716d547047b80614`.
+
+## LTX live proof in progress
+
+Run `tiny-ltx-proof-20261010` started 19:15:13.99Z on GPU0, final LTX image. It uses the same
+four synthetic images, supported Hub source `Lightricks/LTX-2`, two steps, resolution 256,
+rank 2, batch 1, lr 0.0001, RunConfig seed 42, save every step and sampling off. The wrapper
+writes this seed to both root `seed` and `validation.seed`; pinned upstream `trainer.py:156`
+calls `set_seed(cfg.seed)` and its `config.py:802` declares the root reproducibility seed. The wrapper downloaded
+22 selected checkpoint, mirrored Gemma and tokenizer files in 76 seconds into the fixed
+workspace model directory, then loaded four captions for preprocessing. No manual model
+path/download/SSH was required. Checkpoint, curves and Hub push are not yet established.
+
+The actual queued source-verified low-memory override is:
+
+```json
+{
+  "optimization": {"optimizer_type": "adamw8bit"},
+  "acceleration": {
+    "quantization": "int8-quanto",
+    "load_text_encoder_in_8bit": true,
+    "offload_optimizer_during_validation": true
+  },
+  "preprocess": {
+    "args": ["--load-text-encoder-in-8bit", "--vae-tiling", "--skip-audio"]
+  }
+}
 ```
 
-Per file: `test_api` 134, `test_catalog` 145, `test_plan` 79, `test_events` 34, `test_gpus` 31,
-`test_supervisor` 29, `test_health` 5; `test_cli` 95; `test_launch_wrappers` 121,
-`test_pull_dataset` 34, `test_push_lora` 15. `scripts/` has no `pyproject.toml`; it is tested and
-linted from the agent venv with `huggingface_hub datasets Pillow` installed on top of `[dev]`
-(or `-e ".[dev,pod]"`, which adds `tensorboard` and un-skips the parity test).
+The wrapper already sets bf16 and gradient checkpointing. Upstream source recommends this
+memory-saving recipe for 32 GB; live success and memory measurements are still pending.
+The intended private output repo is `RationallyPrime/concept-captioner-tiny-ltx-proof-20261010`.
 
-## Spec drift found during implementation (2026-10-10)
+## Stage 6 preparation: public RunPod template
 
-What the landed code does that `POD-SPEC.md` does not say, or says differently. None of it
-contradicts the owner's rules (token required, no shell, topology, no double-booking). Each item
-is written so it can be lifted into the spec section it names; the spec file is owned by the
-`arch` unit and has **not** been edited yet. Until it is, this list is the contract where the two
-disagree.
+Template `87fxs5v8fn`, **Concept Captioner — authenticated vLLM agent**, was created at
+approximately 19:17 UTC and freshly read back public. This is preparation; stage 6 acceptance
+remains pending until the preceding trainer and topology demonstrations pass. It points to the final public base tag, has no registry credential,
+HTTP ports 8800/8000, 50 GB disk, persistent `/workspace` 200 GB, CUDA 13.0/13.1/13.2,
+and no SSH/Jupyter. The API drops empty env values: `PODAGENT_TOKEN` is deliberately absent.
+The launcher must generate a unique 16+ character token per pod and supply it; the agent
+exits without one. vLLM uses the same token by default. HF token is supplied by the user when
+needed. The template itself does not include an account token or a paid GPU allocation.
 
-- **§0 layout.** `pod/README.md` (one screen: what is here, local fake run, pod creation) and a
-  README per directory (`agent/`, `podctl/`, `images/`, `scripts/`) exist beside the spec.
-- **§1 pod creation, §6.1 driver floor.** The base image's vLLM is the `+cu129` wheel (vLLM has
-  never shipped `+cu128`; torch 2.13 is not on the cu128 index) on the CUDA 12.8 base, fine for
-  any CUDA 12.x driver. Both trainer stacks are CUDA 13 upstream (ai-toolkit cu130, LTX-2
-  cu132), so **the trainer images need an R580+ host driver**: the app must filter the pod's
-  CUDA version to 13.0+ when creating a pod from `…-pod-aitoolkit` / `…-pod-ltx`
-  (`allowedCudaVersions` in the REST v2 pod create). Add to the §1 table and the pod-creation
-  paragraph.
-- **§1 proxy timeout vs §2.6 `stop`.** Resolved in the spec: `timeout_s` is capped at 90
-  (`StopRequest`, `podctl stop --timeout`), so a stop always answers inside the proxy's 100 s
-  cutoff instead of finishing unobserved behind a `524`.
-- **§2.1 body guard.** The bearer is checked by a pure-ASGI middleware (`EdgeGuard`) before
-  the body is read, and bodies above 1 MiB or sent chunked are `413 payload_too_large`: with
-  only the route dependency, an anonymous client on the public proxy URL could make FastAPI
-  buffer arbitrarily large bodies before the 401. Added to §2.1 and the §2.2 table.
-- **§2.2 errors.** Two cases the router answers before any dependency runs are folded into the
-  envelope: unmatched path → `404 not_found`, wrong method → `405` with code `bad_request` and
-  an `Allow` header; both answer `401` first when the bearer is missing, as does a body that is
-  not JSON (`400 bad_request` once authenticated). `invalid_params` detail is pydantic's
-  `errors()` with any secret `input` replaced by `"***"`. A spawn failure (binary missing) is
-  `500` with code `internal` but a specific message (`could not spawn <name>: …`) and files the
-  service as `failed`; the generic-message rule applies to unexpected exceptions only. The
-  OpenAPI routes (`/docs`, `/redoc`, `/openapi.json`) are disabled.
-- **§2.6 start.** `gpus` must be distinct indices (`422 gpu_count` otherwise). `prepare()` for
-  the trainers also creates `<run>/tensorboard/` and writes `run.json` atomically
-  (`run.json.tmp` + rename). `started_at`/`ended_at` are ISO 8601 with microseconds.
-- **§3 fake mode.** Extra knobs, all optional: `PODAGENT_FAKE_TRANSFER_S` (seconds the fake
-  `pull-dataset`/`push-lora` take; default 2), `PODAGENT_FAKE_HOST` (bind address of the fake
-  vLLM/TensorBoard responder; default `127.0.0.1`), and failure switches for tests (`extra:
-  {"fail": true}`, `extra_args: ["--fail"]`, `ignore_sigterm`). The fake vLLM answers
-  `/v1/models` with vLLM-shaped JSON so a readiness poll works.
-- **§3.1–3.5, §4.1 validation bounds not in the spec.** `model`/`base_model`: a Hub id
-  (`owner/name` or bare `name`, no `.`/`..` segments) or an absolute path that must resolve
-  under `<workspace>/models/`; `served_model_name`, `split`, `revision`, `profile`: one printable
-  token, no whitespace, not starting with `-`; `commit_message`: non-blank, not starting with
-  `-`; `caption_ext` `^[A-Za-z0-9]{1,16}$`; `learning_rate` in (0, 1]; each `resolution` in
-  [64, 8192]; `steps`, `rank`, `batch_size`, `gradient_accumulation`, `save_every` ≥ 1;
-  `sample_every`, `seed` ≥ 0; `triggers` and `sample_prompts` non-blank; `pull-dataset.name`
-  defaults to the repo name and is an error when that name does not match the run-id pattern.
-- **§4.3 `launch_aitoolkit.py`.** Adds to the mapping: `model.arch` (`flux` or `h3`, chosen
-  from the base-model id; VERIFY), `model.is_flux` kept for older checkouts, `process[0].log_dir
-  = <run>/tensorboard` (native TensorBoard logging; VERIFY), `device: cuda:0`,
-  `save.push_to_hub: false`; sampling is disabled when `sample_prompts` is empty or
-  `sample_every` is 0. `extra` keys `job`/`config`/`meta` merge at the document root, everything
-  else into `process[0]`. `--dry-run` writes `config.yaml` and exits 0. Resume: an existing
-  `output/` is left alone (ai-toolkit resumes from its newest checkpoint on its own; VERIFY).
-  Env: `AI_TOOLKIT_DIR` (default `/opt/ai-toolkit`), `POD_AGENT_PYTHON` (interpreter for the
-  finishing `push_lora.py`; default `/opt/venvs/agent/bin/python`). Exit code: the trainer's,
-  or the push's when the trainer succeeded and the push did not.
-- **§4.3 `launch_ltx.py`.** Writes `<run>/dataset.json` (`caption`, `media_path`; media without
-  a sidecar caption is skipped and counted); preprocessing is skipped when `preprocessed/` is
-  already populated unless `--reprocess`; `extra.preprocess` (`resolution_buckets`, `args`) is
-  consumed by the wrapper, not passed to the trainer. Config adds `model.training_mode: lora`,
-  `validation.video_dims = [max, max, 1]`, and `model.load_checkpoint` = the newest
-  `output/*.safetensors` when one exists (resume semantics VERIFY). Env: `LTX_TRAINER_DIR`
-  (default `/opt/ltx-2`), `LTX_PREPROCESS_SCRIPT`, `LTX_TRAIN_SCRIPT`, `POD_AGENT_PYTHON`.
-  The trainer entrypoints the image checks for are
-  `packages/ltx-trainer/scripts/{process_dataset,train}.py`.
-- **§4.3 log scraper, both wrappers.** `\r`-separated progress redraws are written as separate
-  lines so `logs` stays line-based. Scalars go to `<run>/tensorboard/` with filename suffix
-  `.scraped`; when `torch.utils.tensorboard` is not importable the scraper is skipped with one
-  log line, not an error. That import needs the `tensorboard` package inside the **trainer**
-  venv (VERIFY for both images; if absent, `/runs/{id}/events` is empty unless the trainer logs
-  natively).
-- **§6.1 images.** All three CUDA Dockerfiles take the repository root as build context
-  (`-f pod/images/Dockerfile.base .`); the agent venv is `podagent[pod]` (a new extra in
-  `agent/pyproject.toml`: tensorboard, huggingface_hub, datasets, Pillow) plus
-  `concept-captioner[hf]`, both non-editable from `/opt/src/`; CPython is uv-managed 3.12.14
-  under `/opt/python` (`POD_PYTHON` env for the trainer images); each venv writes
-  `freeze.txt`; build args `VLLM_VERSION`, `AI_TOOLKIT_COMMIT`, `LTX2_COMMIT`, the torch
-  versions, `FLASHINFER_JIT_CACHE_VERSION` (`""` skips the kernel cache) and
-  `CUDA_JIT_TOOLCHAIN=1` (adds `nvcc` 12.9). The LTX-2 venv is a uv workspace sync
-  (`uv lock` + `uv sync --all-packages --all-extras --no-dev`), lock kept at
-  `/opt/ltx-2/uv.lock`. `nvidia-smi` comes from the container runtime
-  (`NVIDIA_DRIVER_CAPABILITIES=compute,utility`), not the image. No `.dockerignore` at the
-  repo root yet (`images/README.md` has the suggested content).
-- **§6.2 entrypoint.** Honours `PODAGENT_WORKSPACE` and a pre-set `HF_HOME`.
-- **§6.3 compose.** Build context is `../..` (the repo root) with
-  `dockerfile: pod/images/Dockerfile.fake`, not `..`: `Dockerfile.fake` copies `pod/agent`,
-  `pod/images/entrypoint.sh` and `pod/scripts/`. It installs `podagent` without `[pod]` and
-  symlinks `/opt/venvs/agent/bin/python` to the system interpreter so the entrypoint's path
-  works; it is a fake-mode agent only, never a stand-in for the CUDA images. The compose file
-  publishes `8000` and `6006` beside `8800` and sets `PODAGENT_FAKE_HOST=0.0.0.0`: the fake
-  responders default to `127.0.0.1`, which inside the container is unreachable through a
-  published port, so the app's vLLM readiness poll and TensorBoard link could not be exercised
-  against the compose stack without it. `tests/test_compose_fake.py` pins that contract.
-- **§7.1 `pull_dataset.py`.** `metadata.csv` is accepted beside `metadata.jsonl`; images the
-  metadata does not list are copied too, with a `<stem>.txt` sidecar from the repo as caption
-  when present (the metadata field wins); `--split` selects among metadata files in different
-  folders; `--caption-column` is read before `caption`/`text`; a `<caption-column>_response`
-  column (what `HFDatasetSink` writes) lands as `<stem>.json`; `metadata.jsonl` carries
-  `caption: null` for uncaptioned images; `manifest.json` also has `requested_revision`,
-  `split`, `image_column`, `caption_column`, `id_column`, `pulled_at`, and `revision` is the
-  resolved sha the snapshot and `load_dataset` were pinned to. DIR is replaced atomically
-  (`DIR.partial` → `DIR`, old `DIR` removed); with `--require-captions` the folder is still
-  swapped in before exit 1. Token also from `HUGGINGFACE_HUB_TOKEN`.
-- **§7.2 `push_lora.py`.** `*/samples/*` is uploaded as well as `samples/*` (ai-toolkit writes
-  `output/<name>/samples/`); `preprocessed/` and dot-folders are never searched for weights;
-  the model card overwrites `<run>/README.md` and the repo's README on every push and reads
-  the dataset's `manifest.json`/`job.yaml` for dataset name, sha and profile; `<run>/push.json`
-  records `repo_id`, `url`, `commit`, `run_id`, `files`, `pushed_at`; files keep their
-  run-relative paths in the repo.
-- **§8 podctl.** `--follow` reads the service state before every fetch and ends on its own
-  after the last fetch once the service is not `running`; a window that moved by more than
-  `--tail` lines is noted on stderr. `train` also takes `--wait`; a `--wait` that ends in
-  `failed` exits 1. `caption-up` takes `--params`/`--params-file` merged under `model`;
-  `--params-file -` and `--config -` read stdin. Exit 130 on Ctrl-C; a 502/503/504 that is
-  not the agent's envelope (the proxy while the pod boots) is exit 3. `--gpus` rejects
-  duplicates. `--json` prints one document per line (two for `--wait`, one per poll with new
-  lines for `--follow`); errors and notes go to stderr.
-- **§9 testing.** Also covered: `__main__` (exit 2 without a token; serving the configured
-  app), the lifespan shutdown hook, 404/405 envelopes, `--help` of every script under
-  `python -I`, and the scripts themselves (wrappers with the trainer spawn mocked, pull/push
-  with a fake `Hub` object). The `tensorboard` reader parity test runs only when the package is
-  installed.
+## Unresolved source/spec notes
 
-## Verified on a real pod
+The initial handoff listed implementation details beyond the spec. Auth/body limits, stop
+timeout, TensorBoard routing, LTX Hub preparation and compose ports are now reflected in the
+spec. The remaining notes are retained here so live verification does not erase findings:
 
-Nothing yet. No image has been built, no pod created, no trainer or vLLM started outside fake
-mode. When it happens, record the pod id, image tag and outcome here, and close the items below.
+- The LTX mapping in spec §4.3 still names `model.model_source`; the wrapper and current
+  upstream use `model.model_path`, root `seed`, explicit encoder paths and image bucket
+  dimensions. The quoted mapping needs alignment after the live result.
+- Spec §1 still shows legacy CLI pod-creation flags and a terminate-after cost guard; actual
+  native creation uses REST v2 `image`, `gpu.minCudaVersion`, network mount and ports. Driver
+  selection and explicit stop authority in this run are recorded above.
+- Transfer source additionally supports `metadata.csv`, repo sidecars and unlisted images,
+  split-specific metadata, `<caption-column>_response` records, a resolved pinned revision and
+  richer manifest fields. `--require-captions` swaps the dataset before returning 1. Push also
+  includes nested `*/samples/*`, excludes preprocessed/dot directories and records `push.json`.
+- Wrapper resume behavior, H3 config/quantization keys and native TensorBoard locations have
+  not all been live verified. FLUX native and scraped curves are established; LTX remains in
+  progress. Empty-caption sampling disables validation; logging is optional when the trainer
+  environment lacks TensorBoard.
+- vLLM parameter bounds and defaults in source, including the current v0.31 flag allowlist,
+  remain authoritative; the spec sample does not enumerate every rejected override.
 
-What to check, in one place (details in `images/README.md` "What to verify on a real pod" and
-POD-SPEC §4.2):
+## Evidence and remaining terminal work
 
-1. The three builds succeed as written (vLLM `+cu129` wheel + four `+cu129` torch pins;
-   `flashinfer-jit-cache` from flashinfer.ai is real; the LTX-2 workspace sync picks up the
-   `natten` extra).
-2. Driver floor: base serves vLLM on an R570-class host; both trainer venvs see the GPU on
-   R580+.
-3. vLLM captions one image without a JIT compile; `torchcodec` imports against jammy's FFmpeg.
-4. `RUNPOD_POD_ID` / `RUNPOD_PUBLIC_IP` are the env names the pod exposes (`/health` copies
-   them; nothing depends on them).
-5. ai-toolkit: `run.py` trains a few FLUX steps from the wrapper's `config.yaml`; the H3
-   `arch`/quantization keys, `trigger_word`, `log_dir`, and resume-from-`output/`.
-6. LTX-2: `process_dataset.py` and `train.py` accept the wrapper's arguments and keys; where
-   checkpoints land; `load_checkpoint` resume semantics; VRAM per config.
-7. `tensorboard` is importable from `/opt/venvs/aitoolkit/bin/python` and
-   `/opt/venvs/ltx/bin/python` (else the log scraper is a no-op).
-8. `push_on_finish` reaches `push_lora.py` through `/opt/venvs/agent/bin/python` and lands a
-   model repo; `pull_dataset.py` against a real imagefolder repo and a real parquet repo.
-9. PID 1 behaviour: the agent runs under `tini -s`; after killing a vLLM API-server process by
-   hand the engine workers must be reaped (not `Z` in `ps`) and `/services/vllm` must go from
-   `failed` + `group_alive: true` to `group_alive: false` with GPU 0 free. `stop` with
-   `timeout_s` near the proxy's 100 s cutoff; a child that survives SIGKILL (Xid fault) is filed
-   `stuck` after `SIGKILL_WAIT_S` (3 s).
-10. Image sizes and pull time on RunPod.
+Local receipts live under `/tmp/concept-captioner-pod-proof-20261010` (private directory).
+Sanitized agent receipts, prepared-request witness, runtime flag probe and downloaded
+FLUX/Hub receipt are retained there. Build/push logs and isolated Docker configs are on
+cx53 under `/home/hive/work/concept-captioner-pod-verify-20261010`; credentials are never
+part of this document. The notes experiment retains the rejected caption drafts.
+
+Remaining requested checks: LTX tiny checkpoints/curves/Hub roundtrip; two-GPU concurrent
+workload isolation; trainer public visibility and anonymous pulls; final settled task-only
+costs and stopped read-backs; stage 6 final template/image/auth verification after stages 4–5.
+Real parquet transfer, resume and manual crash recovery remain
+unproven optional historical checks; they are not substituted for the concrete seven proofs.
+The separate 512px/rank16 paired experiment is pending accepted boundary captions and both
+stream acceptances. No rejected caption batch has been promoted into training data.
