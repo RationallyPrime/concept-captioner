@@ -37,8 +37,8 @@ defect; do not reimplement completed work based on stale status counts.
 
 Before app provider integration or any real pod exposure, independently accept the relevant
 foundation changes. Key routing and pod argument/proxy repairs have independent acceptance.
-Swift gateway/core work and app implementation are active; the pod owner is proceeding to real
-builds and verification. Current verification details belong in the respective status documents.
+Swift gateway/core work also has independent acceptance. App implementation and real pod
+builds and verification continue in parallel. Current verification details belong in the respective status documents.
 
 ## Then: two delivery streams
 

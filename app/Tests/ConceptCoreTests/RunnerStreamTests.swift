@@ -117,6 +117,64 @@ private struct CountingSink: CaptionSink {
 struct RunnerStreamTests {
     // MARK: Streaming and cancellation
 
+    @Test("run callbacks arrive before the run completes and preserve summary order")
+    func runReportsOutcomesDuringTheRun() async throws {
+        let space = try Workspace()
+        let release = Rendezvous(party: 2)
+        let observed = Rendezvous(party: 2)
+        let seen = Mutex<[Outcome]>([])
+        let captioner = FakeModelClient { request in
+            await release.arrive()
+            return try goodReply(request)
+        }
+        let runner = try runner(captioner: captioner)
+        let source = try space.source
+        let sink = try CountingSink(space.sink)
+        let run = Task {
+            try await runner.run(source: source, sink: sink, only: ["solo.png", "unmapped.png"]) { outcome in
+                seen.withLock { $0.append(outcome) }
+                if outcome.sampleID == "unmapped.png" { await observed.arrive() }
+            }
+        }
+        await observed.arrive()
+        #expect(seen.withLock { $0.map(\.sampleID) } == ["unmapped.png"])
+        #expect(await sink.finalizeCalls == 0)
+        await release.arrive()
+        let summary = try await run.value
+        #expect(summary.outcomes == seen.withLock { $0 })
+        #expect(await sink.finalizeCalls == 1)
+    }
+
+    @Test("cancelled callback run drains a provider that ignores cancellation before returning")
+    func callbackRunWaitsForUncooperativeProvider() async throws {
+        let space = try Workspace()
+        let entered = Rendezvous(party: 2)
+        let release = Rendezvous(party: 2)
+        let seen = Mutex<[Outcome]>([])
+        let captioner = FakeModelClient { request in
+            await entered.arrive()
+            await release.arrive() // intentionally ignores task cancellation
+            return try goodReply(request)
+        }
+        let runner = try runner(captioner: captioner)
+        let source = try space.source
+        let sink = try CountingSink(space.sink)
+        let run = Task {
+            try await runner.run(source: source, sink: sink, only: ["solo.png"]) { outcome in
+                seen.withLock { $0.append(outcome) }
+            }
+        }
+        await entered.arrive()
+        run.cancel()
+        #expect(await captioner.inFlight == 1)
+        await release.arrive()
+        await #expect(throws: CancellationError.self) { _ = try await run.value }
+        #expect(await captioner.inFlight == 0, "no child remains to write after the caller releases the folder")
+        #expect(await sink.finalizeCalls == 0)
+        #expect(seen.withLock { $0.map(\.status) } == [.written], "the draining child's write and callback settled")
+        #expect(space.exists("solo.txt") && space.exists("solo.json"))
+    }
+
     @Test func streamYieldsEveryOutcomeAndOnlyFilters() async throws {
         let space = try Workspace()
         let runner = try runner(captioner: Fixtures.captionerOK())

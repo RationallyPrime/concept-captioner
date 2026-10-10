@@ -10,17 +10,20 @@ public struct GeminiClient: ModelClient {
     public let apiKey: String
     public let requestedModel: String
     public let transport: any HTTPTransport
+    public let bearerAuth: Bool
 
     public init(
         apiKey: String,
         model: String,
         baseURL: URL = defaultBaseURL,
-        transport: any HTTPTransport = URLSessionTransport()
+        transport: any HTTPTransport = URLSessionTransport(),
+        bearerAuth: Bool = false
     ) {
         self.apiKey = apiKey
         requestedModel = model
         self.baseURL = baseURL
         self.transport = transport
+        self.bearerAuth = bearerAuth
     }
 
     public func request(
@@ -30,6 +33,7 @@ public struct GeminiClient: ModelClient {
         settings: RequestSettings
     ) async throws -> ModelReply {
         var headers = ["x-goog-api-key": apiKey]
+        if bearerAuth { headers["Authorization"] = "Bearer \(apiKey)" }
         settings.mergeExtraHeaders(into: &headers)
         let envelope = try await ProviderHTTP.post(
             requestBody(instructions: instructions, messages: messages, output: output, settings: settings),
@@ -82,11 +86,8 @@ public struct GeminiClient: ModelClient {
                 ]),
             ])
         }
-        if let level = settings.thinkingEffort.flatMap(Self.thinkingLevel) {
-            generation["thinkingConfig"] = .object(["thinkingLevel": .string(level)])
-        } else if settings.thinks {
-            // `thinking: true`: pydantic-ai sends includeThoughts with no level (the model's default).
-            generation["thinkingConfig"] = .object(["includeThoughts": .bool(true)])
+        if let thinking = thinkingConfig(settings) {
+            generation["thinkingConfig"] = .object(thinking)
         }
         if let temperature = settings.temperature { generation["temperature"] = .double(temperature) }
         if let maxTokens = settings.maxTokens { generation["maxOutputTokens"] = .int(maxTokens) }
@@ -103,13 +104,47 @@ public struct GeminiClient: ModelClient {
         return body
     }
 
-    static func thinkingLevel(_ level: ThinkingLevel) -> String? {
-        switch level {
-        case .none: nil
-        case .minimal, .low: "low"
-        case .medium: "medium"
-        case .high, .xhigh: "high"
+    private func thinkingConfig(_ settings: RequestSettings) -> JSONObject? {
+        guard settings.thinks else { return nil }
+        // Older non-thinking models do not accept thinkingConfig (pydantic-ai drops it).
+        if requestedModel.contains("gemma") || requestedModel == "gemini-pro" || requestedModel.hasPrefix("gemini-1")
+            || (requestedModel.hasPrefix("gemini-2.") && !requestedModel.hasPrefix("gemini-2.5")) {
+            return nil
         }
+        var config: JSONObject = ["includeThoughts": .bool(true)]
+        guard let effort = settings.thinkingEffort else { return config }
+        if requestedModel.hasPrefix("gemini-2.5") {
+            let budget = switch effort {
+            case .none, .minimal: 128
+            case .low: 2048
+            case .medium: 8192
+            case .high, .xhigh: 24576
+            }
+            config["thinkingBudget"] = .int(budget)
+        } else {
+            let scale = ["minimal", "low", "medium", "high"]
+            let levels: [Int] = if requestedModel.hasPrefix("gemini-3.1-flash-lite-image")
+                || (requestedModel.hasPrefix("gemini-3.1-flash-image") && !bearerAuth) {
+                [0, 3]
+            } else if requestedModel.hasPrefix("gemini-3-pro-preview") {
+                [1, 3]
+            } else if ["gemini-3.7-flash", "gemini-3.8-flash", "gemini-3.1-pro-preview"]
+                .contains(where: requestedModel.hasPrefix) {
+                [1, 2, 3]
+            } else {
+                [0, 1, 2, 3]
+            }
+            let requested = switch effort {
+            case .none, .minimal: 0
+            case .low: 1
+            case .medium: 2
+            case .high, .xhigh: 3
+            }
+            // Match Python's nearest supported level, preferring the lower one on a tie.
+            let chosen = levels.min { abs($0 - requested) < abs($1 - requested) }!
+            config["thinkingLevel"] = .string(scale[chosen])
+        }
+        return config
     }
 
     private static func encode(_ message: ChatMessage) -> JSONValue {

@@ -87,7 +87,8 @@ public struct Runner: Sendable {
         return stream
     }
 
-    /// Runs every sample, then `sink.finalize()`; `elapsed` is wall-clock.
+    /// Reports each settled sample to `onOutcome`, then `sink.finalize()`; `elapsed` is wall-clock.
+    /// The callback is awaited in completion order before this call returns or throws.
     ///
     /// The work is structured under this call: when the calling task is cancelled the in-flight
     /// samples settle first, then this throws `CancellationError` and the sink is not finalized,
@@ -97,12 +98,16 @@ public struct Runner: Sendable {
     public func run(
         source: some ImageSource,
         sink: some CaptionSink,
-        only: Set<String>? = nil
+        only: Set<String>? = nil,
+        onOutcome: @escaping @Sendable (Outcome) async -> Void = { _ in }
     ) async throws -> RunSummary {
         let clock = ContinuousClock()
         let started = clock.now
         let log = OutcomeLog()
-        try await drive(source: source, sink: sink, only: only) { await log.append($0) }
+        try await drive(source: source, sink: sink, only: only) { outcome in
+            await log.append(outcome)
+            await onOutcome(outcome)
+        }
         let summary = try await sink.finalize()
         return await RunSummary(outcomes: log.outcomes, elapsed: Self.seconds(clock.now - started), sink: summary)
     }

@@ -1,5 +1,5 @@
 // Anthropic Messages API over URLSession. Structured output via output_config.format (JSON
-// Schema); tool mode via a strict tool with tool_choice auto; thinking via adaptive + effort.
+// Schema); tool mode via a strict tool with tool_choice auto; thinking follows the model family.
 
 import Foundation
 
@@ -12,17 +12,20 @@ public struct AnthropicClient: ModelClient {
     public let apiKey: String
     public let requestedModel: String
     public let transport: any HTTPTransport
+    public let bearerAuth: Bool
 
     public init(
         apiKey: String,
         model: String,
         baseURL: URL = defaultBaseURL,
-        transport: any HTTPTransport = URLSessionTransport()
+        transport: any HTTPTransport = URLSessionTransport(),
+        bearerAuth: Bool = false
     ) {
         self.apiKey = apiKey
         requestedModel = model
         self.baseURL = baseURL
         self.transport = transport
+        self.bearerAuth = bearerAuth
     }
 
     public func request(
@@ -31,7 +34,8 @@ public struct AnthropicClient: ModelClient {
         output: OutputRequest,
         settings: RequestSettings
     ) async throws -> ModelReply {
-        var headers = ["x-api-key": apiKey, "anthropic-version": Self.apiVersion]
+        var headers = ["anthropic-version": Self.apiVersion]
+        headers[bearerAuth ? "Authorization" : "x-api-key"] = bearerAuth ? "Bearer \(apiKey)" : apiKey
         settings.mergeExtraHeaders(into: &headers)
         let envelope = try await ProviderHTTP.post(
             requestBody(instructions: instructions, messages: messages, output: output, settings: settings),
@@ -49,7 +53,7 @@ public struct AnthropicClient: ModelClient {
         messages: [ChatMessage],
         output: OutputRequest,
         settings: RequestSettings
-    ) -> JSONObject {
+    ) throws -> JSONObject {
         var system = output.instructions(instructions)
         var outputConfig = JSONObject()
         var tools: JSONObject = [:]
@@ -83,10 +87,21 @@ public struct AnthropicClient: ModelClient {
             body[key] = value
         }
         if settings.thinks {
-            // `thinking: true` is adaptive with the effort left to the API (pydantic-ai does the same).
-            body["thinking"] = .object(["type": .string("adaptive")])
-            if let effort = settings.thinkingEffort {
-                outputConfig["effort"] = .string(Self.effort(effort))
+            let family = Self.thinkingFamily(requestedModel)
+            if family != .budget, family != .budgetWithEffort {
+                body["thinking"] = .object(["type": .string("adaptive")])
+            } else {
+                let budget = Self.thinkingBudget(settings.thinkingEffort)
+                guard settings.maxTokens.map({ $0 > budget }) ?? true else {
+                    throw ConfigurationError(
+                        "model '\(requestedModel)' thinking budget \(budget) needs max_tokens greater than \(budget)"
+                    )
+                }
+                body["thinking"] = .object(["type": .string("enabled"), "budget_tokens": .int(budget)])
+                body["max_tokens"] = .int(settings.maxTokens ?? max(Self.defaultMaxTokens, budget + 4096))
+            }
+            if family != .budget, family != .adaptiveOnly, let effort = settings.thinkingEffort {
+                outputConfig["effort"] = .string(Self.effort(effort, supportsXHigh: family == .adaptiveXHigh))
             }
         } else {
             // The API rejects sampling parameters (temperature, top_p, top_k) once thinking is on.
@@ -113,12 +128,41 @@ public struct AnthropicClient: ModelClient {
         }
     }
 
-    static func effort(_ level: ThinkingLevel) -> String {
+    /// The finite family capabilities and budget map match pydantic-ai 2.55's Anthropic profile.
+    private enum ThinkingFamily {
+        case budget, budgetWithEffort, adaptiveOnly, adaptive, adaptiveXHigh
+    }
+
+    private static func thinkingFamily(_ model: String) -> ThinkingFamily {
+        let families: [(prefix: String, family: ThinkingFamily)] = [
+            ("claude-fable-5", .adaptiveXHigh), ("claude-mythos-5", .adaptiveXHigh),
+            ("claude-mythos-preview", .adaptiveOnly),
+            ("claude-opus-5", .adaptiveXHigh), ("claude-sonnet-5", .adaptiveXHigh),
+            ("claude-haiku-5-5", .adaptiveXHigh),
+            ("claude-opus-4-8", .adaptiveXHigh), ("claude-opus-4-7", .adaptiveXHigh),
+            ("claude-opus-4-6", .adaptive), ("claude-sonnet-4-6", .adaptive),
+            ("claude-opus-4-5", .budgetWithEffort),
+        ]
+        return families.first(where: { model.hasPrefix($0.prefix) })?.family ?? .budget
+    }
+
+    private static func thinkingBudget(_ level: ThinkingLevel?) -> Int {
+        switch level {
+        case nil: 10000
+        case .some(.none), .minimal: 1024
+        case .low: 2048
+        case .medium: 10000
+        case .high: 16384
+        case .xhigh: 32768
+        }
+    }
+
+    static func effort(_ level: ThinkingLevel, supportsXHigh: Bool) -> String {
         switch level {
         case .none, .minimal, .low: "low"
         case .medium: "medium"
         case .high: "high"
-        case .xhigh: "xhigh"
+        case .xhigh: supportsXHigh ? "xhigh" : "max"
         }
     }
 

@@ -173,7 +173,9 @@ struct ResolveTests {
         }
         #expect(noBase?.message == "kind vllm needs base_url")
         let unknown = #expect(throws: ConfigurationError.self) { try Endpoints.resolve("foo:bar", keys: Support.keys) }
-        #expect(unknown?.message.contains("expected one of google, anthropic, openai, openrouter, vllm") == true)
+        #expect(unknown?.message.contains("unknown endpoint kind 'foo'; expected one of") == true)
+        #expect(unknown?.message.contains("vercel") == true)
+        #expect(unknown?.message.contains("gateway/openai") == true)
         let noKey = #expect(throws: ModelError.self) {
             try Endpoints.resolve("anthropic:claude-opus-5-5", keys: StaticKeyStore([:]))
         }

@@ -13,7 +13,7 @@
 import Foundation
 
 public enum Provider: String, Sendable, CaseIterable {
-    case google, anthropic, openai, openrouter, vllm
+    case google, anthropic, openai, openrouter, vercel, gateway, vllm
 }
 
 public protocol KeyStore: Sendable {
@@ -87,7 +87,7 @@ public extension Endpoints {
         try resolve(parseSpec(spec), thinking: thinking, keys: keys, transport: transport)
     }
 
-    /// Exactly five kinds. Configuration mistakes are `ConfigurationError`; a provider that
+    /// Direct providers and the three gateways. Configuration mistakes are `ConfigurationError`; a provider that
     /// needs a key the store does not have is `ModelError.missingKey`.
     static func resolve(
         _ spec: EndpointSpec,
@@ -134,6 +134,12 @@ public extension Endpoints {
         case .openrouter:
             let base = OpenAICompatibleClient.openRouterBaseURL
             return OpenAICompatibleClient(baseURL: base, apiKey: apiKey, model: spec.model, transport: transport)
+        case .vercel:
+            return OpenAICompatibleClient(
+                baseURL: OpenAICompatibleClient.vercelBaseURL, apiKey: apiKey, model: spec.model, transport: transport
+            )
+        case .gateway:
+            return try gatewayClient(spec: spec, apiKey: apiKey ?? "", transport: transport)
         case .vllm:
             guard let base = try baseURL(spec) else {
                 throw ConfigurationError("kind vllm needs base_url")
@@ -150,8 +156,20 @@ public extension Endpoints {
         if spec.kind == "gemini" {
             throw ConfigurationError("unknown endpoint kind 'gemini' (Gemini is kind: google)")
         }
-        guard let provider = Provider(rawValue: spec.kind) else {
-            let known = Provider.allCases.map(\.rawValue).joined(separator: ", ")
+        let provider: Provider
+        if spec.kind.hasPrefix("gateway/") {
+            guard gatewayUpstreams.contains(String(spec.kind.dropFirst("gateway/".count))) else {
+                throw ConfigurationError(
+                    "unsupported Pydantic AI Gateway provider '\(spec.kind)'; expected gateway/"
+                        + gatewayUpstreams.joined(separator: ", gateway/")
+                )
+            }
+            provider = .gateway
+        } else if let direct = Provider(rawValue: spec.kind), direct != .gateway {
+            provider = direct
+        } else {
+            let known = (Provider.allCases.filter { $0 != .gateway }.map(\.rawValue)
+                + gatewayUpstreams.map { "gateway/\($0)" }).joined(separator: ", ")
             throw ConfigurationError("unknown endpoint kind '\(spec.kind)'; expected one of \(known)")
         }
         if spec.baseURL != nil, provider == .openai {
@@ -164,6 +182,47 @@ public extension Endpoints {
             throw ConfigurationError("base_url is only meaningful for kind vllm, not '\(spec.kind)'")
         }
         return provider
+    }
+
+    private static var gatewayUpstreams: [String] {
+        ["google", "google-cloud", "anthropic", "openai", "openai-responses", "openai-chat"]
+    }
+
+    private static func gatewayClient(
+        spec: EndpointSpec,
+        apiKey: String,
+        transport: any HTTPTransport
+    ) throws -> any ModelClient {
+        // Match the installed Python provider's key-region inference, using only the documented
+        // production US/EU hosts. No environment, job URL or arbitrary key region chooses a host.
+        guard apiKey.range(of: #"^pylf_v[0-9]+_(us|eu)_[a-zA-Z0-9_-]+\z"#, options: .regularExpression) != nil else {
+            throw ConfigurationError("Pydantic AI Gateway key must encode the supported us or eu region")
+        }
+        let region = apiKey.split(separator: "_")[2]
+        let base = URL(string: region == "us"
+            ? "https://gateway-us.pydantic.dev/proxy"
+            : "https://gateway-eu.pydantic.dev/proxy")!
+        switch String(spec.kind.dropFirst("gateway/".count)) {
+        case "google", "google-cloud":
+            return GeminiClient(
+                apiKey: apiKey, model: spec.model,
+                baseURL: base.appendingPathComponent("google-vertex/v1beta1/publishers/google"),
+                transport: transport, bearerAuth: true
+            )
+        case "anthropic":
+            return AnthropicClient(
+                apiKey: apiKey, model: spec.model, baseURL: base.appendingPathComponent("anthropic"),
+                transport: transport, bearerAuth: true
+            )
+        case "openai-chat":
+            return OpenAICompatibleClient(
+                baseURL: base.appendingPathComponent("openai"), apiKey: apiKey, model: spec.model, transport: transport
+            )
+        default:
+            return OpenAIResponsesClient(
+                baseURL: base.appendingPathComponent("openai"), apiKey: apiKey, model: spec.model, transport: transport
+            )
+        }
     }
 
     /// The spec's base_url as a checked URL, nil when absent.

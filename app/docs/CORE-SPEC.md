@@ -26,6 +26,7 @@ app/
     ModelClient/ModelClient.swift    ModelClient, UserContent, ChatMessage, OutputRequest, RequestSettings, ModelReply, TokenUsage
     ModelClient/HTTPTransport.swift  HTTPTransport, URLSessionTransport, HTTPResponse
     ModelClient/OpenAICompatibleClient.swift
+    ModelClient/OpenAIResponsesClient.swift
     ModelClient/AnthropicClient.swift
     ModelClient/GeminiClient.swift
     ModelClient/Resolve.swift        Provider, KeyStore, StaticKeyStore, ResolvedEndpoint, Endpoints.resolve / parseSpec
@@ -87,9 +88,10 @@ Conventions (non-negotiable):
 3. **Anthropic structured output uses `output_config.format` (JSON Schema), not a forced
    tool.** Forced `tool_choice` returns HTTP 400 on current Claude models; `output_config.format`
    is GA. Tool mode uses a `strict: true` tool with `tool_choice: {type: "auto"}` plus a system
-   instruction to call it. Thinking maps to `thinking: {type: "adaptive"}` + `output_config.effort`.
-4. **`resolve` accepts exactly five kinds** (`google`, `anthropic`, `openai`, `openrouter`,
-   `vllm`). Python forwards unknown prefixes to pydantic-ai; Swift has no such registry and
+   instruction to call it. Thinking maps to the supported budget/adaptive form for the model family.
+4. **`resolve` has a finite provider set**: `google`, `anthropic`, `openai`, `openrouter`,
+   `vercel`, `vllm`, and `gateway/` followed by `google`, `google-cloud`, `anthropic`, `openai`,
+   `openai-responses` or `openai-chat`. Python forwards unknown prefixes to pydantic-ai; Swift
    raises `ConfigurationError`. `gemini` raises a message that names `kind: google`.
 5. **Keys come from an injected `KeyStore`**, never from the environment inside the library.
    The app's Keychain-backed store and the CLI's environment store both conform to it.
@@ -816,7 +818,8 @@ Common rules for the three clients:
 
 ### OpenAICompatibleClient (`ModelClient/OpenAICompatibleClient.swift`)
 
-Covers OpenAI (`https://api.openai.com/v1`), OpenRouter (`https://openrouter.ai/api/v1`) and
+Covers OpenAI (`https://api.openai.com/v1`), OpenRouter (`https://openrouter.ai/api/v1`),
+Vercel (`https://ai-gateway.vercel.sh/v1`), Pydantic Gateway’s explicit OpenAI Chat route, and
 vLLM (`base_url` from the spec).
 
 ```swift
@@ -852,6 +855,22 @@ Reply: `choices[0].message.content` (native/prompted) or
 `choices[0].message.tool_calls[0].function.arguments` (tool); `servedModel = model`;
 usage from `usage.prompt_tokens` / `usage.completion_tokens`.
 
+OpenRouter uses `reasoning: {effort, enabled: true}` instead of `reasoning_effort`;
+minimal maps to low, xhigh to high. A 400 response naming thinking/reasoning_effort preserves
+the provider body and adds the requested model, effort and a concrete setting correction.
+
+### OpenAIResponsesClient (`ModelClient/OpenAIResponsesClient.swift`)
+
+`init(baseURL:apiKey:model:transport:)` implements the Pydantic Gateway default OpenAI route.
+It posts to `{baseURL}/responses` with bearer auth, system/user/assistant input messages and
+image data URLs. Native output uses `text.format` with strict JSON Schema; prompted output
+uses `json_object`; tool output uses a strict function and named `tool_choice`. Thinking uses
+`reasoning.effort`, with minimal mapped to low for gpt-5.6/gpt-6. Supported settings include
+max_output_tokens, temperature, top_p, service_tier and parallel_tool_calls in tool mode;
+extra body and harmless extra headers remain supported. Unsupported Chat-only settings are
+omitted. Replies read message output_text or function_call arguments, model and token usage;
+refusals and missing output are errors. Retry conversations preserve assistant JSON as text.
+
 ### AnthropicClient (`ModelClient/AnthropicClient.swift`)
 
 ```swift
@@ -863,12 +882,14 @@ public struct AnthropicClient: ModelClient {
     public let apiKey: String
     public let requestedModel: String
     public let transport: any HTTPTransport
-    public init(apiKey: String, model: String, baseURL: URL = defaultBaseURL, transport: any HTTPTransport = URLSessionTransport())
+    public let bearerAuth: Bool
+    public init(apiKey: String, model: String, baseURL: URL = defaultBaseURL,
+                transport: any HTTPTransport = URLSessionTransport(), bearerAuth: Bool = false)
 }
 ```
 
 Request: `POST {baseURL}/v1/messages`, headers `x-api-key`, `anthropic-version: 2023-06-01`,
-`Content-Type: application/json`. Body:
+`Content-Type: application/json`. Gateway mode replaces `x-api-key` with bearer Authorization. Body:
 
 ```
 model, max_tokens: settings.maxTokens ?? 16000, system: instructions,
@@ -879,8 +900,11 @@ tool:     tools: [{name, description: "Return the <name> object.", input_schema:
           tool_choice: {type: "auto"}, and append to `system`: "\n\nCall the tool `<name>` exactly once with your answer."
           (forced tool_choice is a 400 on current models)
 thinking: none -> omit `thinking` and `output_config.effort`;
-          otherwise thinking: {type: "adaptive"} and output_config.effort = minimal->"low", low->"low", medium->"medium", high->"high", xhigh->"xhigh"
-          thinking: true -> thinking: {type: "adaptive"} with no output_config.effort (the API's default)
+          otherwise use the finite model-family capabilities matching pydantic-ai 2.55:
+          older models use enabled + budget_tokens (1024, 2048, 10000, 16384, 32768);
+          adaptive families use adaptive; effort appears only on supporting families;
+          xhigh maps to max when xhigh is unsupported. Boolean true selects the family default.
+          Budget mode requires max_tokens > budget; when omitted, allocate at least budget + 4096.
 settings: temperature, top_p, top_k (only when thinking is off; the API rejects sampling params with thinking on);
           stop_sequences; service_tier auto -> "auto", default -> "standard_only", flex/priority dropped;
           seed, penalties, logit_bias, parallel_tool_calls unsupported -> ignored; extraHeaders on the request
@@ -900,12 +924,14 @@ public struct GeminiClient: ModelClient {
     public let apiKey: String
     public let requestedModel: String
     public let transport: any HTTPTransport
-    public init(apiKey: String, model: String, baseURL: URL = defaultBaseURL, transport: any HTTPTransport = URLSessionTransport())
+    public let bearerAuth: Bool
+    public init(apiKey: String, model: String, baseURL: URL = defaultBaseURL,
+                transport: any HTTPTransport = URLSessionTransport(), bearerAuth: Bool = false)
 }
 ```
 
 Request: `POST {baseURL}/models/{model}:generateContent`, headers `x-goog-api-key`,
-`Content-Type: application/json`. Body:
+`Content-Type: application/json`; Gateway Vertex mode also sends bearer Authorization. Body:
 
 ```
 systemInstruction: {parts: [{text: instructions}]}
@@ -915,8 +941,11 @@ generationConfig:
   prompted: responseMimeType: "application/json"
   tool:     (no generationConfig output fields) tools: [{functionDeclarations: [{name, description, parameters: schema}]}],
             toolConfig: {functionCallingConfig: {mode: "ANY", allowedFunctionNames: [name]}}
-  thinkingConfig: none -> omitted; minimal|low -> {thinkingLevel: "low"}; medium -> "medium"; high|xhigh -> "high";
-                  thinking: true -> {includeThoughts: true} with no level (as pydantic-ai sends it)
+  thinkingConfig: none and older non-thinking models -> omitted;
+                  Gemini 2.5 uses budgets 128, 2048, 8192, 24576 (high and xhigh);
+                  current families choose their nearest supported level, lower wins ties;
+                  Developer/Vertex image-family capabilities remain distinct;
+                  includes includeThoughts: true, with boolean true leaving the amount to the provider
   temperature, maxOutputTokens, topP, topK, seed, stopSequences, presencePenalty, frequencyPenalty
   (logit_bias, parallel_tool_calls, service_tier unsupported -> ignored; extraHeaders on the request)
 ```
@@ -930,7 +959,7 @@ candidates is `ModelError.malformedReply`.
 
 ```swift
 public enum Provider: String, Sendable, CaseIterable {
-    case google, anthropic, openai, openrouter, vllm
+    case google, anthropic, openai, openrouter, vercel, gateway, vllm
 }
 
 public protocol KeyStore: Sendable {
@@ -968,7 +997,7 @@ extension Endpoints {
 `resolve` rules (ConfigurationError unless noted):
 
 - `kind == "gemini"`: `"unknown endpoint kind 'gemini' (Gemini is kind: google)"`.
-- unknown kind: `"unknown endpoint kind '<k>'; expected one of google, anthropic, openai, openrouter, vllm"`.
+- Unknown kind: `ConfigurationError` listing the finite supported direct and gateway kinds.
 - `base_url` on `openai`: `"kind: openai always talks to api.openai.com and takes no base_url; for another
   OpenAI-compatible server use kind: vllm with base_url (its key is VLLM_API_KEY)"`. A job file may have
   been downloaded, so its `base_url` must never pair with the stored OpenAI key (Python `_model`).
@@ -982,6 +1011,13 @@ extension Endpoints {
   otherwise travel in clear text to a public host"`.
 - `openrouter` -> `OpenAICompatibleClient(baseURL: https://openrouter.ai/api/v1)`; `openai` ->
   `https://api.openai.com/v1` always; `anthropic` -> `AnthropicClient`; `google` -> `GeminiClient`.
+- `vercel` uses the fixed Vercel Chat Completions host and its own `.vercel` key.
+- Every `gateway/<provider>` uses `.gateway`, never a direct-provider key. The key’s supported
+  `us`/`eu` region selects `https://gateway-{region}.pydantic.dev/proxy`; malformed/unsupported
+  regions fail. Google/google-cloud uses native Vertex generateContent under
+  `/google-vertex/v1beta1/publishers/google`; Anthropic uses `/anthropic/v1/messages`;
+  openai/openai-responses uses `/openai/responses`; openai-chat uses `/openai/chat/completions`.
+  No job URL overrides any gateway host.
 - Key: `keys.apiKey(for:)`; nil for a provider other than vllm -> `ModelError.missingKey(provider)`.
   For vLLM, attach the key only when the parsed job host equals the parsed host of
   `keys.vllmBaseURL` (case-insensitive); absent or different configured host means no key.
@@ -1066,7 +1102,7 @@ in tool mode too (pydantic-ai keeps it only for tool-output retries).
 
 ### Tests `ModelClientTests.swift` must pass (StubTransport, no network)
 
-1. `resolve` for the five documented specs returns the expected client type, `requested ==`
+1. `resolve` for the documented direct and gateway specs returns the expected client type, `requested ==`
    the part after the colon, `settings.thinking == .low` when asked; `gemini:` throws a message
    containing `"kind: google"`; `parseSpec("no-colon")` throws; `google` with `base_url` throws;
    `vllm` without `base_url` throws; a missing key is `ModelError.missingKey`.
@@ -1084,8 +1120,7 @@ in tool mode too (pydantic-ai keeps it only for tool-output retries).
    are returned as text. Prompted mode: `response_format.type == "json_object"` and the
    instructions end with the schema suffix; a fenced reply is unfenced.
 4. Anthropic client: headers `x-api-key` and `anthropic-version`; `output_config.format.type == "json_schema"`;
-   image block `source.type == "base64"`; thinking `.high` -> `thinking.type == "adaptive"` and
-   `output_config.effort == "high"`; `.none` -> no `thinking` key; tool mode has `tool_choice.type == "auto"`
+   image block `source.type == "base64"`; thinking `.high` uses the family’s budget or adaptive form; `.none` -> no `thinking` key; tool mode has `tool_choice.type == "auto"`
    and `tools[0].strict == true`; a `tool_use` block's input is returned as JSON text;
    `stop_reason: "refusal"` throws `malformedReply`.
 5. Gemini client: URL ends with `models/<m>:generateContent`, `x-goog-api-key` header,
@@ -1129,8 +1164,10 @@ public struct Runner: Sendable {
     public func stream(source: some ImageSource, sink: some CaptionSink, only: Set<String>? = nil)
         -> AsyncThrowingStream<Outcome, any Error>
 
-    /// Collects stream(), then sink.finalize(); elapsed is wall-clock.
-    public func run(source: some ImageSource, sink: some CaptionSink, only: Set<String>? = nil)
+    /// Awaits each outcome callback in completion order, then sink.finalize(); elapsed is wall-clock.
+    /// Cancellation drains in-flight samples/callbacks before throwing, without finalizing.
+    public func run(source: some ImageSource, sink: some CaptionSink, only: Set<String>? = nil,
+                    onOutcome: @escaping @Sendable (Outcome) async -> Void = { _ in })
         async throws -> RunSummary
 }
 ```

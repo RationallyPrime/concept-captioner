@@ -6,6 +6,7 @@ import Foundation
 public struct OpenAICompatibleClient: ModelClient {
     public static let openAIBaseURL = URL(string: "https://api.openai.com/v1")!
     public static let openRouterBaseURL = URL(string: "https://openrouter.ai/api/v1")!
+    public static let vercelBaseURL = URL(string: "https://ai-gateway.vercel.sh/v1")!
 
     public let baseURL: URL
     public let apiKey: String?
@@ -38,12 +39,22 @@ public struct OpenAICompatibleClient: ModelClient {
             headers["Authorization"] = "Bearer \(apiKey)"
         }
         settings.mergeExtraHeaders(into: &headers)
-        let envelope = try await ProviderHTTP.post(
-            requestBody(instructions: instructions, messages: messages, output: output, settings: settings),
-            to: baseURL.appendingPathComponent("chat/completions"),
-            headers: headers,
-            transport: transport
-        )
+        let envelope: JSONValue
+        do {
+            envelope = try await ProviderHTTP.post(
+                requestBody(instructions: instructions, messages: messages, output: output, settings: settings),
+                to: baseURL.appendingPathComponent("chat/completions"),
+                headers: headers,
+                transport: transport
+            )
+        } catch let ModelError.http(status, body) where status == 400 && settings.thinks
+            && (body.contains("reasoning_effort") || body.contains("thinking")) {
+            throw ModelError.http(
+                status: status,
+                body: "model '\(requestedModel)' rejected thinking '\(settings.thinkingEffort?.rawValue ?? "medium")'; "
+                    + "choose a supported thinking level or none. Provider response: \(body)"
+            )
+        }
         return try Self.parse(envelope, mode: output.mode)
     }
 
@@ -90,8 +101,9 @@ public struct OpenAICompatibleClient: ModelClient {
             ])
         }
         if settings.thinks {
-            // pydantic-ai's OPENAI_REASONING_EFFORT_MAP sends "medium" for `thinking: true`.
-            body["reasoning_effort"] = .string(settings.thinkingEffort?.rawValue ?? "medium")
+            for (key, value) in reasoningSettings(settings).pairs {
+                body[key] = value
+            }
         }
         if let temperature = settings.temperature { body["temperature"] = .double(temperature) }
         if let maxTokens = settings.maxTokens { body["max_completion_tokens"] = .int(maxTokens) }
@@ -108,6 +120,19 @@ public struct OpenAICompatibleClient: ModelClient {
         }
         settings.mergeExtraBody(into: &body)
         return body
+    }
+
+    private func reasoningSettings(_ settings: RequestSettings) -> JSONObject {
+        guard baseURL.host() == Self.openRouterBaseURL.host() else {
+            // pydantic-ai's OPENAI_REASONING_EFFORT_MAP sends "medium" for `thinking: true`.
+            return ["reasoning_effort": .string(settings.thinkingEffort?.rawValue ?? "medium")]
+        }
+        let effort = switch settings.thinkingEffort {
+        case nil, .medium: "medium"
+        case .some(.none), .minimal, .low: "low"
+        case .high, .xhigh: "high"
+        }
+        return ["reasoning": .object(["effort": .string(effort), "enabled": .bool(true)])]
     }
 
     private static func encode(_ message: ChatMessage) -> JSONValue {

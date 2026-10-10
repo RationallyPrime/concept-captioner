@@ -1,19 +1,18 @@
 # CORE-STATUS
 
-State of the ConceptCore library on 2026-10-10, written by hand after its build workflow was
-stopped during the last fix pass (to save session budget; nothing was lost).
+State of ConceptCore on 2026-10-10 after the handoff repairs and independent acceptance.
 
 ## What exists
 
 All nine modules of `CORE-SPEC.md` are implemented with tests: models (Job and friends, YAML),
 skills (Agent Skills loader, bundled skill as a resource), prompt, triggers, images, model clients
-(OpenAI-compatible, Anthropic, Gemini; structured output with one in-conversation retry;
+(OpenAI-compatible, Responses, Anthropic, Gemini; structured output with one in-conversation retry;
 `resolve` with the key-safety rule), runner (streaming outcomes, optional critic, response
 records, human-final skip), sources (local folder, sidecar sink) and hub (Hub client with LFS
 upload and verify, imagefolder source and sink).
 
-Verification: `swift build` and `swift test` green, 183 tests in 26 suites; swiftformat and
-swiftlint clean on the last run. The workflow's four review lenses (parity with the Python
+Handoff baseline: `swift build` and `swift test` green, 183 tests in 26 suites; swiftformat and
+swiftlint clean. Current acceptance is the 207-test run recorded below. The workflow's four review lenses (parity with the Python
 reference, Swift 6 concurrency, API fitness for an app, wire formats of the three clients and the
 Hub) produced 28 findings, 19 confirmed adversarially, 14 fixed inside the workflow. The fixer
 on `HubClient.swift` was interrupted mid-edit; the missing call-site change was completed by hand
@@ -23,24 +22,40 @@ Everything is fake-verified: model clients against a stubbed transport, the Hub 
 stubbed transport, the runner against a fake model client. No call has been made to a real
 provider or to the Hub from Swift.
 
-## Open findings (confirmed by review, not yet fixed)
+## Accepted gateway and provider work, 2026-10-10
 
-- `HubClient.swift` ~290 (medium): after the LFS PUT, POST the batch reply's `verify` action
-  (`{oid, size}`, LFS media types, Hub token), as `huggingface_hub` does. The plumbing now exists
-  (`verifyLFS`, `LFSUpload.verify`); confirm it is called after every PUT and tested.
-- `AnthropicClient.swift` ~88 (medium) and ~103 (low): thinking is always sent as adaptive plus
-  an effort, which older still-served models reject; `xhigh` exists only on newer models. Map
-  thinking per model family or fall back to `budget_tokens`.
-- `OpenAICompatibleClient.swift` ~92 (low): `reasoning_effort` is sent for every non-none thinking
-  level; non-reasoning models reject the parameter and some values exist only on some models.
-  Send it only where the model accepts it, or let the request fail with a clear message.
-- `GeminiClient.swift` ~101 (low): `medium` thinking is not accepted by every Gemini model.
+The Sol core author implemented Vercel and Pydantic AI Gateway routes alongside OpenRouter.
+Each has its own key and fixed origins. Pydantic routing uses native Vertex, Anthropic,
+Responses (the default OpenAI route), or explicit Chat Completions, matching the finite
+supported Python routes. Job URLs cannot redirect gateway keys. Unsupported upstreams and
+key regions fail with configuration errors.
+
+Independent coordinator review accepted the frozen changes after source inspection, outgoing
+request tests and a complete isolated core run: **207 tests in 30 suites passed**. The isolated
+SwiftPM package uses the exact repository source/tests and existing Yams checkout; it establishes
+core behavior while app screens are still being edited. The author’s strict SwiftLint and
+SwiftFormat checks passed on all eleven changed source/test files. These are offline checks;
+live provider and Hub acceptance remain outstanding.
+
+The remaining handoff findings are dispositioned:
+
+- Hub LFS verification was already called after every pending PUT. New tests verify ordering,
+  object IDs/sizes, headers and that verification failure prevents the commit. No Hub code rewrite.
+- Claude thinking uses model-family budget/adaptive capabilities, only supported effort values,
+  and sufficient output-token space; explicit insufficient limits fail clearly.
+- Gemini thinking uses 2.5 budgets or the family’s supported levels, with old non-thinking
+  models omitted and the Developer/Vertex distinction retained.
+- OpenAI-compatible thinking rejection retains the provider response and names the model,
+  selected effort and corrective setting action. This does not claim every model accepts thinking.
+
+`Runner.run` now provides an awaited async outcome callback for the app. Tests demonstrate
+updates before completion and cancellation draining an uncooperative provider before returning;
+no source access is released while a child can still write.
 
 ## Not done yet
 
-- Gateway kinds `vercel` and `gateway/<provider>` in `resolve` (the Python reference has them).
-- Parquet-backed Hub datasets (out of scope for v1; imagefolder convention only).
-- A real-provider smoke run from Swift.
+- A real-provider and Hub smoke run from Swift.
+- Parquet-backed Hub datasets remain out of scope for v1; imagefolder convention only.
 
 ## Accepted key-routing repair, 2026-10-10
 
@@ -61,4 +76,5 @@ Explicit Python OpenAI/Anthropic origins ignore ambient base-URL overrides, whil
 still fail as ConfigurationError. Both closure findings were accepted; sampled coverage does
 not establish exhaustive URL-parser equivalence or live-provider acceptance.
 
-Gateway/core work, pod verification and the app are now dispatched under `docs/SWARM-PLAN.md`.
+Gateway/core work has independent acceptance. App implementation and real pod verification
+continue under `docs/SWARM-PLAN.md`.
