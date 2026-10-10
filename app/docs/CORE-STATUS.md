@@ -18,9 +18,8 @@ Hub) produced 28 findings, 19 confirmed adversarially, 14 fixed inside the workf
 on `HubClient.swift` was interrupted mid-edit; the missing call-site change was completed by hand
 and the suite re-run.
 
-Everything is fake-verified: model clients against a stubbed transport, the Hub client against a
-stubbed transport, the runner against a fake model client. No call has been made to a real
-provider or to the Hub from Swift.
+Model clients and runner remain verified with stubbed transports/fake models. The Swift Hub
+client has now also passed the live check recorded below; model-provider smoke is pending.
 
 ## Accepted gateway and provider work, 2026-10-10
 
@@ -35,7 +34,7 @@ request tests and a complete isolated core run: **207 tests in 30 suites passed*
 SwiftPM package uses the exact repository source/tests and existing Yams checkout; it establishes
 core behavior while app screens are still being edited. The author’s strict SwiftLint and
 SwiftFormat checks passed on all eleven changed source/test files. These are offline checks;
-live provider and Hub acceptance remain outstanding.
+live model-provider acceptance remains outstanding. Subsequent live Hub evidence is below.
 
 The remaining handoff findings are dispositioned:
 
@@ -54,7 +53,7 @@ no source access is released while a child can still write.
 
 ## Not done yet
 
-- A real-provider and Hub smoke run from Swift.
+- A real model-provider smoke run from Swift.
 - Parquet-backed Hub datasets remain out of scope for v1; imagefolder convention only.
 
 ## Accepted key-routing repair, 2026-10-10
@@ -78,3 +77,14 @@ not establish exhaustive URL-parser equivalence or live-provider acceptance.
 
 Gateway/core work has independent acceptance. App implementation and real pod verification
 continue under `docs/SWARM-PLAN.md`.
+
+## Live Swift Hub proof, 2026-10-10
+
+The Sol core agent ran accepted commit `602c60c` against the real Hub with synthetic images in
+private dataset `RationallyPrime/conceptstudio-swift-smoke-20261010`. Commit
+`a6aef9afa5ed209d11c1027ede2131ba4d6ad8c4` contains two images and their metadata captions/records.
+The Hub advertised two LFS verify actions: both uploads returned 200, each verify POST returned
+200, and the dataset commit returned 200 only afterward. Both downloaded image byte sequences
+and their hashes/sizes matched, and the two source samples and metadata records round-tripped.
+Credentials were neither printed nor written to project files. This establishes the core Hub
+client path; app UI import/publication and model-provider requests have separate evidence.
