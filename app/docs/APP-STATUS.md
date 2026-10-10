@@ -81,6 +81,15 @@ and an authenticated native-schema image request to the owned Qwen pod.
 Those proofs do not establish interaction with the app UI. Separate pod-stream evidence owns
 real container tags, GPU training and spend.
 
+On 2026-10-10, a separate headless probe using an exact copy of the app's `PodAgentClient`
+also read the owned live agent's plan, services, trainer logs and persisted FLUX events over
+authenticated HTTP. All four requests returned 200. The same `TrainingPoint` consumed by
+Monitor decoded step 2 and loss 0.05031000077724457, matching the real event scalar.
+Source hashes were checked after the calls. This establishes native control reads and curve
+decoding; it does not establish rendered chart interaction. The first live LTX run saved
+checkpoints but lacked TensorBoard in its trainer environment, so its curves await a repaired
+image and a fresh run.
+
 The preview is unsigned and not notarized. Signing, notarization, sandbox runtime checks and
 distribution approval remain external release work described in `RUNNING.md`. This file does
 not claim that a fake training result is a real LoRA or that a built bundle is a published app.

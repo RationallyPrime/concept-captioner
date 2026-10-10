@@ -100,3 +100,27 @@ blue circle on a white background; reported usage was 61 input and 16 output tok
 retained pod token was bound to its user-configured endpoint and never printed. The accepted
 core source hashes remained unchanged. This proves one native vLLM image request from Swift;
 the full concept-boundary prompt and training behavior are separate pod-stream checks.
+
+## Live native pod-agent read proof, 2026-10-10
+
+At 19:24:17–19:24:18 UTC, the Sol core agent compiled an exact copy of the current app's
+`PodAgentClient.swift` with the current ConceptCore source in a temporary SwiftPM package
+outside the repository. The copied client and all recorded native source hashes matched
+the repository after the live read. Its authenticated, read-only requests to the owned pod
+proxy returned HTTP 200 for `POST /plan`, `GET /services`,
+`GET /services/trainer-ltx/logs`, and `GET /runs/tiny-flux-proof-20261010/events`.
+The plan decoded sequential captioning/training on GPU 0; current service states retained
+the completed LTX run ID, and current LTX logs decoded to 200 lines without retaining their
+contents. The plan POST computes assignments and does not start or stop services.
+
+The persisted FLUX run returned a real `scraped/loss` scalar at step 2, value
+`0.05031000077724457`. The app's actual `latest()` decoder produced the matching
+`TrainingPoint`, whose step/loss fields feed the Monitor curve. This proves native decoding
+of one actual FLUX point and authenticated control reads; no GUI was launched or rendered,
+no resource actions were made, and existing tests remain network-free. The token was read
+only inside the probe and was not printed or retained in the receipt.
+
+LTX curve decoding remains unproved. The pod-stream owner reported that the completed LTX
+run produced no TensorBoard events because its trainer environment lacked TensorBoard.
+A separate native LTX read awaits that image repair and an actual loss scalar; the FLUX
+point does not establish LTX curve behavior.
