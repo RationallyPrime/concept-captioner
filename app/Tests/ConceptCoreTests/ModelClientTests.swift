@@ -118,7 +118,7 @@ struct ResolveTests {
                 settings: ["temperature": .double(0.2)],
                 concurrency: 2
             ),
-            keys: StaticKeyStore([.vllm: "v-key"])
+            keys: StaticKeyStore([.vllm: "v-key"], vllmBaseURL: "http://127.0.0.1:8000/v1")
         )
         #expect((other.client as? OpenAICompatibleClient)?.baseURL == URL(string: "http://127.0.0.1:8000/v1"))
         #expect((other.client as? OpenAICompatibleClient)?.apiKey == "v-key")

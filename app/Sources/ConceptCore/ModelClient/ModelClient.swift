@@ -198,7 +198,17 @@ public struct RequestSettings: Sendable, Equatable {
         case "stop_sequences": stopSequences = try Self.strings(value, key: key)
         case "logit_bias": logitBias = try Self.integerMap(value, key: key)
         case "parallel_tool_calls": parallelToolCalls = try Self.boolean(value, key: key)
-        case "extra_headers": extraHeaders = try Self.stringMap(value, key: key)
+        case "extra_headers":
+            let headers = try Self.stringMap(value, key: key)
+            for header in headers.keys {
+                let name = header.lowercased().replacingOccurrences(of: "-", with: "")
+                    .replacingOccurrences(of: "_", with: "")
+                if name.contains("authorization") || name.contains("apikey") || name.hasSuffix("token")
+                    || ["cookie", "setcookie", "host"].contains(name) {
+                    throw ConfigurationError("job setting header '\(header)' is not allowed")
+                }
+            }
+            extraHeaders = headers
         case "service_tier": serviceTier = try Self.serviceTier(value)
         case "thinking": try applyThinking(value)
         case "extra_body":

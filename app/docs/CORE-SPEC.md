@@ -936,10 +936,12 @@ public enum Provider: String, Sendable, CaseIterable {
 public protocol KeyStore: Sendable {
     /// nil when no key is stored. For `.vllm` the key is optional; everyone else requires one.
     func apiKey(for provider: Provider) throws -> String?
+    /// User-configured endpoint from Settings, never the job file.
+    var vllmBaseURL: String? { get }
 }
 
 public struct StaticKeyStore: KeyStore {
-    public init(_ keys: [Provider: String])
+    public init(_ keys: [Provider: String], vllmBaseURL: String? = nil)
 }
 
 public struct ResolvedEndpoint: Sendable {
@@ -981,6 +983,15 @@ extension Endpoints {
 - `openrouter` -> `OpenAICompatibleClient(baseURL: https://openrouter.ai/api/v1)`; `openai` ->
   `https://api.openai.com/v1` always; `anthropic` -> `AnthropicClient`; `google` -> `GeminiClient`.
 - Key: `keys.apiKey(for:)`; nil for a provider other than vllm -> `ModelError.missingKey(provider)`.
+  For vLLM, attach the key only when the parsed job host equals the parsed host of
+  `keys.vllmBaseURL` (case-insensitive); absent or different configured host means no key.
+  Python uses `VLLM_BASE_URL` for that user configuration, including when it supplies the
+  endpoint omitted by the job. Neither implementation reads the configured host from the job.
+- Reject URL userinfo, escaped hosts, whitespace, control characters, backslashes and invalid
+  ports before requests. Check and send the same parsed URL in Swift.
+- Job `extra_headers` cannot set authentication or routing: reject names containing
+  `authorization` or `apikey`, ending in `token`, or equal to `cookie`, `setcookie`, `host`
+  after lowercasing and removing hyphens/underscores. Other headers remain supported.
 - `settings = try RequestSettings(settings: spec.settings, thinking: thinking)`; Python only sets
   thinking when the level is not `none`, which this matches since `.none` emits nothing.
 - `requested = spec.model`, `concurrency = spec.concurrency`, `outputMode = spec.outputMode`.

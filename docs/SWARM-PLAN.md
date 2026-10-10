@@ -2,7 +2,7 @@
 
 This plan executes `CODEX-HANDOFF.md`, `app/docs/APP-BRIEF.md` and
 `pod/docs/POD-VERIFY-BRIEF.md`; those remain the product and delivery requirements.
-Prepared 2026-10-10 before dispatch. No subagents have been launched.
+Prepared 2026-10-10; execution launched on the same day after Hákon enabled ULTRA.
 
 ## Target and acceptance
 
@@ -36,8 +36,9 @@ The core owner covers the Swift findings alongside gateway work. Confirm or repa
 defect; do not reimplement completed work based on stale status counts.
 
 Before app provider integration or any real pod exposure, independently accept the relevant
-foundation changes. The current key-routing repair is prepared locally with tests; it is not
-independently accepted yet. The gateway and pod outcomes have not been started in this session.
+foundation changes. Key routing and pod argument/proxy repairs have independent acceptance.
+Swift gateway/core work and app implementation are active; the pod owner is proceeding to real
+builds and verification. Current verification details belong in the respective status documents.
 
 ## Then: two delivery streams
 

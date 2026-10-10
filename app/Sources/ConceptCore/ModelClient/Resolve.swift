@@ -8,6 +8,7 @@
 //   OpenAI-compatible server is `kind: vllm`, whose key the user set for custom endpoints and
 //   nothing else.
 // - A custom `base_url` must be https, or http to a loopback / private-network host.
+// - The vLLM key goes only to the host configured by the user, never to an arbitrary job host.
 
 import Foundation
 
@@ -18,13 +19,17 @@ public enum Provider: String, Sendable, CaseIterable {
 public protocol KeyStore: Sendable {
     /// nil when no key is stored. `.vllm` may run without one; everyone else needs one.
     func apiKey(for provider: Provider) throws -> String?
+    /// The endpoint the user configured in Settings, never a value taken from a job file.
+    var vllmBaseURL: String? { get }
 }
 
 public struct StaticKeyStore: KeyStore {
     public let keys: [Provider: String]
+    public let vllmBaseURL: String?
 
-    public init(_ keys: [Provider: String]) {
+    public init(_ keys: [Provider: String], vllmBaseURL: String? = nil) {
         self.keys = keys
+        self.vllmBaseURL = vllmBaseURL
     }
 
     public func apiKey(for provider: Provider) throws -> String? {
@@ -92,7 +97,17 @@ public extension Endpoints {
     ) throws -> ResolvedEndpoint {
         let provider = try provider(for: spec)
         let settings = try RequestSettings(settings: spec.settings, thinking: thinking)
-        let apiKey = try keys.apiKey(for: provider)
+        var apiKey = try keys.apiKey(for: provider)
+        if provider == .vllm {
+            guard let target = try baseURL(spec) else {
+                throw ConfigurationError("kind vllm needs base_url")
+            }
+            let configured = try keys.vllmBaseURL.map(checkBaseURL)
+            if configured?.host(percentEncoded: false)?.lowercased()
+                != target.host(percentEncoded: false)?.lowercased() {
+                apiKey = nil
+            }
+        }
         if apiKey == nil, provider != .vllm {
             throw ModelError.missingKey(provider)
         }
@@ -162,6 +177,17 @@ public extension Endpoints {
     static func checkBaseURL(_ text: String) throws -> URL {
         guard let url = URL(string: text), let host = url.host(percentEncoded: false), !host.isEmpty else {
             throw ConfigurationError("base_url '\(text)' has no host")
+        }
+        guard !text.unicodeScalars.contains(where: {
+            CharacterSet.whitespacesAndNewlines.contains($0)
+                || CharacterSet.controlCharacters.contains($0) || $0 == "\\"
+        }) else {
+            throw ConfigurationError("base_url must not contain whitespace, controls or backslashes")
+        }
+        guard url.user == nil, url.password == nil, !((url.host() ?? "").contains("%")),
+              url.port.map({ (0 ... 65535).contains($0) }) ?? true
+        else {
+            throw ConfigurationError("base_url must not contain userinfo, an escaped host or an invalid port")
         }
         let scheme = url.scheme?.lowercased()
         if scheme == "https" {

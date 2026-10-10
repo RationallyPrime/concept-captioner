@@ -10,6 +10,64 @@ import Testing
 struct ResolveBaseURLTests {
     static let keys = StaticKeyStore([.google: "g-key", .anthropic: "a-key", .openai: "o-key", .openrouter: "r-key"])
 
+    @Test(arguments: [
+        ("https://trusted.example/v1", "https://trusted.example/v1", true),
+        ("https://TRUSTED.example/v1", "https://trusted.example/other", true),
+        ("https://evil.example/v1", "https://trusted.example/v1", false),
+        ("http://localhost:9000/v1", "http://localhost:8000/v1", true),
+        ("https://evil.example/v1", nil, false),
+    ] as [(String, String?, Bool)])
+    func vllmKeyOnlyReachesConfiguredHost(target: String, configured: String?, authenticated: Bool) async throws {
+        let reply = try StubTransport.json([
+            "model": "m",
+            "choices": [["message": ["content": "{}"]]],
+        ])
+        let transport = StubTransport { _ in reply }
+        let result = try Endpoints.resolve(
+            EndpointSpec(kind: "vllm", model: "m", baseURL: target),
+            keys: StaticKeyStore([.vllm: "stored-vllm-key"], vllmBaseURL: configured),
+            transport: transport
+        )
+        _ = try await result.client.request(
+            instructions: "test", messages: [.user("test")],
+            output: OutputRequest(name: Caption.schemaName, schema: Caption.jsonSchema, mode: .native),
+            settings: result.settings
+        )
+        let request = try #require(await transport.requests.first)
+        #expect(request.url?.host()?.lowercased() == URL(string: target)?.host()?.lowercased())
+        #expect(request.value(forHTTPHeaderField: "Authorization") ==
+            (authenticated ? "Bearer stored-vllm-key" : nil))
+    }
+
+    @Test(arguments: [
+        "Authorization", "aUtHoRiZaTiOn", "Proxy-Authorization", "x-api-key", "x-goog-api-key",
+        "api_key", "X-Auth-Token", "Cookie", "Host",
+    ])
+    func jobCannotSupplyAuthenticationHeaders(header: String) throws {
+        #expect(throws: ConfigurationError.self) {
+            try Endpoints.resolve(
+                EndpointSpec(
+                    kind: "vllm",
+                    model: "m",
+                    baseURL: "http://localhost/v1",
+                    settings: ["extra_headers": .object(JSONObject([(header, .string("bad"))]))]
+                ),
+                keys: StaticKeyStore([:])
+            )
+        }
+    }
+
+    @Test(arguments: [
+        "http://localhost@evil.example/v1", "https://localhost@evil.example/v1",
+        "http://local%68ost/v1", "http://localhost\\@evil.example/v1",
+        "http://local\thost/v1", "http://localhost/\npath", "http://localhost:99999/v1",
+    ])
+    func ambiguousURLsAreRejected(url: String) throws {
+        #expect(throws: ConfigurationError.self) {
+            try Endpoints.resolve(EndpointSpec(kind: "vllm", model: "m", baseURL: url), keys: StaticKeyStore([:]))
+        }
+    }
+
     @Test("a downloaded job file's base_url can never pair with the stored OpenAI key")
     func baseURLCannotRedirectAStoredKey() throws {
         for bad in ["https://evil.example/v1", "http://localhost:8000/v1"] {

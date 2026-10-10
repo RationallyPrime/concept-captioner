@@ -8,8 +8,8 @@ Specs are pydantic-ai ``provider:model`` strings::
     openrouter:anthropic/claude-sonnet-4-6
     vllm:Qwen/Qwen3-VL-32B-Instruct        (base_url from the spec or VLLM_BASE_URL)
 
-Anything else is passed to ``pydantic_ai.models.infer_model`` unchanged. Keys come from each
-provider's own environment variable; this module never touches them.
+Anything else is passed to ``pydantic_ai.models.infer_model`` unchanged. Hosted providers read
+their own keys; the vLLM key is sent only to the user-configured ``VLLM_BASE_URL`` host.
 
 A job file is data that may have been downloaded (``hf fetch-job``), so a ``base_url`` in it is
 untrusted. Two rules keep a stored key from being sent to a host the file chose:
@@ -23,10 +23,12 @@ untrusted. Two rules keep a stored key from being sent to a host the file chose:
 from __future__ import annotations
 
 import ipaddress
+import os
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
+import httpx2
 from pydantic import BaseModel
 from pydantic_ai import NativeOutput, PromptedOutput, ToolOutput, UserError
 from pydantic_ai.models import Model, infer_model
@@ -74,13 +76,27 @@ def _private_host(host: str) -> bool:
 
 def check_base_url(url: str) -> str:
     """Accept https anywhere, or plain http only to a loopback / private host."""
-    parts = urlsplit(url)
+    if any(char.isspace() or ord(char) < 32 or char == "\\" for char in url):
+        raise ConfigurationError("base_url must not contain whitespace, controls or backslashes")
+    try:
+        parts = urlsplit(url)
+        _ = parts.port  # validate malformed / out-of-range ports before a client parses them
+    except ValueError:
+        raise ConfigurationError("base_url is not a valid URL") from None
     if not parts.hostname:
         raise ConfigurationError(f"base_url {url!r} has no host")
-    if parts.scheme == "https":
-        return url
-    if parts.scheme == "http" and _private_host(parts.hostname):
-        return url
+    if parts.username is not None or parts.password is not None or "%" in parts.netloc:
+        raise ConfigurationError("base_url must not contain userinfo or an escaped host")
+    try:
+        normalized = httpx2.URL(url)
+    except (httpx2.InvalidURL, ValueError):
+        raise ConfigurationError("base_url is not a valid URL") from None
+    # This is the SDK's own URL parser: Unicode full stops and IDNA must be normalized
+    # before deciding whether a name is local, and the same URL goes to the HTTP client.
+    if normalized.scheme == "https":
+        return str(normalized)
+    if normalized.scheme == "http" and _private_host(normalized.host):
+        return str(normalized)
     raise ConfigurationError(
         f"base_url {url!r} must be https, or http to a loopback/private address; images and the "
         "endpoint key would otherwise travel in clear text to a public host"
@@ -93,15 +109,48 @@ def _model(spec: EndpointSpec) -> Model:
             "kind: openai always talks to api.openai.com and takes no base_url; for another "
             "OpenAI-compatible server use kind: vllm with base_url (its key is VLLM_API_KEY)"
         )
-    if spec.kind == "vllm" and spec.base_url:
+    if spec.kind == "vllm":
+        from openai import AsyncOpenAI
         from pydantic_ai.models.openai import OpenAIChatModel
         from pydantic_ai.providers.vllm import VLLMProvider
 
-        base_url = check_base_url(spec.base_url)
-        return OpenAIChatModel(spec.model, provider=VLLMProvider(base_url=base_url))
+        configured = os.getenv("VLLM_BASE_URL")
+        target = spec.base_url or configured
+        if not target:
+            raise ConfigurationError("kind vllm needs base_url or VLLM_BASE_URL")
+        base_url = check_base_url(target)
+        host = urlsplit(base_url).hostname
+        configured_host = urlsplit(check_base_url(configured)).hostname if configured else None
+        key = os.getenv("VLLM_API_KEY", "") if host == configured_host else ""
+
+        # The SDK's public async key callback supports a genuinely unauthenticated request.
+        # Passing None / an empty string through VLLMProvider would reread ambient credentials.
+        async def no_key() -> str:
+            return ""
+
+        client = AsyncOpenAI(base_url=base_url, api_key=key or no_key)
+        return OpenAIChatModel(spec.model, provider=VLLMProvider(openai_client=client))
     if spec.base_url:
         raise ConfigurationError(f"base_url is only meaningful for kind vllm, not {spec.kind!r}")
     try:
+        if spec.kind == "openai":
+            from pydantic_ai.models.openai import OpenAIResponsesModel
+            from pydantic_ai.providers.openai import OpenAIProvider
+
+            key = os.getenv("OPENAI_API_KEY")
+            if not key:
+                raise UserError("Set OPENAI_API_KEY to use the OpenAI provider")
+            return OpenAIResponsesModel(
+                spec.model,
+                provider=OpenAIProvider(base_url="https://api.openai.com/v1", api_key=key),
+            )
+        if spec.kind == "anthropic":
+            from pydantic_ai.models.anthropic import AnthropicModel
+            from pydantic_ai.providers.anthropic import AnthropicProvider
+
+            return AnthropicModel(
+                spec.model, provider=AnthropicProvider(base_url="https://api.anthropic.com")
+            )
         return infer_model(spec.spec)
     except UserError as error:
         hint = " (Gemini is kind: google)" if spec.kind == "gemini" else ""
@@ -110,6 +159,15 @@ def _model(spec: EndpointSpec) -> Model:
 
 def _settings(spec: EndpointSpec, thinking: ThinkingLevel) -> ModelSettings:
     settings: dict[str, Any] = dict(spec.settings)
+    for header in settings.get("extra_headers") or {}:
+        name = header.lower().replace("-", "").replace("_", "")
+        if (
+            "authorization" in name
+            or "apikey" in name
+            or name.endswith("token")
+            or name in {"cookie", "setcookie", "host"}
+        ):
+            raise ConfigurationError(f"job setting header {header!r} is not allowed")
     if thinking != "none":
         settings.setdefault("thinking", thinking)
     return ModelSettings(**settings)  # type: ignore[typeddict-item]
@@ -117,9 +175,17 @@ def _settings(spec: EndpointSpec, thinking: ThinkingLevel) -> ModelSettings:
 
 def resolve(spec: str | EndpointSpec, *, thinking: ThinkingLevel = "none") -> Resolved:
     endpoint = parse_spec(spec) if isinstance(spec, str) else spec
+    settings = _settings(endpoint, thinking)
+    model = _model(endpoint)
+    if endpoint.kind == "vllm" and not model.client.api_key:
+        from openai import omit
+
+        # Explicit omission is the SDK's supported unauthenticated-request path. This is
+        # runtime-derived, after rejecting auth headers from the job, and never saved to it.
+        settings["extra_headers"] = {**(settings.get("extra_headers") or {}), "Authorization": omit}
     return Resolved(
-        model=_model(endpoint),
-        settings=_settings(endpoint, thinking),
+        model=model,
+        settings=settings,
         output_mode=endpoint.output_mode,
         requested=endpoint.model,
         concurrency=endpoint.concurrency,

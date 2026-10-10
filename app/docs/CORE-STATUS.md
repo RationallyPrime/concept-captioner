@@ -35,22 +35,30 @@ provider or to the Hub from Swift.
   level; non-reasoning models reject the parameter and some values exist only on some models.
   Send it only where the model accepts it, or let the request fail with a clear message.
 - `GeminiClient.swift` ~101 (low): `medium` thinking is not accepted by every Gemini model.
-- `Resolve.swift` (unverified, from an automated review of the pushed commit; no details were
-  delivered): a possible parser differential in the base-URL safety check, i.e. the code that
-  decides "loopback / private / single-label host" could parse a URL differently from the HTTP
-  client that later sends the request. Check with adversarial inputs: userinfo
-  (`http://localhost@evil.example/`), IPv6 brackets, trailing dots, mixed case, embedded
-  whitespace or `\u` escapes, and make both sides use the same parsed host. The Python
-  reference (`models.py`, `urlsplit().hostname`) is the behaviour to match; add tests.
-- `Resolve.swift` `kind: vllm` (medium, confirmed by a second automated review): the stored vLLM
-  key is still attached to any job-file `base_url` that passes the https-or-private rule. Tighten
-  in both languages: attach the vLLM key only when the job's host equals the host the user
-  configured (Settings in the app, `VLLM_BASE_URL` in Python); otherwise send no key. Reject
-  `Authorization`, `x-api-key`, `x-goog-api-key` and similar in a job file's `settings` /
-  extra headers. Python reference first (`models.py`), then Swift, tests for both.
 
 ## Not done yet
 
 - Gateway kinds `vercel` and `gateway/<provider>` in `resolve` (the Python reference has them).
 - Parquet-backed Hub datasets (out of scope for v1; imagefolder convention only).
 - A real-provider smoke run from Swift.
+
+## Accepted key-routing repair, 2026-10-10
+
+The key-routing finding is repaired and independently accepted by the Sol key-review agent:
+the vLLM key is bound to the user-configured host in Python and Swift;
+job authentication/routing headers and sampled ambiguous URL inputs are rejected. The Swift
+KeyStore now carries the user-configured vLLM endpoint separately from the job.
+
+Local checks after this repair: all 186 Swift tests in 26 suites passed (stub transports only),
+strict swiftlint and formatting clean; all 48 Python tests passed, with focused Ruff checks
+clean. The new tests observe outgoing authentication headers for matching and different hosts.
+Independent review reproduced a Python Unicode-dot hostname/parser gap. Python now uses the
+SDK's httpx2 URL normalization before host classification and key binding; its U+3002, U+FF0E
+and U+FF61 witnesses are rejected over HTTP. Swift checks its Foundation URL before sending.
+The review also verified actual pydantic-ai Agent requests with a mock HTTP transport: matching
+host gets the vLLM key, different host gets no Authorization, harmless headers survive.
+Explicit Python OpenAI/Anthropic origins ignore ambient base-URL overrides, while missing keys
+still fail as ConfigurationError. Both closure findings were accepted; sampled coverage does
+not establish exhaustive URL-parser equivalence or live-provider acceptance.
+
+Gateway/core work, pod verification and the app are now dispatched under `docs/SWARM-PLAN.md`.

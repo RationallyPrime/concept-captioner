@@ -86,6 +86,9 @@ the kind for *any* OpenAI-compatible server you point at with `base_url` (vLLM, 
 a proxy); `kind: openai` always means api.openai.com and refuses a `base_url`, so a job file you
 downloaded can never send your OpenAI key somewhere else. A custom `base_url` must be https, or
 http only to localhost, a private address or a bare hostname such as a Docker service name.
+The stored `VLLM_API_KEY` is sent only when the endpoint's host matches the host in the
+user's `VLLM_BASE_URL`; other custom hosts receive no key. Job settings cannot supply
+authentication headers or override the HTTP Host header.
 
 Per endpoint you can also set `output_mode` (`native` default: the provider enforces the JSON schema;
 `prompted` for a server that rejects schema-constrained decoding; `tool` for models that prefer tool calls),
