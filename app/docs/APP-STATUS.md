@@ -1,7 +1,8 @@
 # ConceptStudio app status
 
 Development preview prepared on 2026-10-10 at `app/dist/ConceptStudio.app`. It was built and
-its bundle metadata validated; an automated agent has not launched the GUI. The app is an
+its bundle metadata validated. The first agent-driven GUI launch has now reached Welcome;
+the offline demo walkthrough is in progress. The app is an
 unsigned macOS 15+ Swift 6 / SwiftUI executable, with SwiftPM and Yams as its only third-party
 dependency. `scripts/build-app.sh` produces the bundle; `RUNNING.md` covers first run and
 distribution requirements.
@@ -71,13 +72,16 @@ The full 234-test result above remains the earlier integration boundary. These s
 establish app wiring, not caption quality; the live experiment has rejected the initial 8B
 captions for describing traits that its job reserves for the concept.
 
-These are headless checks. Pixel layout and interactive keyboard/VoiceOver use have not been
-observed, because GUI launch is prohibited. Keychain save/read, Apple Photos/iCloud selection,
+The automated action tests above are headless checks. Complete pixel-layout and interactive
+keyboard/VoiceOver coverage remain pending. Keychain save/read, Apple Photos/iCloud selection,
 real security-scoped bookmark restoration, live model requests, live Hub import/publication,
 real RunPod creation and trainer hardware behavior are not established by the app tests.
 Read-only live native RunPod calls successfully decoded the actual catalog and network-volume
 responses. `CORE-STATUS.md` also records a real Swift Hub upload/verify/download round trip
-and an authenticated native-schema image request to the owned Qwen pod.
+and an authenticated native-schema image request to the owned Qwen pod. A single direct
+Gemini 3.8 Flash request also returned 200 and decoded the shared Caption schema from a
+bundled synthetic demo image. That establishes native provider integration, not a caption
+quality comparison or full training-prompt evaluation.
 Those proofs do not establish interaction with the app UI. Separate pod-stream evidence owns
 real container tags, GPU training and spend.
 

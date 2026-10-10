@@ -77,8 +77,8 @@ connection, demo mode).
 ## Constraints
 
 Swift 6 language mode, macOS 15 minimum, SwiftPM only (Xcode opens the package), Yams is the only
-third-party dependency, Swift Testing, no network in tests. Lint and format clean. Do not run the
-GUI from an automated agent; verify through tests and a build. A script must produce a
+third-party dependency, Swift Testing, no network in tests. Lint and format clean. Verify through
+tests, builds and GUI walkthroughs. A script must produce a
 double-clickable `.app`; signing and notarization are documented, not done.
 
 ## Done means

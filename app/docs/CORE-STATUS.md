@@ -18,9 +18,9 @@ Hub) produced 28 findings, 19 confirmed adversarially, 14 fixed inside the workf
 on `HubClient.swift` was interrupted mid-edit; the missing call-site change was completed by hand
 and the suite re-run.
 
-The offline suite covers stubbed model transports and the runner. The Swift Hub client and
-owned vLLM endpoint have also passed the live checks below. Direct-provider and gateway
-requests remain verified offline only.
+The offline suite covers stubbed model transports and the runner. The Swift Hub client,
+owned vLLM endpoint and one direct Gemini request have passed the live checks below.
+Other direct-provider and gateway requests remain verified offline only.
 
 ## Accepted gateway and provider work, 2026-10-10
 
@@ -35,8 +35,8 @@ request tests and a complete isolated core run: **207 tests in 30 suites passed*
 SwiftPM package uses the exact repository source/tests and existing Yams checkout; it establishes
 core behavior while app screens are still being edited. The author’s strict SwiftLint and
 SwiftFormat checks passed on all eleven changed source/test files. These are offline checks;
-live direct-provider/gateway acceptance remains outstanding. Subsequent live Hub and owned
-vLLM evidence is below.
+live acceptance for other direct providers and gateways remains outstanding. Subsequent
+live Hub, owned vLLM and direct Gemini evidence is below.
 
 The remaining handoff findings are dispositioned:
 
@@ -55,7 +55,7 @@ no source access is released while a child can still write.
 
 ## Not done yet
 
-- Live direct-provider and gateway requests; no authorized key source was established.
+- Live OpenAI/Anthropic and gateway requests remain outstanding.
 - Parquet-backed Hub datasets remain out of scope for v1; imagefolder convention only.
 
 ## Accepted key-routing repair, 2026-10-10
@@ -124,3 +124,23 @@ LTX curve decoding remains unproved. The pod-stream owner reported that the comp
 run produced no TensorBoard events because its trainer environment lacked TensorBoard.
 A separate native LTX read awaits that image repair and an actual loss scalar; the FLUX
 point does not establish LTX curve behavior.
+
+## Live direct Gemini proof, 2026-10-10
+
+At 19:33:12–19:33:16 UTC, the Sol core agent made exactly one native request through the
+actual `Endpoints.resolve(google)` and `GeminiClient`, using one bundled synthetic demo
+image (`studio.png`) and the shared `Caption.jsonSchema` in native JSON mode. The
+authenticated request returned HTTP 200; requested and served model were both
+`gemini-3.8-flash`. The shared `Caption` decoder accepted a nonempty caption with
+`usable: true` and `note: null`. Reported usage was 1,117 input and 36 output tokens.
+
+The temporary SwiftPM probe used exact current ConceptCore source, whose copied files
+matched the repository after the request. The receipt records source, image, schema,
+request and response hashes, the HTTP outcome, decoded caption and usage. The authorized
+key was read only inside the process; its value was not printed or retained, stored in
+Keychain or written to the repository. Existing tests remain network-free.
+
+This proves one native provider/image/schema/decode path with the current Gemini model.
+It does not establish caption quality, the full training prompt, a comparative dataset
+experiment or another model's behavior. No additional provider calls, GPU actions or GUI
+launches were performed.

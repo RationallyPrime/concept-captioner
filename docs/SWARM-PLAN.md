@@ -12,8 +12,8 @@ terminal. Apply the audience rules in the app brief to defaults, language, error
 runs, not merely to onboarding copy. Keep meaningful controls and the shared project formats.
 
 App acceptance: build, tests, lint and bundle green; every screen and required feature works
-through the complete offline demo; status distinguishes fake checks from live checks. No
-automated GUI launch. Signing and notarization are documented at this boundary.
+through the complete offline demo, including an actual GUI walkthrough; status distinguishes
+fake checks from live checks. Signing and notarization are documented at this boundary.
 
 Pod acceptance: all seven demonstrations in the pod brief, in its order, including both
 trainers, real one- and two-GPU behavior, output retrieval/publication and actual spend.
@@ -122,7 +122,7 @@ comparison is superseded, not ready to run.
 Connect the Mac to the verified agent through the provider proxy. Demonstrate the full shared
 data flow, user-configured endpoint/key behavior, observable failures, cancellation, cost
 controls, result publication and pod shutdown. Actual hardware behavior and API outcomes are
-recorded separately from automated app checks; the automated agent does not launch the GUI.
+recorded separately from automated app checks and observed GUI behavior.
 
 Hákon has deferred the comparison until this evening, with a dataset and experiment design
 large enough to support the intended statistical conclusions. Do not run the five-image
