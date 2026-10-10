@@ -18,8 +18,9 @@ Hub) produced 28 findings, 19 confirmed adversarially, 14 fixed inside the workf
 on `HubClient.swift` was interrupted mid-edit; the missing call-site change was completed by hand
 and the suite re-run.
 
-Model clients and runner remain verified with stubbed transports/fake models. The Swift Hub
-client has now also passed the live check recorded below; model-provider smoke is pending.
+The offline suite covers stubbed model transports and the runner. The Swift Hub client and
+owned vLLM endpoint have also passed the live checks below. Direct-provider and gateway
+requests remain verified offline only.
 
 ## Accepted gateway and provider work, 2026-10-10
 
@@ -34,7 +35,8 @@ request tests and a complete isolated core run: **207 tests in 30 suites passed*
 SwiftPM package uses the exact repository source/tests and existing Yams checkout; it establishes
 core behavior while app screens are still being edited. The author’s strict SwiftLint and
 SwiftFormat checks passed on all eleven changed source/test files. These are offline checks;
-live model-provider acceptance remains outstanding. Subsequent live Hub evidence is below.
+live direct-provider/gateway acceptance remains outstanding. Subsequent live Hub and owned
+vLLM evidence is below.
 
 The remaining handoff findings are dispositioned:
 
@@ -53,7 +55,7 @@ no source access is released while a child can still write.
 
 ## Not done yet
 
-- A real model-provider smoke run from Swift.
+- Live direct-provider and gateway requests; no authorized key source was established.
 - Parquet-backed Hub datasets remain out of scope for v1; imagefolder convention only.
 
 ## Accepted key-routing repair, 2026-10-10
@@ -88,3 +90,13 @@ The Hub advertised two LFS verify actions: both uploads returned 200, each verif
 and their hashes/sizes matched, and the two source samples and metadata records round-tripped.
 Credentials were neither printed nor written to project files. This establishes the core Hub
 client path; app UI import/publication and model-provider requests have separate evidence.
+
+## Live Swift model proof, 2026-10-10
+
+The Sol core agent exercised the actual `Endpoints.resolve(vllm)` and OpenAI-compatible client
+against the owned pod proxy, with an image and native structured-output schema. The request
+returned HTTP 200 from requested/served `Qwen/Qwen2.5-VL-3B-Instruct`, describing the synthetic
+blue circle on a white background; reported usage was 61 input and 16 output tokens. The
+retained pod token was bound to its user-configured endpoint and never printed. The accepted
+core source hashes remained unchanged. This proves one native vLLM image request from Swift;
+the full concept-boundary prompt and training behavior are separate pod-stream checks.

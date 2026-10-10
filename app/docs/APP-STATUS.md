@@ -66,7 +66,8 @@ observed, because GUI launch is prohibited. Keychain save/read, Apple Photos/iCl
 real security-scoped bookmark restoration, live model requests, live Hub import/publication,
 real RunPod creation and trainer hardware behavior are not established by the app tests.
 Read-only live native RunPod calls successfully decoded the actual catalog and network-volume
-responses. `CORE-STATUS.md` also records a real Swift Hub upload/verify/download round trip.
+responses. `CORE-STATUS.md` also records a real Swift Hub upload/verify/download round trip
+and an authenticated native-schema image request to the owned Qwen pod.
 Those proofs do not establish interaction with the app UI. Separate pod-stream evidence owns
 real container tags, GPU training and spend.
 
