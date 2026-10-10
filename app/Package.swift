@@ -21,11 +21,17 @@ let package = Package(
         .executableTarget(
             name: "ConceptStudio",
             dependencies: ["ConceptCore"],
+            resources: [.copy("Resources/Demo")],
             swiftSettings: [.swiftLanguageMode(.v6)],
         ),
         .testTarget(
             name: "ConceptCoreTests",
             dependencies: ["ConceptCore"],
+            swiftSettings: [.swiftLanguageMode(.v6)],
+        ),
+        .testTarget(
+            name: "ConceptStudioTests",
+            dependencies: ["ConceptStudio"],
             swiftSettings: [.swiftLanguageMode(.v6)],
         ),
     ],
