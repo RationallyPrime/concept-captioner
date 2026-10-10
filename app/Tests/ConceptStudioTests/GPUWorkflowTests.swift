@@ -22,13 +22,18 @@ private actor UnreachableAgentTransport: HTTPTransport {
     private var failedFirstStop: Bool
     private let agentAvailable: Bool
     private let inferenceReady: Bool
+    private let gpuCount: Int
+    private var services: [String: String] = [:]
+    private var servedModel = "Qwen/Qwen3-VL-8B-Instruct"
     private(set) var stopCalls = 0
     private(set) var inferenceRequests: [URLRequest] = []
+    private(set) var starts: [URLRequest] = []
 
-    init(failFirstStop: Bool = false, agentAvailable: Bool = false, inferenceReady: Bool = false) {
+    init(failFirstStop: Bool = false, agentAvailable: Bool = false, inferenceReady: Bool = false, gpuCount: Int = 1) {
         failedFirstStop = !failFirstStop
         self.agentAvailable = agentAvailable
         self.inferenceReady = inferenceReady
+        self.gpuCount = gpuCount
     }
 
     func send(_ request: URLRequest) async throws -> HTTPResponse {
@@ -37,15 +42,31 @@ private actor UnreachableAgentTransport: HTTPTransport {
             inferenceRequests.append(request)
             return HTTPResponse(
                 status: inferenceReady ? 200 : 503,
-                body: Data(#"{"data":[{"id":"Qwen/Qwen3-VL-8B-Instruct"}]}"#.utf8)
+                body: JSONValue.object(["data": .array([.object(["id": .string(servedModel)])])]).pythonDumpsData()
             )
         }
         if url.host() != "api.runpod.io" {
             guard agentAvailable else { return HTTPResponse(status: 522) }
-            let reply = url.path().hasSuffix("plan")
-                ? #"{"mode":"sequential","caption":{"gpus":[0]},"train":{"gpus":[0]}}"#
-                : #"{"services":[]}"#
-            return HTTPResponse(status: 200, body: Data(reply.utf8))
+            if url.lastPathComponent == "start" {
+                starts.append(request)
+                let service = url.deletingLastPathComponent().lastPathComponent
+                guard services[service] != "running" else { return HTTPResponse(status: 409) }
+                services[service] = service == "pull-dataset" ? "exited" : "running"
+                if service == "vllm" {
+                    servedModel = try JSONValue(parsing: #require(request.httpBody))
+                        .objectValue?["params"]?.objectValue?["model"]?.stringValue ?? servedModel
+                }
+            }
+            let reply: JSONObject = if url.lastPathComponent == "plan" {
+                [
+                    "mode": .string(gpuCount == 1 ? "sequential" : "concurrent"),
+                    "caption": .object(["gpus": .array([.int(0)])]),
+                    "train": .object(["gpus": .array([.int(gpuCount == 1 ? 0 : 1)])]),
+                ]
+            } else {
+                ["services": .array(services.map { .object(["name": .string($0.key), "state": .string($0.value)]) })]
+            }
+            return HTTPResponse(status: 200, body: JSONValue.object(reply).pythonDumpsData())
         }
         let json: String
         if url.path().contains("catalog/gpus") {
@@ -63,7 +84,8 @@ private actor UnreachableAgentTransport: HTTPTransport {
                 }
                 stopped = true
             }
-            json = "{\"id\":\"test\",\"status\":\"\(stopped ? "EXITED" : "RUNNING")\",\"cost\":1,\"gpu\":{\"count\":1}}"
+            json = "{\"id\":\"test\",\"status\":\"\(stopped ? "EXITED" : "RUNNING")\",\"cost\":1,"
+                + "\"gpu\":{\"count\":\(gpuCount)}}"
         }
         return HTTPResponse(status: 200, body: Data(json.utf8))
     }
@@ -71,6 +93,46 @@ private actor UnreachableAgentTransport: HTTPTransport {
 
 @Suite("GPU workflow")
 struct GPUWorkflowTests {
+    private func expectCaptionStart(_ request: URLRequest, model: String) throws {
+        #expect(request.url?.path() == "/services/vllm/start")
+        let body = try JSONValue(parsing: #require(request.httpBody)).objectValue
+        #expect(body?["gpus"] == .array([.int(0)]))
+        let params = try #require(body?["params"]?.objectValue)
+        #expect(params["model"]?.stringValue == model)
+        #expect(params["max_model_len"]?.intValue == 16384)
+        #expect(params["max_num_seqs"]?.intValue == 2)
+        #expect(params["gpu_memory_utilization"]?.doubleValue == 0.85)
+        #expect(params["extra_args"] == .array([.string("--enforce-eager"), .string("--max-num-batched-tokens=4096")]))
+    }
+
+    @MainActor @Test(arguments: [false, true])
+    func concurrentTrainingStartsOrReusesCaptionServer(_ captionEarlier: Bool) async throws {
+        let suite = "GPUWorkflowTests." + UUID().uuidString
+        let preferences = try #require(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let transport = UnreachableAgentTransport(agentAvailable: true, inferenceReady: true, gpuCount: 2)
+        let workspace = GPUWorkspace(
+            demoMode: false, transport: transport, preferences: preferences, saveAgentToken: { _, _ in }
+        )
+        try workspace.configure(runpodKey: "provider-only", hubToken: "hub-only", imageName: "test")
+        workspace.gpuCount = 2
+        if !captionEarlier { workspace.captionModel = "Qwen/alternate-caption-model" }
+        workspace.keepCaptionServer = true
+        await workspace.refreshOffers()
+        await workspace.rent()
+        if captionEarlier { #expect(await workspace.startCaptioning()) }
+        await workspace.train(datasetRepo: "test/images")
+        let starts = await transport.starts
+        let captionStarts = starts.filter { $0.url?.path() == "/services/vllm/start" }
+        #expect(captionStarts.count == 1)
+        try expectCaptionStart(#require(captionStarts.first), model: workspace.captionModel)
+        let trainer = try #require(starts.first { $0.url?.path() == "/services/trainer-aitoolkit/start" })
+        let body = try JSONValue(parsing: #require(trainer.httpBody)).objectValue
+        #expect(body?["gpus"] == .array([.int(1)]))
+        #expect(workspace.trainingState == "running")
+        await workspace.stopEverything()
+    }
+
     @MainActor @Test
     func stoppedComputerMustBeExplicitlyRemovedBeforeAnotherRental() async {
         let workspace = GPUWorkspace(demoMode: true)
@@ -176,6 +238,7 @@ struct GPUWorkflowTests {
         let request = try #require(await transport.inferenceRequests.first)
         #expect(request.url?.absoluteString == "https://test-8000.proxy.runpod.net/v1/models")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer " + workspace.agentToken)
+        try expectCaptionStart(#require(await transport.starts.first), model: workspace.captionModel)
         await workspace.stopEverything()
         #expect(!workspace.hasRunningPod)
     }

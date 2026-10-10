@@ -271,11 +271,10 @@ final class GPUWorkspace {
                     try await self.waitForService("vllm", allowStopped: true)
                 }
             } else if self.keepCaptionServer {
-                try await agent.start(
-                    "vllm",
-                    gpus: plan.caption?.gpus ?? [],
-                    params: ["model": .string(self.captionModel)]
-                )
+                let services = try await agent.services()
+                if !services.contains(where: { $0.name == "vllm" && $0.active }) {
+                    try await agent.start("vllm", gpus: plan.caption?.gpus ?? [], params: self.captionStartParams)
+                }
             }
             self.runID = "concept-" + UUID().uuidString.prefix(12).lowercased()
             self.points = []
@@ -470,6 +469,14 @@ extension GPUWorkspace {
         return URL(string: "https://\(pod.id)-8000.proxy.runpod.net/v1")
     }
 
+    private var captionStartParams: JSONObject {
+        [
+            "model": .string(captionModel), "max_model_len": .int(16384), "max_num_seqs": .int(2),
+            "gpu_memory_utilization": .double(0.85),
+            "extra_args": .array([.string("--enforce-eager"), .string("--max-num-batched-tokens=4096")]),
+        ]
+    }
+
     func startCaptioning() async -> Bool {
         var ready = false
         await perform {
@@ -484,9 +491,7 @@ extension GPUWorkspace {
                 throw StudioError.message("Finish training before captioning on this single-GPU computer.")
             }
             if !services.contains(where: { $0.name == "vllm" && $0.active }) {
-                try await agent.start("vllm", gpus: plan.caption?.gpus ?? [], params: [
-                    "model": .string(self.captionModel),
-                ])
+                try await agent.start("vllm", gpus: plan.caption?.gpus ?? [], params: self.captionStartParams)
             }
             self.lastActivity = Date()
             self.message = "The caption model is starting. Large models can take several minutes to download."

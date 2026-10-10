@@ -54,12 +54,22 @@ Core Hub source/Runner and the actual Python pod imagefolder collector/writer: t
 images with captions and no reference-image contamination. Vision revision 2 uses conservative
 photo similarity and face-proposal thresholds with an ambiguity margin; pixel-equivalent and
 distinct-image witnesses cover the sample behavior, not calibrated face recognition. Build and
-strict lint and formatting pass, and the final app gate passes 27 tests in seven suites
+strict lint and formatting pass, and the initial app gate passes 27 tests in seven suites
 (16 app tests and 11 GPU tests). Independent coordinator review accepted the app, and the
 Sol core reviewer independently accepted the GPU module and its failure-path repairs. The
 coordinator also ran the complete package: 27 app/GPU tests plus 207 core tests, all passed;
 strict lint and formatting were clean. The final provider-change handler preserves the
 verified pod model instead of overwriting it with a different default.
+
+After the real Qwen 8B run, both app caption-server startup paths were updated to use its
+working context, concurrency and memory settings. Concurrent training also reuses an already
+active caption server instead of issuing a duplicate start that the agent rejects with 409.
+The focused GPU suite now passes 12 tests, with wire witnesses for both startup paths and
+training on GPU 1 while the existing caption server stays on GPU 0. An independent reviewer
+reran that suite and accepted the frozen repair; product build, strict lint and format passed.
+The full 234-test result above remains the earlier integration boundary. These startup checks
+establish app wiring, not caption quality; the live experiment has rejected the initial 8B
+captions for describing traits that its job reserves for the concept.
 
 These are headless checks. Pixel layout and interactive keyboard/VoiceOver use have not been
 observed, because GUI launch is prohibited. Keychain save/read, Apple Photos/iCloud selection,
