@@ -21,7 +21,7 @@ let package = Package(
         .executableTarget(
             name: "ConceptStudio",
             dependencies: ["ConceptCore"],
-            resources: [.copy("Resources/Demo")],
+            resources: [.copy("Resources/Demo"), .process("Resources/OpenAI")],
             swiftSettings: [.swiftLanguageMode(.v6)],
         ),
         .testTarget(

@@ -23,6 +23,7 @@ extension StudioSession {
     func loadSavedChoices() {
         endpointKind = preferences.string(forKey: "endpointKind") ?? "openrouter"
         modelName = preferences.string(forKey: "modelName") ?? "google/gemini-3.8-flash"
+        openAIUsesChatGPT = preferences.bool(forKey: "openAIUsesChatGPT")
         criticKind = endpointKind
         criticModel = modelName
         customBaseURL = preferences.string(forKey: "vllmBaseURL") ?? ""
@@ -59,7 +60,8 @@ extension StudioSession {
         thinking: ThinkingLevel? = nil,
         baseURL: String? = nil,
         keys: (any KeyStore)? = nil,
-        transport: any HTTPTransport = URLSessionTransport()
+        transport: any HTTPTransport = URLSessionTransport(),
+        streamingTransport: any HTTPStreamingTransport = URLSessionTransport()
     ) throws -> ResolvedEndpoint {
         if demoMode { return ResolvedEndpoint(client: DemoModelClient(scenario: scenario)) }
         let selectedKind = kind ?? endpointKind
@@ -72,6 +74,31 @@ extension StudioSession {
             settings: settings ?? project?.job.endpoints?.captioner.settings ?? [:],
             concurrency: concurrency
         )
+        if selectedKind == "openai", openAIUsesChatGPT {
+            let requestSettings = try RequestSettings(settings: spec.settings, thinking: thinking ?? modelThinking)
+            try ChatGPTModelClient.validate(settings: requestSettings, outputMode: spec.outputMode)
+            guard let account = chatGPT.selectedAccount, account.isSignedIn, account.hasPlanPermission else {
+                throw StudioError
+                    .message("Log in with ChatGPT in Settings and allow use of your plan before captioning.")
+            }
+            guard chatGPT.availableModels.contains(where: { $0.slug == spec.model }) else {
+                throw StudioError.message("Refresh the ChatGPT models on Captioning and choose one for this account.")
+            }
+            return ResolvedEndpoint(
+                client: ChatGPTModelClient(
+                    model: spec.model,
+                    accessToken: chatGPT.tokenProvider(accountID: account.id),
+                    onUsageLimit: { [weak self] error in
+                        await self?.stopForChatGPTUsageLimit(error)
+                    },
+                    transport: streamingTransport
+                ),
+                settings: requestSettings,
+                outputMode: spec.outputMode,
+                requested: spec.model,
+                concurrency: spec.concurrency
+            )
+        }
         if selectedKind == "vllm", usingPodCaptioner {
             guard let trustedURL = gpu.captionEndpoint,
                   !gpu.agentToken.isEmpty else {

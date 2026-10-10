@@ -1,7 +1,22 @@
 import AppKit
+import ConceptCore
 @testable import ConceptStudio
 import SwiftUI
 import Testing
+
+private struct ChatGPTPreviewWire: HTTPTransport {
+    func send(_ request: URLRequest) async throws -> HTTPResponse {
+        guard request.url?.absoluteString == "https://api.openai.com/v1/models" else {
+            throw StudioError.message("Only the synthetic model catalog is available in previews.")
+        }
+        return HTTPResponse(status: 200, body: Data("""
+        {"models":[
+          {"slug":"example-vision","display_name":"Example vision model","visibility":"list"},
+          {"slug":"example-fast","display_name":"Example fast model","visibility":"list"}
+        ]}
+        """.utf8))
+    }
+}
 
 @Suite(
     "offscreen app previews",
@@ -75,12 +90,26 @@ struct PreviewRenderTests {
                 captures: &captures
             )
         }
-        try await capture(
-            "concept-editor",
-            view: ConceptEditor(session: session, existing: session.project?.job.concepts.first),
+        try await captureAuxiliaryScreens(session: session, output: output, filter: filter, captures: &captures)
+        await session.gpu.stopEverything()
+        #expect(!session.gpu.hasRunningPod)
+        try await captureChatGPT(
+            project: session.project,
+            preferences: preferences,
             output: output,
             filter: filter,
-            captures: &captures,
+            captures: &captures
+        )
+        try writeManifest(captures, to: output)
+        print("OFFSCREEN PREVIEWS: \(output.path) (\(captures.count) PNGs)")
+    }
+
+    private func captureAuxiliaryScreens(
+        session: StudioSession, output: URL, filter: Set<String>, captures: inout [[String: String]]
+    ) async throws {
+        try await capture(
+            "concept-editor", view: ConceptEditor(session: session, existing: session.project?.job.concepts.first),
+            output: output, filter: filter, captures: &captures,
             renderSizes: [("sheet", CGSize(width: 660, height: 650))]
         )
         try await capture(
@@ -90,16 +119,60 @@ struct PreviewRenderTests {
             filter: filter,
             captures: &captures
         )
-        await session.gpu.stopEverything()
-        #expect(!session.gpu.hasRunningPod)
-        try writeManifest(captures, to: output)
-        print("OFFSCREEN PREVIEWS: \(output.path) (\(captures.count) PNGs)")
+    }
+
+    private func captureChatGPT(
+        project: StudioProject?, preferences: UserDefaults, output: URL, filter: Set<String>,
+        captures: inout [[String: String]]
+    ) async throws {
+        guard filter.isEmpty || filter.contains(where: { $0.hasPrefix("chatgpt-") }) else { return }
+        let state = ChatGPTSavedState(hostID: "urn:uuid:preview-only", registrations: [
+            ChatGPTRegistration(
+                clientID: "oaiapp_preview_account", subject: "preview-only", email: "preview@example.invalid",
+                tokens: ChatGPTTokens(
+                    accessToken: "synthetic-preview-access", refreshToken: "synthetic-preview-refresh",
+                    idToken: "synthetic-preview-identity", scopes: [ChatGPTAuth.directScope],
+                    expiresAt: Date.distantFuture, nonce: "preview-only"
+                )
+            ),
+        ])
+        let data = try JSONEncoder().encode(state)
+        let accounts = ChatGPTAccounts(
+            preferences: preferences, transport: ChatGPTPreviewWire(),
+            loadCredentials: { data }, saveCredentials: { _ in },
+            openBrowser: { _ in throw StudioError.message("Browser sign-in is disabled in previews.") }
+        )
+        let session = StudioSession(preferences: preferences, chatGPT: accounts)
+        session.gpu = GPUWorkspace(demoMode: true, preferences: preferences)
+        session.project = project
+        session.step = .captioning
+        session.endpointKind = "openai"
+        session.modelName = "example-vision"
+        session.openAIUsesChatGPT = true
+        // Render the actual account section without Settings' unrelated API-key status reads.
+        try await capture(
+            "chatgpt-sign-in", view: Form { ChatGPTSettingsSection(session: session) }.formStyle(.grouped),
+            output: output, filter: filter, captures: &captures,
+            renderSizes: [("section", CGSize(width: 700, height: 300))]
+        )
+        await accounts.load()
+        await accounts.refreshModels()
+        #expect(accounts.availableModels.count == 2)
+        try await capture(
+            "chatgpt-captioning",
+            view: StudioRootView(session: session),
+            output: output,
+            filter: filter,
+            captures: &captures
+        )
+        await accounts.cancelAndWait()
     }
 
     private func writeManifest(_ captures: [[String: String]], to output: URL) throws {
         let metadata: [String: Any] = [
             "method": "NSHostingView in a never-shown NSWindow; offscreen cacheDisplay, no desktop screenshot",
-            "fixtures": "Actual DemoProject, demo model actions and DemoGPUProvider; isolated UserDefaults",
+            "fixtures": "Actual DemoProject, demo model actions and DemoGPUProvider; isolated UserDefaults. "
+                + "ChatGPT captures use a synthetic account/model catalog and injected credentials/HTTP/browser seams.",
             "appearance": "Light/dark scheme with simulated controlActiveState.key; no key window or activation",
             "limits": "Content only; native sidebar vibrancy may differ from a visible window. "
                 +

@@ -48,13 +48,8 @@ public struct OpenAIResponsesClient: ModelClient {
         ])
         var body: JSONObject = ["model": .string(requestedModel), "input": .array([system] + messages.map(Self.encode))]
         switch output.mode {
-        case .native:
-            body["text"] = .object(["format": .object([
-                "type": .string("json_schema"), "name": .string(output.name),
-                "schema": output.schema, "strict": .bool(true),
-            ])])
-        case .prompted:
-            body["text"] = .object(["format": .object(["type": .string("json_object")])])
+        case .native, .prompted:
+            body["text"] = Self.textFormat(output)
         case .tool:
             body["tools"] = .array([.object([
                 "type": .string("function"), "name": .string(output.name),
@@ -63,13 +58,7 @@ public struct OpenAIResponsesClient: ModelClient {
             body["tool_choice"] = .object(["type": .string("function"), "name": .string(output.name)])
             if let parallel = settings.parallelToolCalls { body["parallel_tool_calls"] = .bool(parallel) }
         }
-        if settings.thinks {
-            var effort = settings.thinkingEffort?.rawValue ?? "medium"
-            if effort == "minimal", requestedModel.hasPrefix("gpt-5.6") || requestedModel.hasPrefix("gpt-6") {
-                effort = "low"
-            }
-            body["reasoning"] = .object(["effort": .string(effort)])
-        }
+        body["reasoning"] = Self.reasoning(settings, model: requestedModel)
         if let temperature = settings.temperature { body["temperature"] = .double(temperature) }
         if let maxTokens = settings.maxTokens { body["max_output_tokens"] = .int(maxTokens) }
         if let topP = settings.topP { body["top_p"] = .double(topP) }
@@ -79,7 +68,24 @@ public struct OpenAIResponsesClient: ModelClient {
         return body
     }
 
-    private static func encode(_ message: ChatMessage) -> JSONValue {
+    static func textFormat(_ output: OutputRequest) -> JSONValue {
+        let format: JSONValue = output.mode == .native ? .object([
+            "type": .string("json_schema"), "name": .string(output.name),
+            "schema": output.schema, "strict": .bool(true),
+        ]) : .object(["type": .string("json_object")])
+        return .object(["format": format])
+    }
+
+    static func reasoning(_ settings: RequestSettings, model: String) -> JSONValue? {
+        guard settings.thinks else { return nil }
+        var effort = settings.thinkingEffort?.rawValue ?? "medium"
+        if effort == "minimal", model.hasPrefix("gpt-5.6") || model.hasPrefix("gpt-6") {
+            effort = "low"
+        }
+        return .object(["effort": .string(effort)])
+    }
+
+    static func encode(_ message: ChatMessage) -> JSONValue {
         if message.role == .assistant {
             return .object(["role": .string("assistant"), "content": .string(message.text)])
         }

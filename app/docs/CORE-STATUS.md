@@ -1,6 +1,24 @@
 # CORE-STATUS
 
-State of ConceptCore on 2026-10-10 after the handoff repairs and independent acceptance.
+State of ConceptCore on 2026-10-10 after the handoff repairs and ChatGPT captioning work.
+
+## ChatGPT plan captioning
+
+The native ChatGPT client accepts an asynchronous account-token provider and sends image-aware
+structured caption requests only to the public OpenAI Responses endpoint. It requires
+`store: false`, streaming, and a completed terminal response before returning a caption.
+It reuses the existing Responses encoders and parser; API-key routes retain their behavior.
+Unsupported preview settings fail before credential access. HTTP and streamed usage-limit
+errors stop new requests from the client and notify the app to cancel its batch.
+
+The independent reviewer accepted the exact Core changes after rerunning 12 focused tests
+across the ChatGPT and existing Responses gateway suites, including URLSession through an
+offline URLProtocol. The final integrated package passed **217 Core tests in 31 suites**;
+strict lint and formatting passed. Interrupted, failed, incomplete and malformed streams,
+image/schema requests, cancellation, token acquisition and usage-limit handling have offline
+evidence. Real ChatGPT-plan inference still requires a user's sign-in and remains unverified.
+The app owns browser OAuth, Keychain credentials and account/model controls; see
+[APP-STATUS.md](APP-STATUS.md) for their evidence and remaining boundaries.
 
 ## What exists
 
@@ -12,7 +30,7 @@ records, human-final skip), sources (local folder, sidecar sink) and hub (Hub cl
 upload and verify, imagefolder source and sink).
 
 Handoff baseline: `swift build` and `swift test` green, 183 tests in 26 suites; swiftformat and
-swiftlint clean. Current acceptance is the 207-test run recorded below. The workflow's four review lenses (parity with the Python
+swiftlint clean. The earlier gateway acceptance is the 207-test run recorded below. The workflow's four review lenses (parity with the Python
 reference, Swift 6 concurrency, API fitness for an app, wire formats of the three clients and the
 Hub) produced 28 findings, 19 confirmed adversarially, 14 fixed inside the workflow. The fixer
 on `HubClient.swift` was interrupted mid-edit; the missing call-site change was completed by hand

@@ -41,13 +41,48 @@ Create a project in a folder you choose. Photos are copied to `images/`; `job.ya
 `source: human` in the response record. Reference images live in `references/`. No keys go into
 these files. Recent project folders and custom skill folders use security-scoped bookmarks.
 
-Settings leads with one gateway key: OpenRouter, Vercel AI Gateway or Pydantic AI Gateway.
-Direct model providers, a Hugging Face write token and a RunPod key are available under
-Advanced. Secrets are saved in the Mac Keychain. The captioning connection test uses the model
-selected on Captioning and can use provider credits. The app remembers choices in the shared
-job and non-secret preferences.
+Settings offers **Log in with ChatGPT** and account keys. For key-based access, one gateway key
+is enough: OpenRouter, Vercel AI Gateway or Pydantic AI Gateway. Direct model providers,
+a Hugging Face write token and a RunPod key are also available. Secrets are saved in the Mac
+Keychain. The captioning connection test uses the model selected on Captioning and consumes
+that account's allowance. The app remembers choices in the shared job and local preferences.
 The advanced vLLM URL is the host allowed to receive your saved server key. A downloaded
 project can name a different captioner or reviewer URL; that request receives no saved key.
+
+### Caption with your ChatGPT plan
+
+Choose **Continue with ChatGPT** in Settings and approve the sign-in in your browser.
+Eligible accounts can authorize use of their ChatGPT plan without an API key. ConceptStudio
+shows a one-time explanation before you continue. On Captioning, choose **OpenAI**, select
+**ChatGPT plan** and pick a model from your account's current catalog. **Manage usage** opens
+[ChatGPT usage settings](https://chatgpt.com/settings/usage) to review allowance and app limits.
+Image support depends on the chosen model. ConceptStudio itself sells no credits.
+
+This choice applies to all OpenAI requests in the app: captioning, the optional caption
+reviewer, model comparisons and photo/concept assistance. **OpenAI API credits** uses the
+separate API key instead. There is no automatic fallback between them. Other providers keep
+their own accounts. ChatGPT plan usage can draw on the plan or its credits balance, according
+to the permissions you approve in ChatGPT.
+
+The ChatGPT preview supports native structured captions and JSON output, with image inputs.
+Its current API does not accept an output-token cap or sampling controls such as temperature;
+unsupported job settings produce an error rather than being silently ignored. Usage-limit
+errors stop new captioning requests and direct you to Manage usage. Saved captions remain.
+
+Accounts and tokens stay separate from projects. Select an existing account to reuse it, use
+**Sign in again** to renew authorization, or **Continue with ChatGPT** to add another account
+or workspace. **Sign out** clears that registration's local tokens and attempts remote session
+revocation; the app reports when it cannot confirm revocation. You can also disconnect the
+app in ChatGPT settings. Demo mode disables sign-in and stays offline.
+
+The shared job still records the OpenAI model as `kind: openai`; it contains no OAuth tokens
+or account registration. The authentication choice is local to this Mac. The Python CLI
+continues using its separately configured OpenAI API credentials.
+
+Implementation follows OpenAI's [open-source sign-in flow](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
+and [preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
+
+### Prepare and train
 
 Use folder, selected-file, Apple Photos or Hub imagefolder import. Check warnings, define the
 learning boundary and confirm subject mappings. On-device face matches and model proposals
@@ -118,7 +153,9 @@ rendering does not establish live keyboard, VoiceOver, titlebar or native vibran
 use the actual app for the human walkthrough. Ordinary `swift test` skips the render pass.
 
 `app/ConceptStudio.entitlements` declares the sandbox, user-selected read/write access,
-security-scoped bookmarks, network-client access and Photos access. Distribution still needs
+security-scoped bookmarks, network-client access and Photos access. Network-server permission
+allows the temporary ChatGPT sign-in callback, bound only to `127.0.0.1`; it is closed when
+sign-in finishes, is cancelled or times out. Distribution still needs
 a Developer ID signing identity, hardened-runtime signing with those entitlements, a zipped
 app or disk image submitted through `xcrun notarytool`, and a stapled notarization ticket.
 Those steps need the owner's Apple developer account and have not been performed. Verify

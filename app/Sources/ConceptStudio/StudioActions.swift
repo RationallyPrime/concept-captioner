@@ -289,6 +289,7 @@ extension StudioSession {
 
     func rememberChoices() {
         guard !demoMode else { return }
+        preferences.set(openAIUsesChatGPT, forKey: "openAIUsesChatGPT")
         normalizePodImageChoice()
         for (key, value) in [
             "endpointKind": endpointKind,

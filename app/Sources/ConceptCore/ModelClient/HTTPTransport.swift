@@ -20,12 +20,40 @@ public protocol HTTPTransport: Sendable {
     func send(_ request: URLRequest) async throws -> HTTPResponse
 }
 
+public struct HTTPStreamResponse: Sendable {
+    public let status: Int
+    /// Header names lowercased, as for HTTPResponse.
+    public let headers: [String: String]
+    public let lines: AsyncThrowingStream<String, any Error>
+    private let cancellation: @Sendable () -> Void
+
+    public init(
+        status: Int,
+        headers: [String: String] = [:],
+        lines: AsyncThrowingStream<String, any Error>,
+        cancel: @escaping @Sendable () -> Void = {}
+    ) {
+        self.status = status
+        self.headers = headers
+        self.lines = lines
+        cancellation = cancel
+    }
+
+    public func cancel() {
+        cancellation()
+    }
+}
+
+public protocol HTTPStreamingTransport: HTTPTransport {
+    func stream(_ request: URLRequest) async throws -> HTTPStreamResponse
+}
+
 /// URLSession-backed. Follows redirects; drops Authorization when a redirect leaves the host.
 ///
 /// Errors from URLSession (`URLError`) propagate unchanged; each caller wraps them in its own
 /// error type (`ModelError.transport`, `HubError.transport`). A non-HTTP response is reported as
 /// `URLError(.badServerResponse)`.
-public struct URLSessionTransport: HTTPTransport {
+public struct URLSessionTransport: HTTPStreamingTransport {
     public let session: URLSession
     public let timeout: TimeInterval
 
@@ -48,6 +76,40 @@ public struct URLSessionTransport: HTTPTransport {
             headers[name.lowercased()] = value
         }
         return HTTPResponse(status: http.statusCode, headers: headers, body: data)
+    }
+
+    public func stream(_ request: URLRequest) async throws -> HTTPStreamResponse {
+        var request = request
+        request.timeoutInterval = timeout
+        let delegate = RedirectDelegate(originalHost: request.url?.host())
+        let (bytes, response) = try await session.bytes(for: request, delegate: delegate)
+        guard let http = response as? HTTPURLResponse else {
+            bytes.task.cancel()
+            throw URLError(.badServerResponse)
+        }
+        var headers: [String: String] = [:]
+        for (name, value) in http.allHeaderFields {
+            guard let name = name as? String, let value = value as? String else { continue }
+            headers[name.lowercased()] = value
+        }
+        let (lines, continuation) = AsyncThrowingStream<String, any Error>.makeStream()
+        let reader = Task {
+            do {
+                for try await line in bytes.lines {
+                    try Task.checkCancellation()
+                    continuation.yield(line)
+                }
+                continuation.finish()
+            } catch {
+                continuation.finish(throwing: error)
+            }
+        }
+        let cancel: @Sendable () -> Void = {
+            reader.cancel()
+            bytes.task.cancel()
+        }
+        continuation.onTermination = { _ in cancel() }
+        return HTTPStreamResponse(status: http.statusCode, headers: headers, lines: lines, cancel: cancel)
     }
 }
 

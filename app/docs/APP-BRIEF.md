@@ -58,9 +58,12 @@ connection, demo mode).
 
 - **Project on disk in the same layout the CLI uses** (images, job file, caption sidecars with
   response records), so the app and the CLI interoperate and nothing is proprietary.
-- **Keys in the Keychain**, entered once in Settings. Lead with "one gateway key" (OpenRouter,
+- **Keys in the Keychain**, entered once in Settings. For key-based access, lead with "one gateway key" (OpenRouter,
   Vercel AI Gateway, Pydantic AI Gateway) and put direct provider keys under Advanced. The app
   sells nothing; users bring accounts they already hold.
+- **Log in with ChatGPT** as an alternative to a key: eligible users can caption with their
+  ChatGPT plan. Show the active account, available models, plan usage and its management link.
+  Keep credentials in Keychain; never silently switch to separately billed API credits.
 - **Demo mode**: a bundled sample project and fake model, provider and pod backends that walk the
   entire journey, every status included, with a visible Demo badge and no network use. This is
   for first runs, screenshots and App Review.
@@ -70,7 +73,8 @@ connection, demo mode).
 - **GPU provider abstraction** with RunPod first; the app creates pods from the project's own
   images and talks to the pod only through the control agent's HTTP API.
 - **Sandbox-compatible from day one** so the Mac App Store stays an option: user-selected
-  folders only, no subprocesses, network client only.
+  folders only, no subprocesses, outbound networking plus a temporary `127.0.0.1` callback
+  listener for ChatGPT sign-in. Close the listener on completion, cancellation or timeout.
 - **Cancel everything long-running**, and nothing left running when a project closes without
   the user knowing.
 - Not in v1, leave room for: Google Photos (via the Picker), Google Drive, Gemini batch.

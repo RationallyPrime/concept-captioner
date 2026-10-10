@@ -24,6 +24,7 @@ struct StudioSettingsView: View {
                 if session.demoMode { DemoBadge() }
             }.padding(24)
             Form {
+                ChatGPTSettingsSection(session: session)
                 Section("One gateway account is enough to start") {
                     Text("A gateway gives you several captioning models through one account. "
                         + "An account key lets this app use that service. ConceptStudio sells no credits.")
@@ -58,8 +59,13 @@ struct StudioSettingsView: View {
                     LabeledContent("Account", value: ModelChoices.title(session.endpointKind))
                     LabeledContent("Model", value: session.modelName)
                         .textSelection(.enabled)
-                    Text("Tests the choices on Captioning, shown above. Live tests may use provider credits.")
-                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                    if session.endpointKind == "openai" {
+                        LabeledContent("Uses", value: session.openAIUsesChatGPT ? "ChatGPT plan" : "OpenAI API credits")
+                    }
+                    Text(
+                        "Tests the choices on Captioning, shown above. Live tests use the selected account’s allowance."
+                    )
+                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
                     HStack {
                         Button(testing ? "Testing connection…" : "Test captioning connection") { test() }
                             .disabled(session.busy)
@@ -106,12 +112,25 @@ struct StudioSettingsView: View {
         .tint(StudioStyle.accent)
         .frame(width: 700, height: 680)
         .onAppear { reload() }
+        .task(id: session.demoMode) {
+            if !session.demoMode { await session.chatGPT.load() }
+        }
+        .alert("You’re using your ChatGPT plan", isPresented: $session.showChatGPTPlanNotice) {
+            Button("Got it") { session.acknowledgeChatGPTPlan() }
+        } message: {
+            Text("Eligible OpenAI requests in ConceptStudio count toward your ChatGPT plan or credits balance. "
+                + "Use Manage usage to review your allowance and set an app limit in ChatGPT settings.")
+        }
         .onChange(of: account) { _, _ in enteredKey = "" }
         .onChange(of: session.demoMode) { _, _ in
             if testing { session.cancel() }
+            session.chatGPT.cancelSignIn()
             enteredKey = ""; reload()
         }
-        .onDisappear { if testing { session.cancel() } }
+        .onDisappear {
+            if testing { session.cancel() }
+            session.chatGPT.cancelSignIn()
+        }
     }
 
     private var accountKeyURL: URL? {

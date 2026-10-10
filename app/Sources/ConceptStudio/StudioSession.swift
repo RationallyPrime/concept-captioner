@@ -31,6 +31,11 @@ final class StudioSession {
     var modelName = ""
     var criticKind = ""
     var criticModel = ""
+    var openAIUsesChatGPT = false
+    var chatGPT: ChatGPTAccounts
+    var showChatGPTPlanNotice = false
+    var chatGPTUsageLimitReached = false
+    @ObservationIgnored var chatGPTWorkGeneration = 0
     var useCritic = false
     var modelThinking = ThinkingLevel.none
     var criticThinking = ThinkingLevel.none
@@ -49,8 +54,9 @@ final class StudioSession {
     let inspector = VisionInspector()
     let preferences: UserDefaults
 
-    init(preferences: UserDefaults = .standard) {
+    init(preferences: UserDefaults = .standard, chatGPT: ChatGPTAccounts? = nil) {
         self.preferences = preferences
+        self.chatGPT = chatGPT ?? ChatGPTAccounts(preferences: preferences)
         loadSavedChoices()
     }
 
@@ -87,7 +93,7 @@ final class StudioSession {
     }
 
     var needsCloseConfirmation: Bool {
-        unsavedCaptionCount > 0 || busy || gpu.hasRunningPod || gpu.isBusy
+        unsavedCaptionCount > 0 || busy || chatGPT.isBusy || gpu.hasRunningPod || gpu.isBusy
     }
 
     func clearSavedCaptionDraft(_ draft: CaptionDraft, for id: String) {
@@ -160,6 +166,7 @@ final class StudioSession {
         perform("Opening the offline demo…") {
             await self.releaseProject()
             self.demoMode = true
+            self.showChatGPTPlanNotice = false
             self.gpu = GPUWorkspace(demoMode: true)
             self.project = try await DemoProject.create()
             self.repoID = "demo/concept-studio"
@@ -226,6 +233,8 @@ final class StudioSession {
     }
 
     func releaseProject() async {
+        chatGPTWorkGeneration += 1
+        await chatGPT.cancelAndWait()
         projectAccess?.stopAccessingSecurityScopedResource()
         skillAccess?.stopAccessingSecurityScopedResource()
         projectAccess = nil
@@ -247,6 +256,8 @@ final class StudioSession {
     }
 
     func stopEverything() async {
+        chatGPTWorkGeneration += 1
+        await chatGPT.cancelAndWait()
         task?.cancel()
         await task?.value
         await gpu.stopEverything()

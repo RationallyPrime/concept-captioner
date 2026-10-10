@@ -1,5 +1,63 @@
 # ConceptStudio app status
 
+## ChatGPT account integration, 2026-10-10
+
+Settings now offers **Log in with ChatGPT**, using OpenAI's official **Continue with ChatGPT**
+browser flow for open-source apps. The native implementation uses PKCE, validates the signed
+identity, keeps separate account registrations and rotating credentials in Keychain, discovers
+the account's available models, and supports reauthorization and sign-out. Sign-out reports
+when remote revocation could not be confirmed. The first successful plan-enabled sign-in
+explains plan usage; ordinary returning sign-in does not force another consent screen.
+
+Captioning keeps `kind: openai` in shared jobs and offers an explicit local choice between
+ChatGPT plan usage and separately billed OpenAI API credits. That choice applies to OpenAI
+captioning, reviewers, comparisons and assistance. The active ChatGPT account and Manage usage
+link are visible. No OAuth credentials or registration enter project files, and there is no
+automatic switch to API billing. The Python CLI retains its independent API-key configuration.
+
+ChatGPT requests use the fixed public Responses endpoint with image inputs, structured output,
+`store: false` and streaming. Only `response.completed` can become a saved caption. A confirmed
+plan limit cancels the active batch and blocks subsequent requests from that client; the alert
+opens ChatGPT usage settings. Unsupported preview options, including output-token caps, are
+rejected before inference. An explicit default-settings action provides recovery without
+editing the job file and preserves unrelated providers' settings.
+
+The sandbox declaration adds network-server permission solely for the temporary HTTP callback
+bound to `127.0.0.1`; completion, cancellation and timeout close it. Stop everything, project
+close and entering demo settle account work. Demo sign-in remains disabled. The integration
+adds no third-party dependency or subprocess.
+
+The final local integration passed **276 executed Swift tests**: 59 app/GPU/authentication
+and 217 Core. The opt-in renderer was skipped in that ordinary test run. Strict lint found
+zero violations; formatting found 0/94 source/test files requiring changes. The debug `.app`
+rebuilt with an arm64 executable and valid Info/entitlement plists. Focused offline checks cover
+PKCE and callback state, signed identity claims, separate accounts, rotating refresh,
+terminal versus temporary credential failures, sign-out/late-refresh ordering, demo/stop
+handoffs, model catalogs, streamed completion, image/schema bodies and usage-limit cancellation.
+Independent source review accepted the feature after rerunning 22 auth/identity/endpoint tests
+and 12 focused Core tests. Its catalog visibility, stale account status and cancellation-handoff
+findings are closed; this acceptance covers the implementation and offline witnesses.
+
+Independent visual review accepted the added controls in ten states: Captioning and demo
+Settings at minimum/default sizes in light/dark, plus the actual sign-in section in both
+appearances. Eight layouts are captured under `app/dist/visual-check/chatgpt-final`; the two
+corrected sign-in captures are under `app/dist/visual-check/chatgpt-mark`. The sign-in section
+uses the approved mark loaded from its resource bundle. The captures use synthetic account
+and model data with injected credential/HTTP/browser seams; no real credentials or requests.
+They establish layout, not interactive access, VoiceOver or native sidebar vibrancy.
+
+The real browser consent flow, Keychain persistence in the distributed signed app, and an actual
+image-caption response through a user's ChatGPT plan remain unverified. Those require a user
+to authorize ConceptStudio's own registration. Existing Codex/ChatGPT credentials have not been
+read or reused. The latest native-control attempt reported `cgWindowNotFound`; process inventory
+shows ConceptStudio running, but the rebuilt version's window could not be inspected or its
+relaunch confirmed. Quit and reopen the preview for the human check. The preview remains unsigned;
+signed sandbox and distribution checks remain
+pending. See [RUNNING.md](RUNNING.md#caption-with-your-chatgpt-plan) for the user flow and the
+official integration references.
+
+## Previous UI checkpoint
+
 The development preview at `app/dist/ConceptStudio.app` includes the 2026-10-10 native UI
 refinement using Impeccable. Its design direction is recorded in [DESIGN.md](../DESIGN.md),
 with APP-BRIEF remaining the product authority. The owner supplied hakonfreyr.com as a quality

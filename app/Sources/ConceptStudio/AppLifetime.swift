@@ -15,7 +15,7 @@ extension StudioSession {
 
     func confirmClose() -> Bool {
         guard confirmDiscardCaptionDrafts() else { return false }
-        guard gpu.hasRunningPod || busy || gpu.isBusy else { return true }
+        guard gpu.hasRunningPod || busy || chatGPT.isBusy || gpu.isBusy else { return true }
         let alert = NSAlert()
         alert.messageText = gpu.hasRunningPod ? "Stop the rented computer before closing?" : "Cancel the current work?"
         alert.informativeText = gpu.hasRunningPod

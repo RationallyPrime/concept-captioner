@@ -2,6 +2,7 @@ import SwiftUI
 
 struct StudioRootView: View {
     @Bindable var session: StudioSession
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         Group {
@@ -14,9 +15,21 @@ struct StudioRootView: View {
         .tint(StudioStyle.accent)
         .frame(minWidth: 980, minHeight: 680)
         .background(WindowCloseGuard(session: session))
-        .alert("Something needs your attention", isPresented: Binding(
-            get: { session.errorMessage != nil }, set: { if !$0 { session.errorMessage = nil } }
-        )) { Button("OK") { session.errorMessage = nil } } message: { Text(session.errorMessage ?? "") }
+        .alert(
+            session.chatGPTUsageLimitReached ? "ChatGPT usage limit reached" : "Something needs your attention",
+            isPresented: Binding(
+                get: { session.errorMessage != nil },
+                set: { if !$0 { session.errorMessage = nil; session.chatGPTUsageLimitReached = false } }
+            )
+        ) {
+            if session.chatGPTUsageLimitReached {
+                Button("Manage usage") { openURL(StudioSession.chatGPTUsageURL) }
+                    .keyboardShortcut(.defaultAction)
+                Button("Close", role: .cancel) { session.errorMessage = nil }
+            } else {
+                Button("OK") { session.errorMessage = nil }
+            }
+        } message: { Text(session.errorMessage ?? "") }
     }
 
     private var journey: some View {
