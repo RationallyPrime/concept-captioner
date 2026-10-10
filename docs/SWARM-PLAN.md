@@ -106,6 +106,14 @@ preserve unresolved findings. Never put keys or private project material in the 
 
 ## Integration proof and final artifacts
 
+Current boundary: the app and GPU code have independent acceptance at `ad5c94c`; the complete
+Swift package passed 234 offline tests, strict lint/format and a refreshed unsigned bundle.
+Real Swift Hub upload/verify/download and native RunPod catalog/volume reads also passed.
+The pod owner has built/pushed all three images and proved authenticated control on one and
+two GPUs; real captioning/training, public distribution and final cost remain in progress.
+Local narrative-history candidates and decision sheets are being prepared against the accepted
+snapshot; equality to the eventual hardware/experiment tree is still pending.
+
 Connect the Mac to the verified agent through the provider proxy. Demonstrate the full shared
 data flow, user-configured endpoint/key behavior, observable failures, cancellation, cost
 controls, result publication and pod shutdown. Actual hardware behavior and API outcomes are
