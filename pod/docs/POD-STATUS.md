@@ -153,7 +153,7 @@ experiment. Local Job validation passed; real agent pull fetched 4 images / 4 ca
 
 Run `tiny-flux-proof-20261010` used gated `black-forest-labs/FLUX.1-dev` successfully,
 two steps, rank 2, resolution 256, batch 1, RunConfig sampling seed 42, lr 0.0001, sampling off.
-Training RNG was not explicitly set: pinned ai-toolkit reads `extra.train.training_seed`; the
+Training RNG was not explicitly set: pinned ai-toolkit reads `extra.training_seed`; the
 paired experiment sets that field separately. The ordinary
 wrapper config quantizes, uses adamw8bit, bf16 and gradient checkpointing; no extra override
 was required. It exited 0 at 18:53:51Z and saved step-1/final safetensors plus optimizer state.
