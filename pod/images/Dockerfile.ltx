@@ -62,6 +62,13 @@ RUN uv lock --directory /opt/ltx-2 \
  && /opt/venvs/ltx/bin/python -c "import torch, importlib.metadata as m; v = torch.__version__; assert v == '${LTX2_TORCH}', v; print('ltx-trainer', m.version('ltx-trainer'), 'ltx-core', m.version('ltx-core'), 'torch', v, 'natten', m.version('natten'))" \
  && uv pip freeze --python /opt/venvs/ltx/bin/python > /opt/venvs/ltx/freeze.txt
 
+# The wrapper writes curves through this trainer venv's torch.utils.tensorboard. LTX's
+# upstream workspace does not install TensorBoard; the agent venv's copy is isolated.
+# Exercise an actual CPU event write/read so an import-only check cannot miss that boundary.
+RUN uv pip install --python /opt/venvs/ltx/bin/python tensorboard \
+ && /opt/venvs/ltx/bin/python -c "import tempfile, importlib.metadata as m; from torch.utils.tensorboard import SummaryWriter; from tensorboard.backend.event_processing.event_accumulator import EventAccumulator; d = tempfile.TemporaryDirectory(); w = SummaryWriter(d.name); w.add_scalar('build/loss', 0.5, 1); w.close(); a = EventAccumulator(d.name); a.Reload(); e = a.Scalars('build/loss'); assert len(e) == 1 and e[0].step == 1 and e[0].value == 0.5, e; print('TensorBoard', m.version('tensorboard'), 'SummaryWriter CPU event: step 1, loss 0.5'); d.cleanup()" \
+ && uv pip freeze --python /opt/venvs/ltx/bin/python > /opt/venvs/ltx/freeze.txt
+
 # VERIFY on a pod (POD-SPEC §4.2): the preprocessing arguments (resolution buckets, caption field),
 # the trainer config keys, where checkpoints land and whether it logs to TensorBoard natively. The
 # trainer README recommends 80 GB of VRAM for the standard configs and ships a low-VRAM (INT8)
