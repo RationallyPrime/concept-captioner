@@ -14,9 +14,19 @@ curates, captions, publishes and watches.
 
 ## Who it is for
 
-Someone who has never trained a model. Every screen explains itself in a sentence, has one
-obvious next action, never shows a stack trace, and says what to do when something goes wrong.
-Money is always visible before it is spent.
+Someone with no programming or ML knowledge, using an ordinary MacBook. They bring photos and
+an intended result; no development environment or knowledge of model families is assumed.
+
+Throughout the project's lifetime, that person must be able to finish, and Hákon must find the
+same app useful enough to prefer it to running transformers in a terminal for convenience.
+Use guidance and sensible defaults for first runs; direct controls and remembered choices for
+efficient repeat runs. Keep model, skill, profile and training controls available without
+requiring beginners to configure everything or experts to repeat introductory guidance.
+
+Lead with intent: what should be learned, what should stay changeable, and what it costs.
+Explain necessary terms in place; require no outside research. Every screen explains itself
+in a sentence, has one obvious next action, gives actionable errors without stack traces, and
+shows money before spending it. Preserve meaningful control and inspectable project data.
 
 ## The user journey (one screen each, in this order)
 
@@ -73,6 +83,8 @@ double-clickable `.app`; signing and notarization are documented, not done.
 
 ## Done means
 
-Build, tests and lint green; the `.app` bundle builds; a first-time user can complete the whole
-journey in demo mode without a dead end; `app/docs/APP-STATUS.md` says what is really verified,
+Build, tests and lint green; the `.app` bundle builds; a user with no programming or ML knowledge
+can complete the whole journey in demo mode without outside research or a dead end; repeat
+users can reuse choices and reach the required controls without replaying introductory guidance;
+`app/docs/APP-STATUS.md` says what is really verified,
 what is fake-verified, what signing needs, and how to do a first run.
