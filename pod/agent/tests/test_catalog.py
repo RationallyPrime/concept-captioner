@@ -210,12 +210,17 @@ def test_vllm_secret_never_in_argv_and_redacted(paths: Paths) -> None:
         {"extra_args": ["--max-num-batched-tokens=abc"]},
         {"extra_args": ["--max-num-batched-tokens=-1"]},
         {"extra_args": ["--max-num-batched-tokens=8"]},
-        {"extra_args": ["--swap-space=1e9"]},
+        {"extra_args": ["--cpu-offload-gb=1e9"]},
         {"extra_args": ["--quantization=evil"]},
         {"extra_args": ["--quantization"]},
         {"extra_args": ["--revision=../../etc"]},
         {"extra_args": ["--limit-mm-per-prompt=image=4;id"]},
         {"extra_args": ["--limit-mm-per-prompt=/etc/passwd"]},
+        # Removed by the pinned vLLM 0.31; reject before a child can fail at argparse.
+        {"extra_args": ["--disable-log-requests"]},
+        {"extra_args": ["--disable-mm-preprocessor-cache"]},
+        {"extra_args": ["--max-seq-len-to-capture=8192"]},
+        {"extra_args": ["--swap-space=4"]},
         # fake-mode switches are unknown flags outside fake mode
         {"extra_args": ["--fail"]},
         {"extra_args": ["--ignore-sigterm"]},
@@ -247,7 +252,6 @@ GOOD_EXTRA_ARGS = [
     "--no-enable-chunked-prefill",
     "--enforce-eager",
     "--max-num-batched-tokens=8192",
-    "--swap-space=4",
     "--cpu-offload-gb=2.5",
     "--block-size=16",
     "--kv-cache-dtype=fp8",
@@ -257,7 +261,7 @@ GOOD_EXTRA_ARGS = [
     "--revision=refs/pr/3",
     "--seed=0",
     "--limit-mm-per-prompt=image=4,video=1",
-    "--disable-log-requests",
+    "--disable-log-stats",
     "--uvicorn-log-level=warning",
 ]
 

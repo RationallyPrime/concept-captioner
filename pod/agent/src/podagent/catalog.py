@@ -127,9 +127,7 @@ VLLM_EXTRA_FLAGS: dict[str, ExtraArgCheck] = {
     "--async-scheduling": _switch,
     "--disable-custom-all-reduce": _switch,
     "--max-num-batched-tokens": _int_arg(256, 1_048_576),
-    "--max-seq-len-to-capture": _int_arg(256, 1_048_576),
     "--max-parallel-loading-workers": _int_arg(1, 64),
-    "--swap-space": _float_arg(0, 128),
     "--cpu-offload-gb": _float_arg(0, 512),
     "--block-size": _choice("8", "16", "32", "64", "128"),
     "--kv-cache-dtype": _choice("auto", "fp8", "fp8_e4m3", "fp8_e5m2"),
@@ -148,9 +146,7 @@ VLLM_EXTRA_FLAGS: dict[str, ExtraArgCheck] = {
     "--limit-mm-per-prompt": _shaped(
         r"[a-z]+=[0-9]{1,4}(,[a-z]+=[0-9]{1,4})*", "modality=count[,modality=count]"
     ),
-    "--disable-mm-preprocessor-cache": _switch,
     # logging
-    "--disable-log-requests": _switch,
     "--disable-log-stats": _switch,
     "--uvicorn-log-level": _choice("debug", "info", "warning", "error", "critical", "trace"),
 }

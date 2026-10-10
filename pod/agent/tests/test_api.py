@@ -764,6 +764,30 @@ def test_failed_child_is_reported_and_can_be_restarted(
 # --- §2.6 start: the check order and its error codes ------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    "flag",
+    [
+        "--disable-log-requests",
+        "--disable-mm-preprocessor-cache",
+        "--max-seq-len-to-capture=8192",
+        "--swap-space=4",
+    ],
+)
+def test_vllm_removed_flags_rejected_before_spawn(client: TestClient, flag: str) -> None:
+    error = expect_error(
+        client.post(
+            "/services/vllm/start",
+            json={"gpus": [0], "params": vllm_params(extra_args=[flag])},
+        ),
+        422,
+        "invalid_params",
+    )
+    assert error["detail"][0]["loc"] == ["extra_args", 0]
+    assert client.get("/services/vllm").json()["state"] == "idle"
+    assert in_use(client) == [None, None]
+    assert client.get("/services/vllm/logs").status_code == 404
+
+
 def test_unknown_service_is_404_on_every_service_route(client: TestClient) -> None:
     body = {"gpus": [99], "params": {"bogus": 1}}
     for response in (
