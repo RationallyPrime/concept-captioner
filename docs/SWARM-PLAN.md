@@ -88,10 +88,10 @@ During key review, the core owner starts the Hub/thinking findings in separate f
 resolver edits wait until the key repair is accepted. Review a frozen change, then assess any
 later resolver delta. Do not let concurrent edits invalidate the review input.
 
-Dispatch only after Hákon's effort-setting change and launch instruction. Resolve the handoff's
-Opus/Sonnet coding-seat convention against actual available models before dispatch; do not
-silently substitute models. The coordinator handles integration and product decisions, keeps
-ownership explicit, and moves a free seat to necessary adjacent work when an outcome finishes.
+Dispatch only after Hákon's effort-setting change and launch instruction. Use Codex agents
+with the model assignment in the handoff's Conventions section. The coordinator handles
+integration and product decisions, keeps ownership explicit, and moves a free seat to necessary
+adjacent work when an outcome finishes.
 
 Each assignment names the user-visible outcome, owned paths, consumed contracts, focused
 checks and terminal artifact. Shared files have one writer. Authors do not accept their own

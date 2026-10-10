@@ -51,8 +51,8 @@ HTTP API, which both briefs point at.
 Python: `uv`, `pytest`, `ruff`. Swift: Swift 6, macOS 15, SwiftPM only, Yams the only
 dependency, Swift Testing, no network in tests. Keys come from the environment or the Keychain,
 never from config, never printed. Private material (market notes, outreach drafts) lives outside
-the repo. Orchestration, if any: coding on Opus or Sonnet; Fable only for judgement-heavy,
-coding-light steps.
+the repo. Orchestration: use Codex agents. Default to Sol for anything nontrivial, including
+implementation and independent review; use Luna for mechanical grunt work.
 
 ## Working style
 
