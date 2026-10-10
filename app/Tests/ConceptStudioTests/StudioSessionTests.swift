@@ -3,9 +3,80 @@ import ConceptCore
 import Foundation
 import Testing
 
+private actor ImageChoiceTransport: HTTPTransport {
+    private var stopped = false
+    private(set) var createdImages: [String] = []
+
+    func send(_ request: URLRequest) async throws -> HTTPResponse {
+        let url = try #require(request.url)
+        let body: String
+        if url.host() != "api.runpod.io" {
+            body = #"{"services":[]}"#
+        } else if url.path().contains("catalog/gpus") {
+            body = #"{"gpus":[{"id":"test","name":"Test GPU","memory":80,"secure":true,"#
+                + #""price":{"secure":1},"maxCount":{"secure":4},"#
+                + #""dataCenters":[{"id":"test","availability":"HIGH"}]}]}"#
+        } else if url.path().hasSuffix("network-volumes") {
+            body = #"{"networkVolumes":[{"id":"test","name":"Data","size":100,"dataCenter":"test"}]}"#
+        } else {
+            if url.path() == "/v2/pods", request.httpMethod == "POST" {
+                let payload = try JSONValue(parsing: #require(request.httpBody)).objectValue
+                try createdImages.append(#require(payload?["image"]?.stringValue))
+            }
+            if url.path().hasSuffix("action") { stopped = true }
+            body = "{\"id\":\"test\",\"status\":\"\(stopped ? "EXITED" : "RUNNING")\",\"cost\":1,"
+                + "\"gpu\":{\"count\":1}}"
+        }
+        return HTTPResponse(status: 200, body: Data(body.utf8))
+    }
+}
+
 @Suite("studio offline actions")
 @MainActor
 struct StudioSessionTests {
+    @Test(arguments: [nil, "", " \n\t", "ghcr.io/example/custom-{trainer}:chosen"] as [String?], ["aitoolkit", "ltx"])
+    func savedTrainingImageReachesTheSelectedTrainer(saved: String?, trainer: String) async throws {
+        let suite = "StudioSessionTests." + UUID().uuidString
+        let preferences = try #require(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        if let saved { preferences.set(saved, forKey: "podImage") }
+        let session = StudioSession(preferences: preferences)
+        let transport = ImageChoiceTransport()
+        session.gpu = GPUWorkspace(
+            demoMode: false, transport: transport, preferences: preferences, saveAgentToken: { _, _ in }
+        )
+        try session.gpu.configure(runpodKey: "fake", hubToken: "fake", imageName: session.podImageName)
+        session.gpu.trainer = trainer
+        await session.gpu.refreshOffers()
+        await session.gpu.rent()
+        let expected = if let saved, !saved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            saved.replacingOccurrences(of: "{trainer}", with: trainer)
+        } else {
+            "ghcr.io/rationallyprime/concept-captioner-pod-\(trainer):v0.1.0-verify20261010"
+        }
+        #expect(await transport.createdImages == [expected])
+        await session.gpu.stopEverything()
+    }
+
+    @Test(arguments: ["", " \n\t", "ghcr.io/example/custom:chosen"])
+    func changedTrainingImageIsRememberedImmediately(_ changed: String) throws {
+        let suite = "StudioSessionTests." + UUID().uuidString
+        let preferences = try #require(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        preferences.set("ghcr.io/example/previous:chosen", forKey: "podImage")
+        let session = StudioSession(preferences: preferences)
+        session.podImageName = changed
+        session.rememberChoices()
+        let loaded = StudioSession(preferences: preferences)
+        #expect(session.podImageName == loaded.podImageName)
+        #expect(preferences.string(forKey: "podImage") == session.podImageName)
+        if changed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            #expect(session.podImageName.contains("concept-captioner-pod-{trainer}:v0.1.0-verify20261010"))
+        } else {
+            #expect(session.podImageName == changed)
+        }
+    }
+
     @Test func startupRecoveryOnlyRoutesKnownRunningMetadata() throws {
         #expect(!StudioSession.startupNeedsPodRecovery(nil))
         for status in ["RUNNING", "STARTING", "EXITED", "ERROR", "TERMINATED"] {

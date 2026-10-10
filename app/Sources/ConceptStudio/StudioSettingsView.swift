@@ -52,9 +52,9 @@ struct StudioSettingsView: View {
                 }
                 TextField("User-configured vLLM server URL", text: $session.customBaseURL)
                 Text("The vLLM key goes only to this host. A downloaded job cannot redirect it.").font(.caption)
-                TextField("Project GPU container image", text: $session.podImageName)
+                TextField("Custom training image (optional)", text: $session.podImageName)
                 TextField("Existing RunPod network volume ID (optional)", text: $session.volumeID)
-                Text("Choose a verified ConceptStudio image before renting. Training images need CUDA 13 or newer.")
+                Text("The included training image is selected automatically. Clear and save an override to restore it.")
                     .font(.caption)
                 Button("Save preferences") {
                     session.rememberChoices(); session.configureGPU(); status = "Preferences saved."

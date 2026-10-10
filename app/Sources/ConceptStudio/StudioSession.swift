@@ -261,6 +261,7 @@ final class StudioSession {
     }
 
     func configureGPU() {
+        normalizePodImageChoice()
         gpu.triggerWords = project?.job.triggers.joined(separator: ",") ?? ""
         gpu.profile = project?.job.profile ?? "flux-image"
         if !gpu.hasRunningPod { gpu.trainer = gpu.profile == "ltx-image" ? "ltx" : "aitoolkit" }

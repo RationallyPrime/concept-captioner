@@ -1,10 +1,11 @@
 # POD-STATUS
 
-Current verification state as of 2026-10-10 20:00 UTC. Real agent, caption, trainer,
+Current verification state as of 2026-10-10 21:26 UTC. Real agent, caption, trainer,
 checkpoint/curve/Hub and GPU isolation proofs are recorded below. All three task-created
 pods are independently confirmed `EXITED`; no runtime work remains queued. The public
-base template is verified. Public trainer-image availability remains blocked, and the
-billing reads are partial posted amounts rather than a complete final charge. Source,
+base template and all three public images are verified; actual anonymous pulls succeeded.
+The latest billing read returns posted charges for all three stopped pods; the network
+volume continues billing. Source,
 fake execution, live functional execution and caption quality remain separate evidence.
 
 ## Implementation and local verification
@@ -60,8 +61,8 @@ All three CUDA images built and pushed on cx53. Base and ai-toolkit carry accept
 | image | final registry digest | bytes | publication |
 | --- | --- | --- | --- |
 | `ghcr.io/rationallyprime/concept-captioner-pod-base` | `sha256:e49e9d2de028ed8185d037b9dcf86ff8652a37923de660b26eb16c51d92c387a` | 10,290,568,891 | public; actual anonymous Docker pull succeeded with an empty isolated config |
-| `ghcr.io/rationallyprime/concept-captioner-pod-aitoolkit` | `sha256:6fcdd6259987203bed61913dd8585eae60a18dc28b184e2545b202fe9c4baf7b` | 14,147,141,514 | pushed, private; latest actual anonymous Docker pull rejected as unauthorized |
-| `ghcr.io/rationallyprime/concept-captioner-pod-ltx` | `sha256:1d346fa7b00de3e95168929d838e39d52206af057e8fc35b5cf1aff35794f6ea` | 13,896,513,451 | pushed, private; latest actual anonymous Docker pull rejected as unauthorized |
+| `ghcr.io/rationallyprime/concept-captioner-pod-aitoolkit` | `sha256:6fcdd6259987203bed61913dd8585eae60a18dc28b184e2545b202fe9c4baf7b` | 14,147,141,514 | public; actual anonymous Docker pull succeeded at 21:24:58Z with exact digest |
+| `ghcr.io/rationallyprime/concept-captioner-pod-ltx` | `sha256:1d346fa7b00de3e95168929d838e39d52206af057e8fc35b5cf1aff35794f6ea` | 13,896,513,451 | public; actual anonymous Docker pull succeeded at 21:25:00Z with exact digest |
 
 The initial live ai-toolkit proofs below used accepted source `c325cb4` under the same tag,
 with supported vLLM arguments. Their ai-toolkit digest was
@@ -91,10 +92,12 @@ The signed-in Chrome settings change made the base package public; REST read-bac
 anonymous Docker pull verified it, including a fresh anonymous pull after stage 5. The Mac
 was subsequently unlocked and the native app launched successfully, then computer-use
 transport failed with `Sky Computer Use native pipe closed before response`. Fresh bindings
-and resets did not recover it. This is the current browser blocker; trainer visibility
-still requires the authorized settings change, with settings at
-`https://github.com/users/RationallyPrime/packages/container/concept-captioner-pod-aitoolkit/settings`
-and the corresponding `concept-captioner-pod-ltx/settings` path.
+and resets did not recover it. The user subsequently made both trainer packages public,
+and the parent independently read GitHub API visibility `public` for each. Fresh anonymous
+pulls on cx53 at 21:24:57Z–21:25:00Z verified both exact published trainer digests and
+their OCI revisions (`92136b1` ai-toolkit, `de6f152` LTX). The isolated Docker configuration
+was empty before and after both pulls; no registry login or GPU/container launch was used.
+Trainer public distribution is now verified despite the earlier browser transport failure.
 
 ## Live resources and cost state
 
@@ -104,9 +107,9 @@ and datasets remain on that volume; no volume or output has been terminated/dele
 
 | pod | hardware actually observed | compute rate | state at this update |
 | --- | --- | --- | --- |
-| `iqs4zrmjf097hf` | 1 × RTX PRO 4500 Blackwell; 32,623 MiB VRAM, 62 GB RAM, 12 vCPU, CUDA 13.2 | $0.72/hour | `EXITED`; final independent read 19:58:55Z |
-| `q833ws7hsuyrqn` | 2 × RTX PRO 4500 Blackwell; distinct GPU UUIDs, 32,623 MiB each, 125 GB RAM, 56 vCPU, CUDA 13.2 | $1.44/hour | native stop 19:58:06Z, fresh native `EXITED` 19:58:07Z, independent read 19:58:55Z |
-| `ey4f2374hd3y62` | A100 PCIe 80 GB; 117 GB RAM, 31 vCPU, CA-MTL-3, CUDA 13.2 | $1.79/hour | cancelled experiment; stopped/read back `EXITED` 19:28:52Z, independently rechecked 19:58:55Z |
+| `iqs4zrmjf097hf` | 1 × RTX PRO 4500 Blackwell; 32,623 MiB VRAM, 62 GB RAM, 12 vCPU, CUDA 13.2 | $0.72/hour | `EXITED`; latest independent read 21:26:38Z |
+| `q833ws7hsuyrqn` | 2 × RTX PRO 4500 Blackwell; distinct GPU UUIDs, 32,623 MiB each, 125 GB RAM, 56 vCPU, CUDA 13.2 | $1.44/hour | native stop 19:58:06Z, fresh native `EXITED` 19:58:07Z, latest independent read 21:26:38Z |
+| `ey4f2374hd3y62` | A100 PCIe 80 GB; 117 GB RAM, 31 vCPU, CA-MTL-3, CUDA 13.2 | $1.79/hour | cancelled experiment; stopped/read back `EXITED` 19:28:52Z, latest independent read 21:26:38Z |
 
 The two training pods each had 50 GB container disk; the cancelled A100 had 100 GB.
 Container disk is ephemeral and is lost on stop/restart. Its published rate applies while
@@ -121,19 +124,27 @@ the pre-repair LTX image and restarted for the initial trainer proof; agent boot
 the repaired image was refused by its original host's GPU capacity, so the existing pair
 resumed at 19:33:30Z for the remaining useful work. No extra replacement pod was created.
 
-At 20:00:31Z exact-resource billing reads for the aligned 17:00–21:00 window returned:
+At 21:25:58Z exact-resource billing reads for the aligned 17:00–22:00 window returned:
 
 | resource | records returned | posted USD |
 | --- | --- | --- |
-| one-GPU pod `iqs4zrmjf097hf` | 18:00 and 19:00 buckets | 0.3690129272872582 |
-| two-GPU pod `q833ws7hsuyrqn` | 18:00 bucket only | 0.14567590539809316 |
-| cancelled A100 `ey4f2374hd3y62` | none yet | no posted amount; not a free-compute claim |
-| network volume `nydku2wmvd` | 18:00 and 19:00 buckets | 0.03888889029622078 |
+| one-GPU pod `iqs4zrmjf097hf` | 18:00 and 19:00 buckets | 0.6336929417448118 |
+| two-GPU pod `q833ws7hsuyrqn` | 18:00, 19:00 and 20:00 buckets | 0.7390690299216658 |
+| cancelled A100 `ey4f2374hd3y62` | 19:00 bucket | 0.05853498727083206 |
+| network volume `nydku2wmvd` | 18:00, 19:00 and 20:00 buckets | 0.05833333544433117 |
 
-The currently posted task subtotal is **$0.5535777229815722**. It is incomplete: the pair's
-19:00 restart period and the cancelled A100 have not appeared in these reads. Rates and
-elapsed-time projections are separate from billing records. Rate fields on an `EXITED` pod
-do not establish active compute billing. No pre-existing account resource was changed.
+The returned pod total is **$1.4312969589373097**; including posted network storage, the
+task total is **$1.4896302943816409**. All three stopped pods now have returned charges,
+closing the earlier missing-record limitation. The network volume continues to accrue
+storage charges after this read. The original 20:00:31Z partial receipt, subtotal
+$0.5535777229815722, is preserved rather than overwritten.
+
+RunPod assigned $0.052838001400232315 of the pair's GPU charge to its 20:00–21:00 bucket.
+The actual native stop and EXITED reads were at 19:58Z, and fresh independent reads at
+21:26:38Z still show all three EXITED. These are the provider's returned billing buckets;
+no later workload is inferred from their attribution. Rates and elapsed-time projections
+remain separate from these recorded amounts. Rate fields on an `EXITED` pod do not
+establish active compute billing. No pre-existing account resource was changed.
 
 ## Verified on a real pod
 
@@ -143,8 +154,9 @@ and pushed all images and passed fake compose; stages 2–3 exercised authentica
 agents and vision captioning; stage 4 produced both trainers' checkpoints, curves and Hub
 roundtrips; stage 5 demonstrated sequential release and simultaneous isolated GPU
 residency; stage 6 verified the public base template/image/token requirement; stage 7 is
-this evidence and cost report. Trainer images remain private, and simultaneous caption
-computation during training was not established by the delayed native request.
+this evidence and cost report. All three images are now public and anonymously pullable;
+simultaneous caption computation during training was not established by the delayed native
+request.
 
 ## Agent, topology and VRAM proof
 
@@ -203,7 +215,8 @@ notes and rejected outputs are retained as cancelled work, not training evidence
 briefly allocated A100 pod `ey4f2374hd3y62` was stopped and freshly read back `EXITED` at
 19:28:52Z; its pending local server-start wait was cancelled (exit 130), and no 32B caption
 batch executed. Creation-to-stop elapsed 117.223 seconds at $1.79/hour, a rate projection of
-$0.0582859 compute; exact billing still has no finalized record. Its 100 GB scratch container
+$0.0582859 compute; the later exact billing read returned $0.05853498727083206 for this pod.
+Its 100 GB scratch container
 disk had no network/persistent mount and was lost on stop. The stopped pod configuration
 is retained; the pod was not terminated/deleted.
 The broader experiment is deferred until this evening with a rational dataset and statistical
@@ -354,7 +367,9 @@ Principal local receipts:
 
 - `final-stopped-template-receipt.json`: independent final three-pod EXITED states, final
   template read-back and storage scope; `final-task-billing-receipt.json`: exact resource
-  billing records, partial subtotal and separately labeled A100 elapsed-rate projection.
+  billing records from 20:00:31Z, partial subtotal and separately labeled A100 elapsed-rate
+  projection; `task-billing-refresh-2125-receipt.json`: later returned charges for all three
+  pods plus network storage and fresh 21:26:38Z EXITED reads.
 - `flux-hub-receipt.json`, `ltx-hub-receipt.json`, `ltx-default-hub-receipt.json`: downloaded
   checkpoint lengths, hashes and tensor headers; the adjacent directories contain weights.
 - `flux-tensorboard-curve.json`, `ltx-default-tensorboard-curve.json`, and
@@ -363,6 +378,9 @@ Principal local receipts:
   and actual different-service reservation rejection.
 - `ltx-tensorboard-review-build.log`, `vllm-removed-flags-source-probe.json` and
   `package-base-public.jpg`: causal repair/build, installed-wheel and public-package proof.
+- `trainer-public-anonymous-pull-receipt.json`: successful anonymous pulls of both exact
+  final trainer tags, matching digests/OCI revisions, empty isolated Docker config and
+  corresponding cx53 pull-log paths.
 
 Native receipts are separately at `/tmp/concept-captioner-swift-agent-flux-read.json`,
 `/tmp/concept-captioner-swift-agent-ltx-read.json`,
@@ -370,10 +388,10 @@ Native receipts are separately at `/tmp/concept-captioner-swift-agent-flux-read.
 `/tmp/concept-captioner-swift-native-stop.json`. The final native stop proved actual app
 `RunPodProvider` status/stop/status, all HTTP 200, before independent MCP verification.
 
-The remaining distribution blocker is trainer public visibility and successful anonymous
-pulls. The current GUI transport failure prevents the already-authorized settings changes.
-Final settled task-only cost is delayed in billing; partial posted amounts are preserved
-without treating missing records as zero spend. No paid pod remains active or useful runtime
+The public-distribution blocker is closed by both successful anonymous trainer pulls.
+The refreshed task-only billing read returns charges for all three stopped pods, with the
+earlier partial receipt preserved. Only the retained network volume continues billing.
+No paid pod remains active or useful runtime
 work queued. Real parquet transfer, FLUX resume and manual crash recovery remain unproven
 historical checks. The five-image experiment is cancelled/deferred by the user; no rejected
 caption batch was promoted into training data. All tiny trainer runs are functional proof

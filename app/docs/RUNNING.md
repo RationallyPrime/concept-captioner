@@ -59,8 +59,9 @@ choose a captioning computer** on Captioning, rent one on GPU pods, then return 
 **Start caption server and use this computer**. That action starts through the control agent
 and verifies the authenticated vLLM model endpoint. The app binds the in-memory pod token to
 that user-selected endpoint; it is never copied into `job.yaml`. Caption and publish before
-starting training on a one-GPU computer. Select a verified project container image in Advanced
-Settings before creating a real pod.
+starting training on a one-GPU computer. ConceptStudio automatically selects the included
+training image for the chosen trainer. A custom training image is optional in Advanced
+Settings; clearing the override and saving restores the included image.
 
 The included models use GPUs with at least 32 GB of memory. The app also requests at least
 60 GB of host RAM per GPU for model loading. Its LTX defaults use 8-bit text-encoder loading,

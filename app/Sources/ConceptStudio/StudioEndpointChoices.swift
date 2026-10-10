@@ -3,6 +3,15 @@ import Foundation
 
 @MainActor
 extension StudioSession {
+    static let defaultPodImageName =
+        "ghcr.io/rationallyprime/concept-captioner-pod-{trainer}:v0.1.0-verify20261010"
+
+    func normalizePodImageChoice() {
+        if podImageName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            podImageName = Self.defaultPodImageName
+        }
+    }
+
     var vllmTargetURL: String {
         requestBaseURL.isEmpty ? customBaseURL : requestBaseURL
     }
@@ -19,6 +28,7 @@ extension StudioSession {
         customBaseURL = preferences.string(forKey: "vllmBaseURL") ?? ""
         repoID = preferences.string(forKey: "hubRepo") ?? ""
         podImageName = preferences.string(forKey: "podImage") ?? ""
+        normalizePodImageChoice()
         volumeID = preferences.string(forKey: "volumeID") ?? ""
         requestBaseURL = ""
         criticRequestBaseURL = ""

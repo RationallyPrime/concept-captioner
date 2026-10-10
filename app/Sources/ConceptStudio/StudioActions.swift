@@ -288,6 +288,7 @@ extension StudioSession {
 
     func rememberChoices() {
         guard !demoMode else { return }
+        normalizePodImageChoice()
         for (key, value) in [
             "endpointKind": endpointKind,
             "modelName": modelName,

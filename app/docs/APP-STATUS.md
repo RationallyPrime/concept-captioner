@@ -1,10 +1,13 @@
 # ConceptStudio app status
 
 Development preview prepared on 2026-10-10 at `app/dist/ConceptStudio.app`. It was built and
-its bundle metadata validated. The first agent-driven GUI launch reached Welcome and the
-demo Images screen, with three bundled photos and all nine navigation entries visible.
-The computer-control connection then failed; the app process remained running, but the
-remaining interactive walkthrough is unverified. The app is an
+its bundle metadata validated. Agent-driven GUI checks reached Welcome, demo Images and
+Concepts, with all nine navigation entries visible. Concepts showed the reference image,
+Learn/Describe boundary, guidance and next action at 1240 × 820 without obvious clipping.
+The user confirmed that Next: Concepts works and the app responds normally. Native control
+then disconnected again on the first attempted navigation, while the Mac was unlocked and
+the app remained running. This is a tool-transport failure, not an observed app crash;
+Mapping through Monitor and the complete interactive walkthrough remain unverified. The app is an
 unsigned macOS 15+ Swift 6 / SwiftUI executable, with SwiftPM and Yams as its only third-party
 dependency. `scripts/build-app.sh` produces the bundle; `RUNNING.md` covers first run and
 distribution requirements.
@@ -35,10 +38,11 @@ rental and a user action to start and select the authenticated app-created vLLM 
 one-GPU user can caption before training. Its pod token remains outside the job. Closing waits
 for local cancellation and confirmed provider stop before releasing project folder access.
 
-The trainer containers are built and tested but their GitHub packages remain private.
-The Advanced image field therefore still requires manual configuration; a working public
-default image for a fresh installation is pending their visibility change and anonymous pull
-verification. This is an unfinished first-run requirement, not a completed rental experience.
+Both trainer containers are public and passed anonymous pulls of the exact verified image
+digests on 2026-10-10 at 21:25 UTC. A fresh installation now automatically selects the included
+image for the chosen trainer. Missing or blank image preferences use that default; a nonblank
+custom image is preserved. Clearing and saving an Advanced override restores the included
+image immediately. No registry setup is required for the included images.
 
 Demo model outcomes include written, unusable, rejected and failed; Core supplies unmapped,
 skipped and protected-final outcomes. The model, assistance, publish and GPU demo actions use
@@ -86,9 +90,15 @@ Both trainers retain the existing caption-server start/reuse behavior. Rental no
 at least 32 GB per GPU and requests a 60 GB host-RAM placement floor per GPU. This avoids
 offering devices too small for the included Qwen 8B server; it is not a guarantee for arbitrary
 models or datasets. The focused GPU suite passes 13 tests, with independent acceptance of
-the frozen change. The current integration passes all 236 Swift tests (29 app/GPU and 207
+the frozen change. That integration passed all 236 Swift tests (29 app/GPU and 207
 Core), strict lint and formatting; the unsigned preview bundle was rebuilt and its metadata
 and entitlement plist validated.
+
+The public-image default change then passed seven focused action tests, including eight
+cases observing the actual native create request for both trainers with missing, blank or
+custom preferences, and three save/reset cases. Parent review accepted the scoped change.
+The latest integration passes 238 Swift tests (31 app/GPU and 207 Core), strict lint and
+formatting. The unsigned preview is rebuilt with the automatic image choice.
 
 The automated action tests above are headless checks. Complete pixel-layout and interactive
 keyboard/VoiceOver coverage remain pending. Keychain save/read, Apple Photos/iCloud selection,

@@ -108,22 +108,24 @@ preserve unresolved findings. Never put keys or private project material in the 
 
 Current boundary: the initial app and GPU implementation have independent acceptance, and
 the measured caption-server settings and reuse repair are published. The latest integration
-passes 236 offline Swift tests, strict lint/format and a refreshed unsigned bundle.
+passes 238 offline Swift tests, strict lint/format and a refreshed unsigned bundle.
 Real Swift Hub upload/verify/download, native RunPod catalog/volume reads, and one direct
-Gemini structured caption request also passed. The GUI reached Welcome and demo Images
-before the computer-control connection failed; the remaining interactive journey is pending.
+Gemini structured caption request also passed. The GUI reached Welcome, demo Images and
+Concepts; the user confirmed the app responds normally. Native control disconnects on input,
+so the remaining interactive journey is pending.
 The pod owner built/pushed all three images and proved authenticated control on one and
 two GPUs. Real open-weights Python and Swift caption requests passed. Both tiny trainers
 produced checkpoints, readable curves and downloaded Hub LoRAs; native app code decoded an
 actual loss point from each. Caption quality has not passed the experiment's boundary review.
 The two-GPU run recorded simultaneous service residency on separate physical devices and
 rejected double-booking. Its final caption request ran after training exited, so simultaneous
-inference during training remains unproved. The base image is anonymously pullable and its
-RunPod template is public. The native provider performed the final stop, and all three task-created pods were
-independently confirmed EXITED. Billing has posted a partial $0.553577723, with later charges
-still delayed; the retained network volume costs $14/month. Trainer-image public visibility
-and the GUI-control connection remain external blockers, including the app's first-run image
-default. The local narrative history, decision sheets and exact-tree receipt live in the
+inference during training remains unproved. All three images are anonymously pullable and
+the base RunPod template is public. The app now selects its included trainer image by default,
+preserving custom overrides. The native provider performed the final stop, and all three
+task-created pods were independently confirmed EXITED. The latest billing read returns
+$1.431296959 for the pods and $1.489630294 including posted network storage; the retained
+network volume costs $14/month. The GUI-control connection remains an external blocker.
+The local narrative history, decision sheets and exact-tree receipt live in the
 sibling notes repository; that repository must not be published before the walkthrough.
 The five-image comparison configs had independent offline acceptance,
 but Hákon rejected that dataset as too small; neither treatment was trained. That proposed

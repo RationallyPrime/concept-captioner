@@ -1,9 +1,10 @@
 # images
 
 Container images for the pod (POD-SPEC §6). All three CUDA images have been built and pushed
-on cx53 with `docker buildx build --platform=linux/amd64`; the base image has passed an
-anonymous pull. Live agent, vLLM and tiny FLUX execution are recorded in
-`../docs/POD-STATUS.md`, alongside the pending LTX and publication checks. Docker is not
+on cx53 with `docker buildx build --platform=linux/amd64`; all three public images have passed
+actual anonymous pulls, including both exact trainer digests on 2026-10-10 at 21:25 UTC.
+Live agent, vLLM, tiny FLUX/LTX checkpoints, curves, Hub roundtrips and final publication
+receipts are recorded in `../docs/POD-STATUS.md`. Docker is not
 available on the development Mac, so builds use the existing build host.
 
 | file | purpose |
