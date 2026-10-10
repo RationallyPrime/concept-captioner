@@ -120,10 +120,18 @@ of one actual FLUX point and authenticated control reads; no GUI was launched or
 no resource actions were made, and existing tests remain network-free. The token was read
 only inside the probe and was not printed or retained in the receipt.
 
-LTX curve decoding remains unproved. The pod-stream owner reported that the completed LTX
-run produced no TensorBoard events because its trainer environment lacked TensorBoard.
-A separate native LTX read awaits that image repair and an actual loss scalar; the FLUX
-point does not establish LTX curve behavior.
+After the pod-stream owner repaired the LTX image's missing TensorBoard dependency,
+a separate native read completed at 19:46:04–19:46:05 UTC against the owned two-GPU
+`q833ws7hsuyrqn` agent. Exactly one authenticated
+`GET /runs/tiny-ltx-default-proof-20261010/events` returned HTTP 200. The actual
+`PodAgentClient.latest()` decoded `TrainingPoint(step: 2, loss: 0.04809999838471413)`,
+exactly matching the real `scraped/loss` scalar. The response also contained `scraped/lr`.
+Captured native source copies and executable hashes matched after the read, and the
+pod owner was promptly notified that no Swift calls remained.
+
+Native loss-point decoding is now demonstrated for both actual FLUX and LTX runs.
+These receipts do not establish GUI rendering, a complete training curve or training
+quality. Existing tests remain network-free; the native reads made no resource actions.
 
 ## Live direct Gemini proof, 2026-10-10
 

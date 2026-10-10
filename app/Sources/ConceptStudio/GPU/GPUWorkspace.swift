@@ -239,10 +239,6 @@ final class GPUWorkspace {
         }
     }
 
-    func noteActivity() {
-        lastActivity = Date()
-    }
-
     func train(datasetRepo: String) async {
         await perform {
             guard let agent = self.agent, self.hasRunningPod else {
@@ -287,6 +283,9 @@ final class GPUWorkspace {
                 "learning_rate": .double(self.learningRate), "resolution": .int(512),
                 "save_every": .int(min(250, self.steps)), "sample_every": .int(0),
             ]
+            if self.trainer == "ltx" {
+                params["extra"] = .object(Self.ltxTrainingExtra)
+            }
             if !self.outputRepo.isEmpty {
                 params["hub"] = .object([
                     "repo_id": .string(self.outputRepo),
@@ -437,13 +436,30 @@ final class GPUWorkspace {
 }
 
 extension GPUWorkspace {
+    static let minimumGPUMemoryGB = 32
+    private static let ltxTrainingExtra: JSONObject = [
+        "optimization": .object(["optimizer_type": .string("adamw8bit")]),
+        "acceleration": .object([
+            "quantization": .string("int8-quanto"),
+            "load_text_encoder_in_8bit": .bool(true),
+            "offload_optimizer_during_validation": .bool(true),
+        ]),
+        "preprocess": .object(["args": .array([
+            .string("--load-text-encoder-in-8bit"), .string("--vae-tiling"), .string("--skip-audio"),
+        ])]),
+    ]
+
+    func noteActivity() {
+        lastActivity = Date()
+    }
+
     var quotedHourlyRate: Double {
         (availableOffers.first(where: { $0.id == selectedGPU })?.price.secure ?? 0) * Double(gpuCount)
     }
 
     var availableOffers: [GPUOffer] {
         guard let volume = volumes.first(where: { $0.id == selectedVolume }) else { return [] }
-        return offers.filter { $0.isAvailable(in: volume.dataCenter) }
+        return offers.filter { $0.memory >= Self.minimumGPUMemoryGB && $0.isAvailable(in: volume.dataCenter) }
     }
 
     func selectAvailableOffer() {

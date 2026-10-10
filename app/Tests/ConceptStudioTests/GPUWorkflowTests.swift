@@ -105,8 +105,8 @@ struct GPUWorkflowTests {
         #expect(params["extra_args"] == .array([.string("--enforce-eager"), .string("--max-num-batched-tokens=4096")]))
     }
 
-    @MainActor @Test(arguments: [false, true])
-    func concurrentTrainingStartsOrReusesCaptionServer(_ captionEarlier: Bool) async throws {
+    @MainActor @Test(arguments: [false, true], ["aitoolkit", "ltx"])
+    func concurrentTrainingStartsOrReusesCaptionServer(_ captionEarlier: Bool, trainerName: String) async throws {
         let suite = "GPUWorkflowTests." + UUID().uuidString
         let preferences = try #require(UserDefaults(suiteName: suite))
         defer { preferences.removePersistentDomain(forName: suite) }
@@ -116,6 +116,7 @@ struct GPUWorkflowTests {
         )
         try workspace.configure(runpodKey: "provider-only", hubToken: "hub-only", imageName: "test")
         workspace.gpuCount = 2
+        workspace.trainer = trainerName
         if !captionEarlier { workspace.captionModel = "Qwen/alternate-caption-model" }
         workspace.keepCaptionServer = true
         await workspace.refreshOffers()
@@ -126,9 +127,26 @@ struct GPUWorkflowTests {
         let captionStarts = starts.filter { $0.url?.path() == "/services/vllm/start" }
         #expect(captionStarts.count == 1)
         try expectCaptionStart(#require(captionStarts.first), model: workspace.captionModel)
-        let trainer = try #require(starts.first { $0.url?.path() == "/services/trainer-aitoolkit/start" })
+        let trainer = try #require(starts.first { $0.url?.path() == "/services/trainer-\(trainerName)/start" })
         let body = try JSONValue(parsing: #require(trainer.httpBody)).objectValue
         #expect(body?["gpus"] == .array([.int(1)]))
+        let params = try #require(body?["params"]?.objectValue)
+        #expect(params["resolution"]?.intValue == 512)
+        #expect(params["rank"]?.intValue == 16)
+        if trainerName == "ltx" {
+            #expect(params["base_model"]?.stringValue == "Lightricks/LTX-2")
+            let extra = try #require(params["extra"]?.objectValue)
+            #expect(extra["optimization"] == .object(["optimizer_type": .string("adamw8bit")]))
+            #expect(extra["acceleration"] == .object([
+                "quantization": .string("int8-quanto"), "load_text_encoder_in_8bit": .bool(true),
+                "offload_optimizer_during_validation": .bool(true),
+            ]))
+            #expect(extra["preprocess"] == .object(["args": .array([
+                .string("--load-text-encoder-in-8bit"), .string("--vae-tiling"), .string("--skip-audio"),
+            ])]))
+        } else {
+            #expect(params["extra"] == nil)
+        }
         #expect(workspace.trainingState == "running")
         await workspace.stopEverything()
     }
@@ -172,6 +190,28 @@ struct GPUWorkflowTests {
         workspace.offers[0].dataCenters = [.init(id: "demo", availability: "NONE")]
         workspace.selectAvailableOffer()
         #expect(workspace.availableOffers.isEmpty)
+    }
+
+    @MainActor @Test
+    func undersizedGPUsCannotBeRentedForTheIncludedModels() async {
+        let workspace = GPUWorkspace(demoMode: true)
+        await workspace.refreshOffers()
+        workspace.offers = [24, 32].map { memory in
+            GPUOffer(
+                id: "gpu-\(memory)", name: "GPU", memory: memory, secure: true,
+                price: .init(secure: 1), maxCount: .init(secure: 4), availability: "HIGH",
+                dataCenters: [.init(id: "demo", availability: "HIGH")]
+            )
+        }
+        #expect(workspace.availableOffers.map(\.id) == ["gpu-32"])
+        workspace.selectedGPU = "gpu-24"
+        await workspace.rent()
+        #expect(workspace.pod == nil)
+        workspace.selectAvailableOffer()
+        #expect(workspace.selectedGPU == "gpu-32")
+        await workspace.rent()
+        #expect(workspace.hasRunningPod)
+        await workspace.stopEverything()
     }
 
     @MainActor @Test
@@ -354,6 +394,7 @@ struct GPUWorkflowTests {
         let body = try JSONValue(parsing: #require(request.httpBody)).objectValue
         #expect(body?["gpu"]?.objectValue?["count"]?.intValue == 2)
         #expect(body?["gpu"]?.objectValue?["minCudaVersion"]?.stringValue == "13.0")
+        #expect(body?["gpu"]?.objectValue?["minRamPerGpu"]?.intValue == 60)
         #expect(body?["ports"]?.arrayValue?.compactMap(\.stringValue) == ["8800/http", "8000/http"])
         #expect(body?["mounts"]?.objectValue?["network"]?.arrayValue?.first?.objectValue?["path"]?.stringValue
             == "/workspace")

@@ -65,6 +65,8 @@ struct GPUJourneyView: View {
                     }
                 }
                 .disabled(workspace.hasRunningPod)
+                Text("Showing GPUs with at least \(GPUWorkspace.minimumGPUMemoryGB) GB to fit the included models.")
+                    .font(.callout).foregroundStyle(.secondary)
                 Button("Refresh prices and availability") { Task { await workspace.refreshOffers() } }
                     .disabled(workspace.isBusy)
             }

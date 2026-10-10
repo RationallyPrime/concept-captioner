@@ -1,8 +1,10 @@
 # ConceptStudio app status
 
 Development preview prepared on 2026-10-10 at `app/dist/ConceptStudio.app`. It was built and
-its bundle metadata validated. The first agent-driven GUI launch has now reached Welcome;
-the offline demo walkthrough is in progress. The app is an
+its bundle metadata validated. The first agent-driven GUI launch reached Welcome and the
+demo Images screen, with three bundled photos and all nine navigation entries visible.
+The computer-control connection then failed; the app process remained running, but the
+remaining interactive walkthrough is unverified. The app is an
 unsigned macOS 15+ Swift 6 / SwiftUI executable, with SwiftPM and Yams as its only third-party
 dependency. `scripts/build-app.sh` produces the bundle; `RUNNING.md` covers first run and
 distribution requirements.
@@ -72,6 +74,16 @@ The full 234-test result above remains the earlier integration boundary. These s
 establish app wiring, not caption quality; the live experiment has rejected the initial 8B
 captions for describing traits that its job reserves for the concept.
 
+The next measured-defaults change adds the successful LTX 8-bit optimizer, quantization,
+text-encoder loading and tiled image-preparation settings to the actual training request.
+Both trainers retain the existing caption-server start/reuse behavior. Rental now requires
+at least 32 GB per GPU and requests a 60 GB host-RAM placement floor per GPU. This avoids
+offering devices too small for the included Qwen 8B server; it is not a guarantee for arbitrary
+models or datasets. The focused GPU suite passes 13 tests, with independent acceptance of
+the frozen change. The current integration passes all 236 Swift tests (29 app/GPU and 207
+Core), strict lint and formatting; the unsigned preview bundle was rebuilt and its metadata
+and entitlement plist validated.
+
 The automated action tests above are headless checks. Complete pixel-layout and interactive
 keyboard/VoiceOver coverage remain pending. Keychain save/read, Apple Photos/iCloud selection,
 real security-scoped bookmark restoration, live model requests, live Hub import/publication,
@@ -91,8 +103,12 @@ authenticated HTTP. All four requests returned 200. The same `TrainingPoint` con
 Monitor decoded step 2 and loss 0.05031000077724457, matching the real event scalar.
 Source hashes were checked after the calls. This establishes native control reads and curve
 decoding; it does not establish rendered chart interaction. The first live LTX run saved
-checkpoints but lacked TensorBoard in its trainer environment, so its curves await a repaired
-image and a fresh run.
+checkpoints but lacked TensorBoard in its trainer environment. After that dependency was
+added to the image, a fresh 512-pixel, rank-16 LTX run completed two steps on one visible
+32 GB GPU in a two-GPU pod. One authenticated native events request at 19:46 UTC decoded
+step 2 and loss 0.04809999838471413, exactly matching its real `scraped/loss` scalar.
+Both trainers now have actual native loss-point decoding evidence. Neither probe establishes
+rendered chart interaction or training quality.
 
 The preview is unsigned and not notarized. Signing, notarization, sandbox runtime checks and
 distribution approval remain external release work described in `RUNNING.md`. This file does

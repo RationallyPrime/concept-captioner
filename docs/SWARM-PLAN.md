@@ -106,16 +106,20 @@ preserve unresolved findings. Never put keys or private project material in the 
 
 ## Integration proof and final artifacts
 
-Current boundary: the app and GPU code have independent acceptance at `ad5c94c`; the complete
-Swift package passed 234 offline tests, strict lint/format and a refreshed unsigned bundle.
-Real Swift Hub upload/verify/download and native RunPod catalog/volume reads also passed.
-The pod owner has built/pushed all three images and proved authenticated control on one and
-two GPUs. Real Python and Swift caption requests passed; the first tiny FLUX run produced
-checkpoints, readable curves and a downloaded Hub LoRA. Caption quality has not passed the
-experiment's boundary review. LTX training, concurrent device isolation, public distribution
-and final cost remain in progress. Four local narrative commits and their decision sheets
-were tested and accepted against the app snapshot; equality to the eventual hardware/experiment
-tree is still pending. The five-image comparison configs had independent offline acceptance,
+Current boundary: the initial app and GPU implementation have independent acceptance, and
+the measured caption-server settings and reuse repair are published. The latest integration
+passes 236 offline Swift tests, strict lint/format and a refreshed unsigned bundle.
+Real Swift Hub upload/verify/download, native RunPod catalog/volume reads, and one direct
+Gemini structured caption request also passed. The GUI reached Welcome and demo Images
+before the computer-control connection failed; the remaining interactive journey is pending.
+The pod owner built/pushed all three images and proved authenticated control on one and
+two GPUs. Real open-weights Python and Swift caption requests passed. Both tiny trainers
+produced checkpoints, readable curves and downloaded Hub LoRAs; native app code decoded an
+actual loss point from each. Caption quality has not passed the experiment's boundary review.
+Concurrent device isolation, trainer-image public visibility and final cost remain in progress.
+Four local narrative commits and their decision sheets were tested and accepted against the
+earlier app snapshot; equality to the eventual verified tree is still pending.
+The five-image comparison configs had independent offline acceptance,
 but Hákon rejected that dataset as too small; neither treatment was trained. That proposed
 comparison is superseded, not ready to run.
 

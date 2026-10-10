@@ -62,6 +62,13 @@ that user-selected endpoint; it is never copied into `job.yaml`. Caption and pub
 starting training on a one-GPU computer. Select a verified project container image in Advanced
 Settings before creating a real pod.
 
+The included models use GPUs with at least 32 GB of memory. The app also requests at least
+60 GB of host RAM per GPU for model loading. Its LTX defaults use 8-bit text-encoder loading,
+quantized training, an 8-bit optimizer and tiled image preparation. A two-step 512-pixel,
+rank-16 LTX run succeeded on one 32 GB GPU with a 125 GB host; a smaller 256-pixel, rank-2 run
+succeeded with a 62 GB host. Those checks establish execution, not training quality or a
+universal memory guarantee for other models and datasets.
+
 Publishing sends training photos and sidecars at the dataset root, imagefolder metadata, and
 `concept-captioner/job.yaml` in one Hub commit. The image names remain the shared sample IDs.
 Reference faces stay local so the Hub and pod readers cannot mistake them for training photos.

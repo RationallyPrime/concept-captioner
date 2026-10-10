@@ -101,6 +101,7 @@ struct RunPodProvider: GPUProvider {
                 "id": .string(request.offer.id),
                 "count": .int(request.count),
                 "minCudaVersion": .string("13.0"),
+                "minRamPerGpu": .int(60),
             ]),
             "disk": .int(50),
             "dataCenterIds": .array([.string(request.volume.dataCenter)]),
