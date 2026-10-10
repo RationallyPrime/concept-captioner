@@ -1,8 +1,9 @@
 """Contract of ``images/compose.fake.yaml`` (POD-SPEC §6.3).
 
 The compose stack is the only way to drive the agent the way the app does without a pod, so
-it must publish the three HTTP ports the app expects (agent, vLLM, TensorBoard) and move the
-fake responders off the container's loopback, or ``GET http://127.0.0.1:8000/v1/models`` from
+it publishes the agent and vLLM ports the app expects. TensorBoard stays on loopback and
+is shown through the authenticated agent route. The fake vLLM moves off loopback or
+``GET http://127.0.0.1:8000/v1/models`` from
 the host is refused and the readiness loop cannot be exercised. Parsed with the stdlib so the
 test suite gains no dependency: the file is simple enough for a line-level reading.
 """
@@ -29,8 +30,8 @@ AGENT_PACKAGE_INPUTS = {
     "pod/agent/src/podagent/ltx_preprocess.py",  # shared with the isolated wrapper
 }
 
-# Agent, vLLM, TensorBoard: the ports the app declares at pod creation (POD-SPEC §1).
-HTTP_PORTS = (8800, 8000, 6006)
+# Agent and vLLM: the public ports; TensorBoard is private behind the agent.
+HTTP_PORTS = (8800, 8000)
 
 
 def _lines() -> list[str]:
@@ -74,7 +75,7 @@ def test_http_port_published_unchanged(port: int) -> None:
     assert (port, port) in _published_ports()
 
 
-def test_only_the_three_http_ports_are_published() -> None:
+def test_only_authenticated_service_ports_are_published() -> None:
     assert {host for host, _ in _published_ports()} == set(HTTP_PORTS)
 
 

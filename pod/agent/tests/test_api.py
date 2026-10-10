@@ -820,6 +820,77 @@ def test_ltx_preprocess_allowlisted_at_api(client: TestClient, settings: Setting
     assert client.post("/services/trainer-ltx/stop").status_code == 200
 
 
+@pytest.mark.parametrize(
+    "path", ["/tensorboard", "/tensorboard/", "/tensorboard/data/plugin/scalars/tags"]
+)
+def test_tensorboard_requires_auth(anon_client: TestClient, path: str) -> None:
+    expect_error(anon_client.get(path), 401, "unauthorized")
+
+
+def test_tensorboard_proxy_and_browser_cookie(client: TestClient) -> None:
+    from podagent.auth import TENSORBOARD_COOKIE
+
+    port = free_port()
+    state = start(client, "tensorboard", [], {"port": port})
+    wait_for_log(state["log_path"], f"listening on 127.0.0.1:{port}")
+    response = client.get("/tensorboard/")
+    assert response.status_code == 200 and response.text == "fakeservice tensorboard ok\n"
+    cookie = response.headers["set-cookie"]
+    assert "HttpOnly" in cookie and "Path=/tensorboard" in cookie and "SameSite=strict" in cookie
+    client.headers.pop("authorization")
+    assert client.get("/tensorboard/data/plugin/scalars/tags").status_code == 200
+    # Even presenting the browser credential manually at a control route cannot authorize it.
+    client.cookies.clear()
+    client.cookies.set(TENSORBOARD_COOKIE, TOKEN, path="/")
+    for path in ["/health", "/gpus", "/services", "/tensorboardevil", "/tensorboard/../health"]:
+        expect_error(client.get(path), 401, "unauthorized")
+    client.cookies.clear()
+    client.cookies.set(TENSORBOARD_COOKIE, "wrong-token", path="/tensorboard")
+    expect_error(client.get("/tensorboard/"), 401, "unauthorized")
+
+
+def test_tensorboard_proxy_target_and_secure_cookie(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import podagent.app as app_module
+
+    observed: list[httpx.Request] = []
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        observed.append(request)
+        return httpx.Response(
+            200,
+            content=b"asset",
+            headers={"Content-Type": "text/javascript", "Content-Encoding": "identity"},
+        )
+
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        app_module.httpx,
+        "AsyncClient",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(upstream), **kwargs),
+    )
+    with TestClient(app, base_url="https://agent", headers=AUTH) as client:
+        port = free_port()
+        start(client, "tensorboard", [], {"port": port})
+        response = client.get(
+            "/tensorboard/index.js?name=scalar", headers={"Cookie": "unrelated=secret"}
+        )
+        assert response.status_code == 200 and response.content == b"asset"
+        assert response.headers["content-type"] == "text/javascript"
+        assert "Secure" in response.headers["set-cookie"]
+        assert "content-encoding" not in response.headers
+        assert len(observed) == 1
+        request = observed[0]
+        assert str(request.url) == f"http://127.0.0.1:{port}/tensorboard/index.js?name=scalar"
+        assert "authorization" not in request.headers and "cookie" not in request.headers
+        assert client.post("/services/tensorboard/stop").status_code == 200
+
+
+def test_tensorboard_not_running(client: TestClient) -> None:
+    expect_error(client.get("/tensorboard/"), 409, "not_running")
+
+
 def test_start_invalid_params_422(client: TestClient, settings: Settings) -> None:
     error = expect_error(
         client.post("/services/vllm/start", json={"gpus": [0], "params": {}}),

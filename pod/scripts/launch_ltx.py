@@ -33,8 +33,10 @@ datasets; the default ``<max>x<max>x1`` is for stills; several buckets separate 
 and appends allowlisted arguments to the preprocess command. Paths, columns and device
 remain fixed by the wrapper; switches take no value and numeric options use --flag=value.
 
-Model files. LTX-2 loads only local files (no Hub ids, no URLs): ``base_model`` must be the
-checkpoint ``.safetensors`` under the workspace (``/workspace/models/...``) and becomes
+Model files. ``base_model: Lightricks/LTX-2`` automatically prepares its unified checkpoint
+and mirrored Gemma assets in ``<workspace>/models/ltx-2`` before preprocessing. The dry run
+only writes those planned paths and downloads nothing. Alternatively, ``base_model`` may be
+a checkpoint ``.safetensors`` under the workspace (``/workspace/models/...``) and becomes
 ``model.model_path``; the Gemma text encoder is a second path the RunConfig has no field for,
 so it comes from ``extra.model.text_encoder_path`` (a directory for a unified checkpoint, a
 packed ``.safetensors`` for a split pack) and is required. ``extra.model.video_vae_path`` /
@@ -698,6 +700,54 @@ TEXT_ENCODER_HINT = (
     "LTX-2 needs the Gemma text encoder as a second path (a directory for a unified checkpoint, "
     "a packed .safetensors for a split pack); set extra.model.text_encoder_path"
 )
+LTX_HUB_MODEL = "Lightricks/LTX-2"
+LTX_HUB_CHECKPOINT = "ltx-2-19b-dev.safetensors"
+LTX_HUB_FILES = (
+    LTX_HUB_CHECKPOINT,
+    "text_encoder/model*.safetensors",
+    "text_encoder/config.json",
+    "text_encoder/generation_config.json",
+    "tokenizer/*",
+)
+
+
+def resolve_hub_model(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Map the supported Hub source to fixed workspace paths; this step performs no I/O."""
+    if cfg["base_model"].startswith("/"):
+        return cfg
+    if cfg["base_model"] != LTX_HUB_MODEL:
+        raise ConfigError(
+            f"base_model: automatic LTX preparation supports {LTX_HUB_MODEL}; "
+            "otherwise provide local checkpoint and text encoder paths under the workspace"
+        )
+    model_dir = workspace_root() / "models" / "ltx-2"
+    extra_model = cfg["extra"].get("model", {})
+    if not isinstance(extra_model, dict):
+        raise ConfigError("extra.model: must be a mapping")
+    return deep_merge(
+        cfg,
+        {
+            "base_model": str(model_dir / LTX_HUB_CHECKPOINT),
+            "extra": {"model": {"text_encoder_path": str(model_dir), **extra_model}},
+        },
+    )
+
+
+def download_hub_model(cfg: dict[str, Any]) -> None:
+    """Prepare the source's checkpoint and Gemma assets at the already-validated paths."""
+    if cfg["base_model"] != LTX_HUB_MODEL:
+        return
+    from huggingface_hub import snapshot_download
+
+    model_dir = workspace_root() / "models" / "ltx-2"
+    say(f"preparing {LTX_HUB_MODEL} in {model_dir}; existing files are reused")
+    snapshot_download(
+        repo_id=LTX_HUB_MODEL,
+        local_dir=str(model_dir),
+        allow_patterns=list(LTX_HUB_FILES),
+        token=cfg.get("hf_token") or os.environ.get("HF_TOKEN"),
+    )
+
 
 YAML_HEADER = (
     "# LTX-2 trainer config written by launch_ltx.py from run.json (POD-SPEC §4.3).\n"
@@ -946,6 +996,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         run_dir, cfg = load_run(Path(args.config))
+        source_cfg = cfg
+        cfg = resolve_hub_model(cfg)
         entries, skipped = build_dataset_entries(
             Path(cfg["dataset"]["path"]), cfg["dataset"]["caption_ext"]
         )
@@ -978,6 +1030,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         say("dry run: nothing started")
         return 0
+    try:
+        download_hub_model(source_cfg)
+    except Exception as error:
+        status = getattr(getattr(error, "response", None), "status_code", None)
+        detail = f" (HTTP {status})" if status is not None else ""
+        say(f"model preparation failed for {LTX_HUB_MODEL}: {type(error).__name__}{detail}")
+        return 1
     if needs_preprocess(run_dir, force=args.reprocess):
         (run_dir / "preprocessed").mkdir(exist_ok=True)
         code = tee(pre_cmd, cwd=run_dir, env=child_env(cfg), out=sys.stdout)

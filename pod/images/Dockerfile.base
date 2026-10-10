@@ -178,8 +178,8 @@ RUN for script in /opt/pod/scripts/*.py; do \
 # The network volume is mounted here on RunPod; the entrypoint creates the layout (POD-SPEC §6.4).
 WORKDIR /workspace
 
-# 8800 agent, 8000 vLLM, 6006 TensorBoard: the three HTTP ports the app exposes at pod creation.
-EXPOSE 8800 8000 6006
+# 8800 agent, 8000 vLLM: the public HTTP ports. TensorBoard is behind /tensorboard/.
+EXPOSE 8800 8000
 
 # Starts the agent and nothing else (POD-SPEC §6.2). Services are started by the app through it.
 ENTRYPOINT ["/opt/pod/entrypoint.sh"]

@@ -60,13 +60,14 @@ GPU, Docker or the network. Counts are in `docs/POD-STATUS.md`.
    `--build-arg BASE_IMAGE=…`, tagged `ghcr.io/<owner>/concept-captioner-pod-<trainer>:<tag>`.
    One pod runs one trainer image; vLLM for captioning is in both.
 2. Create the pod with that image, N GPUs, a network volume mounted at `/workspace`, HTTP ports
-   `8800,8000,6006` exposed (agent, vLLM, TensorBoard; they cannot be added later), env
+   `8800,8000` exposed (agent and vLLM; TensorBoard stays internal), env
    `PODAGENT_TOKEN` (16+ characters, generated per pod) and `HF_TOKEN`, and a terminate-after
    cost guard. The trainer images are CUDA 13 stacks: filter the pod to a CUDA 13.0+ host
    (R580+ driver). A pod created without the token exits immediately, visibly.
 3. Poll `GET https://<pod-id>-8800.proxy.runpod.net/health` with the bearer until it answers
    (the proxy returns 502 for the first 30–60 s). The proxy is public and has a 100 s request
-   timeout; the agent and vLLM carry the token, TensorBoard does not.
+   timeout; the agent and vLLM carry the token. TensorBoard uses the authenticated agent
+   route `/tensorboard/`, with a bearer on first navigation and a scoped browser cookie.
 4. `POST /plan {"caption": true, "train": true}` → start `pull-dataset`, `vllm` on its GPUs,
    caption through `vllm:<model>` on port 8000 (same bearer as the agent), then
    `trainer-aitoolkit` or `trainer-ltx` with a `run.json` (POD-SPEC §4.1) on the plan's GPUs,

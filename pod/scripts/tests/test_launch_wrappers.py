@@ -962,17 +962,52 @@ def test_ltx_dry_run_refuses_extra_outside_workspace(
     assert not (run / "config.yaml").exists() and not (run / "dataset.json").exists()
 
 
-def test_ltx_refuses_hub_id_base_model(workspace: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """A Hub id is a valid RunConfig base_model, but LTX-2 loads local checkpoints only."""
-    cfg = ltx_run_config(workspace, base_model="Lightricks/LTX-2")
+def test_ltx_prepares_supported_hub_model_without_network_on_dry_run(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import huggingface_hub
+
+    def refuse_download(**_kwargs: Any) -> None:
+        pytest.fail("dry run downloaded a model")
+
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", refuse_download)
+    cfg = ltx_run_config(
+        workspace, base_model="Lightricks/LTX-2", extra={"model": {"text_encoder_path": None}}
+    )
+    cfg["extra"].pop("model")
+    run_json = write_run_json(workspace, cfg)
+    assert ltx.main(["--config", str(run_json), "--dry-run"]) == 0
+    native = load_yaml_if_available(run_json.parent / "config.yaml")
+    model_dir = workspace / "models" / "ltx-2"
+    assert native["model"]["model_path"] == str(model_dir / "ltx-2-19b-dev.safetensors")
+    assert native["model"]["text_encoder_path"] == str(model_dir)
+    assert not model_dir.exists()
+
+
+def test_ltx_hub_download_uses_controlled_destination(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import huggingface_hub
+
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda **kwargs: calls.append(kwargs))
+    cfg = ltx.validate_run_config(
+        ltx_run_config(workspace, base_model="Lightricks/LTX-2"), workspace
+    )
+    ltx.download_hub_model(cfg)
+    assert len(calls) == 1
+    assert calls[0]["repo_id"] == "Lightricks/LTX-2"
+    assert calls[0]["local_dir"] == str(workspace / "models" / "ltx-2")
+    assert calls[0]["allow_patterns"] == list(ltx.LTX_HUB_FILES)
+
+
+def test_ltx_refuses_unknown_hub_source(
+    workspace: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cfg = ltx_run_config(workspace, base_model="other/model")
     run_json = write_run_json(workspace, cfg)
     assert ltx.main(["--config", str(run_json), "--dry-run"]) == 2
-    out = capsys.readouterr().out
-    assert "model.model_path (base_model)" in out and "not Hub ids" in out
-    assert "Lightricks/LTX-2" in out
-    run = workspace / "runs" / RUN_ID
-    with pytest.raises(ltx.ConfigError, match=r"model\.model_path \(base_model\)"):
-        ltx.preprocess_argv(run, ltx.validate_run_config(cfg, workspace))
+    assert "automatic LTX preparation supports Lightricks/LTX-2" in capsys.readouterr().out
 
 
 def test_ltx_requires_text_encoder_path(

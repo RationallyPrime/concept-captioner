@@ -334,13 +334,15 @@ def test_tensorboard_argv_defaults_to_runs(paths: Paths, agent_settings: Setting
         "--logdir",
         str(paths.workspace / "runs"),
         "--host",
-        "0.0.0.0",
+        "127.0.0.1",
         "--port",
         "6006",
         "--reload_multifile",
         "true",
         "--reload_interval",
         "15",
+        "--path_prefix",
+        "/tensorboard",
     ]
     assert spec.env(params, agent_settings) == {}
     assert spec.cwd(params, paths) == paths.workspace

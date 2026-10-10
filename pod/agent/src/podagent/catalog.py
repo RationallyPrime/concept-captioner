@@ -679,13 +679,15 @@ def _tensorboard_argv(params: ServiceParams, _gpus: list[int], paths: Paths) -> 
         "--logdir",
         p.logdir if p.logdir is not None else str(paths.runs),
         "--host",
-        "0.0.0.0",
+        "127.0.0.1",
         "--port",
         str(p.port),
         "--reload_multifile",
         "true",
         "--reload_interval",
         "15",
+        "--path_prefix",
+        "/tensorboard",
     ]
 
 

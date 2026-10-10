@@ -26,6 +26,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import Depends, FastAPI, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
@@ -36,11 +37,12 @@ from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import __version__
-from .auth import check_bearer, require_bearer
+from .auth import TENSORBOARD_COOKIE, TENSORBOARD_PREFIX, check_request_auth, require_bearer
 from .errors import (
     AgentError,
     BadRequest,
     NotFound,
+    NotRunning,
     PayloadTooLarge,
     Unauthorized,
     Validation,
@@ -101,7 +103,9 @@ def _envelope(error: AgentError) -> JSONResponse:
 def _denied(request: Request, token: str) -> JSONResponse | None:
     """The ``401`` envelope when ``request`` carries no valid bearer, else ``None``."""
     try:
-        check_bearer(request.headers.get("authorization"), token)
+        check_request_auth(
+            request.url.path, request.headers.get("authorization"), request.cookies, token
+        )
     except Unauthorized as error:
         return _envelope(error)
     return None
@@ -128,16 +132,20 @@ class EdgeGuard:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        error = self.reject(Headers(scope=scope))
+        error = self.reject(
+            Headers(scope=scope), path=scope["path"], cookies=Request(scope).cookies
+        )
         if error is not None:
             await _envelope(error)(scope, receive, send)
             return
         await self.app(scope, self._counted(scope, receive), send)
 
-    def reject(self, headers: Headers) -> AgentError | None:
+    def reject(
+        self, headers: Headers, *, path: str = "", cookies: dict[str, str] | None = None
+    ) -> AgentError | None:
         """The error this request earns from its headers, or ``None`` to let it through."""
         try:
-            check_bearer(headers.get("authorization"), self.token)
+            check_request_auth(path, headers.get("authorization"), cookies or {}, self.token)
         except Unauthorized as error:
             return error
         if "chunked" in headers.get("transfer-encoding", "").lower():
@@ -250,6 +258,53 @@ def create_app(settings: Settings | None = None, backend: GpuBackend | None = No
 
     def supervisor() -> Supervisor:
         return app.state.supervisor
+
+    @app.api_route(TENSORBOARD_PREFIX, methods=["GET", "POST", "HEAD"])
+    @app.api_route(TENSORBOARD_PREFIX + "/{path:path}", methods=["GET", "POST", "HEAD"])
+    async def tensorboard(request: Request, path: str = "") -> Response:
+        del path  # the route's original path and query are forwarded to the fixed local service
+        state = await run_in_threadpool(supervisor().state, "tensorboard")
+        if state.state != "running":
+            raise NotRunning("TensorBoard is not running")
+        port = (state.params or {}).get("port", 6006)
+        target = httpx.URL(
+            scheme="http",
+            host="127.0.0.1",
+            port=port,
+            path=request.url.path,
+            query=request.url.query.encode(),
+        )
+        headers = {
+            name: value
+            for name, value in request.headers.items()
+            if name in {"accept", "content-type", "if-none-match", "if-modified-since"}
+        }
+        try:
+            async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
+                upstream = await client.request(
+                    request.method, target, headers=headers, content=await request.body()
+                )
+        except httpx.HTTPError as error:
+            raise AgentError("cannot reach local TensorBoard") from error
+        response = Response(
+            upstream.content,
+            status_code=upstream.status_code,
+            headers={
+                name: value
+                for name, value in upstream.headers.items()
+                if name in {"content-type", "cache-control", "etag", "last-modified", "location"}
+            },
+        )
+        if request.headers.get("authorization"):
+            response.set_cookie(
+                TENSORBOARD_COOKIE,
+                settings.token,
+                path=TENSORBOARD_PREFIX,
+                httponly=True,
+                secure=settings.fake_gpus is None or request.url.scheme == "https",
+                samesite="strict",
+            )
+        return response
 
     @app.get("/health")
     def health() -> dict[str, Any]:

@@ -110,7 +110,9 @@ class _Handler(BaseHTTPRequestHandler):
 
 def _serve(name: str, params: dict[str, Any], stop: threading.Event) -> ThreadingHTTPServer | None:
     """Bind ``params.port`` and serve in a daemon thread; ``None`` and ``stop`` set on failure."""
-    host = os.environ.get("PODAGENT_FAKE_HOST", "127.0.0.1")
+    host = (
+        "127.0.0.1" if name == "tensorboard" else os.environ.get("PODAGENT_FAKE_HOST", "127.0.0.1")
+    )
     port = int(params.get("port") or 0)
     handler = type("Handler", (_Handler,), {"service": name, "model": params.get("model", "fake")})
     try:

@@ -1,9 +1,9 @@
 # Local fake-GPU run of the agent (POD-SPEC §6.3). From the repo root:
 #   PODAGENT_TOKEN=local-dev-token-0123 docker compose -f pod/images/compose.fake.yaml up --build
 # Publishes the same three HTTP ports the app exposes on a real pod: 8800 (agent), 8000 (the
-# fake vLLM, answers /v1/models for the readiness poll) and 6006 (the fake TensorBoard). The fake
-# responders bind 127.0.0.1 by default, which is the container's own loopback: PODAGENT_FAKE_HOST
-# makes them reachable through the published ports.
+# fake vLLM, answers /v1/models for the readiness poll). TensorBoard stays on loopback and
+# is served through the authenticated agent at /tensorboard/. PODAGENT_FAKE_HOST makes the
+# fake vLLM reachable through its published port.
 services:
   agent:
     build:
@@ -17,6 +17,5 @@ services:
     ports:
       - "8800:8800"
       - "8000:8000"
-      - "6006:6006"
     volumes:
       - ./workspace:/workspace

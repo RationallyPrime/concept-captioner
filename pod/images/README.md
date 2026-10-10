@@ -12,7 +12,7 @@ the list of things to confirm when that happens is at the end.
 | `Dockerfile.ltx` | base + `Lightricks/LTX-2` at a pinned commit in `/opt/ltx-2` (uv workspace), venv `/opt/venvs/ltx` |
 | `Dockerfile.fake` | `python:3.12-slim` + podagent only, for `compose.fake.yaml` (no CUDA, no trainers) |
 | `entrypoint.sh` | creates `/workspace/{datasets,runs,models/hf-cache,logs}`, exports `HF_HOME`, execs `tini -s -- python -m podagent --host 0.0.0.0 --port 8800`; nothing else |
-| `compose.fake.yaml` | local fake-GPU agent: `PODAGENT_FAKE_GPUS=2`, `PODAGENT_FAKE_HOST=0.0.0.0`, bind mount `./workspace:/workspace`, ports 8800 (agent), 8000 (fake vLLM), 6006 (fake TensorBoard) |
+| `compose.fake.yaml` | local fake-GPU agent: `PODAGENT_FAKE_GPUS=2`, `PODAGENT_FAKE_HOST=0.0.0.0`, bind mount `./workspace:/workspace`, ports 8800 (agent), 8000 (fake vLLM); fake TensorBoard stays on loopback |
 
 ## Layout inside an image
 
@@ -135,18 +135,18 @@ PODAGENT_TOKEN=local-dev-token-0123 docker compose -f pod/images/compose.fake.ya
 podctl --url http://127.0.0.1:8800 health
 ```
 
-The compose file publishes 8000 and 6006 as well as 8800 and sets `PODAGENT_FAKE_HOST=0.0.0.0`,
-so after `podctl caption-up` the fake vLLM answers `http://127.0.0.1:8000/v1/models` and the fake
-TensorBoard `http://127.0.0.1:6006/` from the host, the way the app's readiness loop and
-TensorBoard link expect (POD-SPEC §2.6). Without that variable the fake responders bind the
-container's own loopback and the published ports connect to nothing.
+The compose file publishes 8000 beside 8800 and sets `PODAGENT_FAKE_HOST=0.0.0.0`, so
+vLLM's fake readiness endpoint is reachable from the host. Fake and real TensorBoard both bind
+loopback and are shown through the authenticated agent at `/tensorboard/`; port6006 is never
+published. The browser's first navigation sends the bearer and receives a cookie scoped to
+that route for its subresources.
 
 `Dockerfile.fake` installs `pod/agent` alone (no `[pod]` extra, no concept-captioner); it exists to
 drive the fake services (POD-SPEC §3, §6.3) and is not a stand-in for the CUDA images.
 
 ## Pod creation (the app's side, for reference)
 
-HTTP ports `8800,8000,6006` exposed, `PODAGENT_TOKEN` (16+ characters) and `HF_TOKEN` as env, the
+HTTP ports `8800,8000` exposed, `PODAGENT_TOKEN` (16+ characters) and `HF_TOKEN` as env, the
 volume at `/workspace`, a trainer image, and a CUDA 13.0+ host for the trainer images. The agent
 refuses to start without the token, so a pod created without it exits immediately and visibly.
 `nvidia-smi` is not in the image: the NVIDIA container runtime mounts it (the base sets

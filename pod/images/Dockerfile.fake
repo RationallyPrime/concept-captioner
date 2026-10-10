@@ -18,6 +18,6 @@ COPY pod/scripts/*.py /opt/pod/scripts/
 # One preprocessing validator for the API and the isolated trainer wrapper.
 COPY pod/agent/src/podagent/ltx_preprocess.py /opt/pod/agent/src/podagent/ltx_preprocess.py
 RUN chmod +x /opt/pod/entrypoint.sh
-# Same three HTTP ports as Dockerfile.base; compose.fake.yaml publishes all of them.
-EXPOSE 8800 8000 6006
+# Same public ports as Dockerfile.base; TensorBoard stays internal.
+EXPOSE 8800 8000
 ENTRYPOINT ["/opt/pod/entrypoint.sh"]

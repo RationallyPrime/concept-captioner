@@ -32,9 +32,9 @@ checked on a real pod.
 
 | Convention | Value | Consequence |
 | --- | --- | --- |
-| HTTP ports | declared at pod creation ("Expose HTTP Ports", max 10); cannot be added later without a reset | the app declares `8800/http,8000/http,6006/http` (agent, vLLM, TensorBoard) when it creates the pod |
+| HTTP ports | declared at pod creation ("Expose HTTP Ports", max 10); cannot be added later without a reset | the app declares `8800/http,8000/http` (agent, vLLM; TensorBoard stays on loopback) when it creates the pod |
 | Proxy URL | `https://<pod-id>-<internal-port>.proxy.runpod.net`, HTTPS only, **public and unauthenticated**, **100 s Cloudflare timeout** (`524`) | every agent endpoint answers in well under 100 s; nothing streams; the agent, vLLM and TensorBoard must carry their own auth or be treated as public |
-| Bind address | services must bind `0.0.0.0` | every argv in the catalog passes `--host 0.0.0.0` |
+| Bind address | public services bind `0.0.0.0`; TensorBoard binds `127.0.0.1` | TensorBoard is reached only through the authenticated agent route |
 | Volume | network volume (or pod volume disk) mounted at `/workspace`; survives stop/restart; container disk is wiped | all data, logs and caches live under `/workspace`; the image holds only code and wheels |
 | Env vars | `--env` at creation reach **PID 1** (our entrypoint → the agent); not SSH shells | the agent inherits `PODAGENT_TOKEN`, `HF_TOKEN`; every child service inherits the agent's env minus `PODAGENT_TOKEN` / `VLLM_API_KEY` (2.6), plus per-service additions |
 | "Running" ≠ ready | proxy returns 502 for the first 30–60 s | the app polls `GET /health` with backoff, up to ~10 min |
@@ -42,7 +42,7 @@ checked on a real pod.
 | GPU count | not in the references; the agent reads it from `nvidia-smi` | `/gpus` is the source of truth, not the pod spec |
 
 Pod creation (the app's side, for reference): image `ghcr.io/<owner>/concept-captioner-pod-<trainer>:<tag>`,
-`--ports "8800/http,8000/http,6006/http"`, `--env '{"PODAGENT_TOKEN":"…","HF_TOKEN":"…"}'`,
+`--ports "8800/http,8000/http"`, `--env '{"PODAGENT_TOKEN":"…","HF_TOKEN":"…"}'`,
 `--volume-mount-path /workspace`, N GPUs, `--terminate-after` as cost guard.
 
 ## 2. Control agent: HTTP API
@@ -66,7 +66,12 @@ The app-level dependency on every route is the second line of defence.
 
 The same token is, by default, the API key vLLM is started with (`VLLM_API_KEY` env of the
 vLLM child), so the app's `vllm:` endpoint on port 8000 is not an open proxy either. TensorBoard
-has no auth of its own; the app shows it through the proxy knowing the URL is public.
+binds loopback and is shown at `https://<pod-id>-8800.proxy.runpod.net/tensorboard/`.
+The first browser navigation sends the bearer. Its response sets `podagent_tensorboard`, an
+HttpOnly cookie scoped to `/tensorboard`, SameSite Strict and Secure on real pods. This cookie
+can authenticate only the `/tensorboard` subtree; all control APIs still require the bearer.
+`GET`, `POST` and `HEAD` under this route proxy only the catalog's local TensorBoard port,
+with its `/tensorboard` path prefix. Authorization and cookies are never forwarded upstream.
 
 ### 2.2 Errors
 
@@ -243,7 +248,7 @@ check. `HF_HOME=/workspace/models/hf-cache` is set for every child.
 
 `PODAGENT_TOKEN` and any `VLLM_API_KEY` in the agent's environment are removed from every
 child's environment (vLLM gets its key from its own params, default the agent token, via the
-catalog's `env()`); `tensorboard`, an unauthenticated public listener that never talks to the
+catalog's `env()`); `tensorboard`, a loopback-only listener behind the authenticated agent that never talks to the
 Hub, additionally gets no `HF_TOKEN`. None of the children need the control-plane bearer, and
 TensorBoard, the trainer stacks and whatever a base model's custom code pulls in can read
 `/proc/self/environ`.
@@ -361,8 +366,8 @@ Env: `VLLM_API_KEY`. Readiness for the client: `GET http://…:8000/v1/models` w
 ### 3.2 `tensorboard` — GPUs 0, port 6006
 
 Params: `logdir` (str, default `/workspace/runs`; must resolve under `/workspace`), `port`
-(default 6006). argv: `[/opt/venvs/agent/bin/tensorboard, --logdir, <logdir>, --host, 0.0.0.0, --port,
-<port>, --reload_multifile, true, --reload_interval, 15]`. log `/workspace/logs/tensorboard.log`.
+(default 6006, internal only). argv: `[/opt/venvs/agent/bin/tensorboard, --logdir, <logdir>, --host, 127.0.0.1, --port,
+<port>, --reload_multifile, true, --reload_interval, 15, --path_prefix, /tensorboard]`. log `/workspace/logs/tensorboard.log`.
 Pointing it at `/workspace/runs` once shows every run as a TensorBoard "run"
 (`<id>/tensorboard`).
 
@@ -514,6 +519,13 @@ The single stdlib validator is `agent/src/podagent/ltx_preprocess.py`, copied in
 using `--flag=value` with values 1 through 64. Duplicates, unknown flags and values on switches
 are rejected. Model paths, output paths, device and column names remain wrapper-owned.
 
+For LTX's first run, `base_model: Lightricks/LTX-2` prepares the unified
+`ltx-2-19b-dev.safetensors` checkpoint and its mirrored Gemma model/tokenizer assets from that
+Hub repository into `/workspace/models/ltx-2`. The wrapper uses only its declared file patterns
+and the fixed destination, then supplies local checkpoint and text encoder paths to upstream.
+No SSH or separate model path is needed. Existing files are reused; `--dry-run` writes the
+planned config without downloading. Other LTX sources require explicit local component paths.
+
 `launch_ltx.py` mapping (two phases): preprocess
 (`scripts/process_dataset.py` VERIFY: dataset JSON with `caption`/`media_path`, resolution
 bucket `<max>x<max>x1` for stills) into `<run>/preprocessed/`, then train
@@ -561,7 +573,7 @@ images/Dockerfile.base       nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
                                                     huggingface_hub, datasets, Pillow
                              + /opt/venvs/vllm    : vllm (pinned), its torch
                              + /opt/pod/scripts/*, /opt/pod/entrypoint.sh
-                             EXPOSE 8800 8000 6006; ENTRYPOINT /opt/pod/entrypoint.sh
+                             EXPOSE 8800 8000; ENTRYPOINT /opt/pod/entrypoint.sh
 images/Dockerfile.aitoolkit  FROM base; git clone ostris/ai-toolkit @ pinned commit → /opt/ai-toolkit;
                              /opt/venvs/aitoolkit with its requirements (own torch)
 images/Dockerfile.ltx        FROM base; git clone Lightricks/LTX-2 @ pinned commit → /opt/ltx-2;
@@ -598,9 +610,9 @@ itself (that would make `Popen` lose its children's exit codes). `tini` forwards
 One service `agent`: build `Dockerfile.fake` with context `..` (so it can install `agent/`),
 `PODAGENT_FAKE_GPUS=2`, `PODAGENT_FAKE_HOST=0.0.0.0`, `PODAGENT_TOKEN=${PODAGENT_TOKEN:?set
 PODAGENT_TOKEN}`, `PODAGENT_WORKSPACE=/workspace`, bind mount `./workspace:/workspace`, ports
-`8800:8800`, `8000:8000`, `6006:6006` (the same three the app exposes on a real pod). `podctl
+`8800:8800`, `8000:8000` (the same two the app exposes on a real pod). `podctl
 --url http://127.0.0.1:8800` then drives the fake services, and the fake vLLM's `/v1/models` on
-`http://127.0.0.1:8000` and the fake TensorBoard on `6006` are reachable from the host because
+`http://127.0.0.1:8000` is reachable from the host because
 `PODAGENT_FAKE_HOST` moves the responders off the container's loopback. The same thing without Docker:
 `PODAGENT_FAKE_GPUS=2 PODAGENT_TOKEN=… PODAGENT_WORKSPACE=/tmp/ws python -m podagent`.
 

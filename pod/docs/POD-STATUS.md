@@ -26,7 +26,10 @@ column overrides before a run is prepared or a subprocess starts. The images cop
 into the wrapper's source-relative layout. `podctl` classifies proxy Cloudflare 520-526 responses
 without an agent error envelope as unreachable (exit 3); actual agent envelopes still exit 1.
 Fake scripts: 238 passed; podctl: 113 passed; lint and formatting clean in both trees.
-The agent tree and independent acceptance remain pending.
+Agent: 557 passed, 1 skipped (TensorBoard absent), with an inherited Starlette/httpx warning;
+Ruff and formatting clean. The parent independently accepted the foundation after 15 API
+preprocess tests, 33 wrapper preprocessing tests, and 21 proxy tests passed. Published to main
+as `52bedeea032aaa08a7923249bc06c127795f00d2` (2026-10-10).
 No Docker image or real pod claim is established by this repair.
 
 ## How the numbers were produced
