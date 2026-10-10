@@ -41,9 +41,17 @@ checked on a real pod.
 | Runtime env (*verify*) | `RUNPOD_POD_ID`, `RUNPOD_PUBLIC_IP`, `RUNPOD_GPU_COUNT`, `RUNPOD_TCP_PORT_22` | reported in `/health` when present; nothing depends on them |
 | GPU count | not in the references; the agent reads it from `nvidia-smi` | `/gpus` is the source of truth, not the pod spec |
 
-Pod creation (the app's side, for reference): image `ghcr.io/<owner>/concept-captioner-pod-<trainer>:<tag>`,
-`--ports "8800/http,8000/http"`, `--env '{"PODAGENT_TOKEN":"…","HF_TOKEN":"…"}'`,
-`--volume-mount-path /workspace`, N GPUs, `--terminate-after` as cost guard.
+The app creates pods through RunPod REST v2 `POST /v2/pods`: `image` names
+`ghcr.io/<owner>/concept-captioner-pod-<trainer>:<tag>`, `gpu` carries `id`, `count`,
+`minCudaVersion: "13.0"` and `minRamPerGpu: 60`; `disk: 50` is the temporary container disk.
+`mounts.network` attaches the selected `volumeId` at `/workspace`, `dataCenterIds` selects
+that volume's location, and `ports` is `["8800/http", "8000/http"]`. The `env` object carries
+a generated `PODAGENT_TOKEN` and the user's `HF_TOKEN`. The app's budget and idle watchdog
+send `POST /v2/pods/<id>/action` with `{"action":"stop"}` and confirm a stopped status;
+they require the app to remain open. Removal is a separate, confirmed DELETE operation.
+The temporary disk is cleared on stop/restart; the network volume persists and remains billed.
+See [RunPod storage](https://docs.runpod.io/pods/storage/types) and the current
+`https://api.runpod.io/v2/openapi.json` schema.
 
 ## 2. Control agent: HTTP API
 
@@ -450,7 +458,7 @@ log `/workspace/logs/push-lora.log`. Exit 0 = the model repo has the LoRA.
 | `sample_prompts` | no | `[]` | each should contain a trigger; the wrapper does not enforce it |
 | `hub` | no | null | `repo_id`, `private` (true), `push_on_finish` (false → push is a separate `push-lora` start) |
 | `hf_token` | no | null | secret; env only |
-| `extra` | no | `{}` | deep-merged into the native config last; the escape hatch for trainer options not modelled here. It cannot move the trainer out of the workspace: path-bearing keys it sets (`training_folder`, `log_dir`, `datasets[*].folder_path`, `output_dir`, `preprocessed_data_root`, `load_checkpoint`; `name_or_path` / `model_source` as a Hub id or a local path) must resolve under `/workspace` — the agent refuses them (`422`) and the wrapper re-checks the merged config |
+| `extra` | no | `{}` | deep-merged into the native config last; the escape hatch for trainer options not modelled here. It cannot move the trainer out of the workspace: output/data paths and LTX `model.*_path` / `load_checkpoint` must resolve under `/workspace`; AI Toolkit `name_or_path` accepts a Hub id or a workspace-local path. The agent refuses invalid paths (`422`) and the wrapper re-checks the merged config |
 
 Output layout, both trainers: `/workspace/runs/<id>/run.json`, `config.yaml` (native config as
 written by the wrapper), `trainer.log`, `tensorboard/` (event files), `output/` (checkpoints and
@@ -463,19 +471,19 @@ Everything else has a default a first-time user can accept. The defaults above a
 conventional FLUX-LoRA starting point from ai-toolkit's example configs; they are not tuned for
 H3 or LTX and the wrappers must not pretend otherwise.
 
-**Uncertain, check on a real pod against the trainer's docs** (the wrappers are written to
-these assumptions and carry a `# VERIFY` comment at each one):
+**Live evidence and remaining uncertainty** (full receipts and exact image revisions are in
+`POD-STATUS.md`):
 
 - ai-toolkit: the config keys for the MiniMax H3 model family (`model.arch`/`name_or_path`,
-  quantization flags), whether `trigger_word` is still honoured, and whether it writes TensorBoard
-  event files natively (`logging` section) or only logs to stdout. If the latter, the wrapper's
-  **log scraper** (4.3) is the source of the event files.
-- LTX-2: the trainer package name and entrypoints inside `Lightricks/LTX-2`, the preprocessing
-  step (resolution buckets of the form `WxHxF`, caption column names), config keys for
-  `model_source`, `lora.rank`, `optimization.{learning_rate,steps,batch_size}`,
-  `data.preprocessed_data_root`, `validation.prompts`, where it writes checkpoints and whether
-  it logs to TensorBoard natively.
-- Both: resume-from-checkpoint behaviour; VRAM needed per base model at the default resolution.
+  quantization flags) and semantic treatment of `trigger_word` remain unverified. The tiny
+  FLUX run produced native and scraped TensorBoard events and valid checkpoints.
+- LTX-2: the pinned trainer's entrypoints, `caption`/`media_path` preparation, one-frame
+  buckets, mapped training keys, nested checkpoints and scraped TensorBoard events ran on
+  real hardware. A 512-pixel/rank-16 run passed on one visible 32 GB GPU in a 125 GB host.
+  The trainer venv requires TensorBoard explicitly; the image tests an actual event write/read.
+- Wider resolutions, other models, video inputs, generated validation samples and training
+  quality remain unverified. These tiny functional checks do not establish universal memory
+  capacity. Resume evidence and its exact scope are recorded separately in `POD-STATUS.md`.
 
 ### 4.3 Launch wrappers (`scripts/launch_aitoolkit.py`, `scripts/launch_ltx.py`)
 
@@ -526,14 +534,25 @@ and the fixed destination, then supplies local checkpoint and text encoder paths
 No SSH or separate model path is needed. Existing files are reused; `--dry-run` writes the
 planned config without downloading. Other LTX sources require explicit local component paths.
 
-`launch_ltx.py` mapping (two phases): preprocess
-(`scripts/process_dataset.py` VERIFY: dataset JSON with `caption`/`media_path`, resolution
-bucket `<max>x<max>x1` for stills) into `<run>/preprocessed/`, then train
-(`scripts/train.py <run>/config.yaml` VERIFY) with `model.model_source = base_model`,
-`lora.{rank, alpha}`, `optimization.{learning_rate, steps, batch_size, gradient_accumulation_steps}`,
-`data.preprocessed_data_root`, `validation.{prompts, interval = sample_every, seed}`,
-`checkpoints.{interval = save_every, keep_last_n = 4}`, `output_dir = <run>/output`,
-`acceleration.mixed_precision_mode = bf16`, `extra` deep-merged last.
+`launch_ltx.py` runs `/opt/venvs/ltx/bin/python` against the entrypoints under
+`/opt/ltx-2/packages/ltx-trainer/scripts/`. `process_dataset.py` consumes dataset JSON with
+`caption`/`media_path`, a `<max>x<max>x1` still-image bucket and explicit model/encoder paths,
+writing `<run>/preprocessed/`. `train.py <run>/config.yaml` consumes:
+
+- `model.model_path`: the prepared or supplied local checkpoint, `model.text_encoder_path`,
+  `model.training_mode: lora`, and the newest nested checkpoint as `model.load_checkpoint`
+  when present; explicit model overrides still apply.
+- `lora.{rank, alpha}` and `optimization.{learning_rate, steps, batch_size,
+  gradient_accumulation_steps, enable_gradient_checkpointing: true}`.
+- `data.preprocessed_data_root`, root `seed`, and `validation.{prompts, interval, seed,
+  video_dims: [max(resolution), max(resolution), 1]}`. Validation is disabled with a null
+  interval when sampling is off or no prompts are supplied.
+- `checkpoints.{interval: save_every, keep_last_n: 4}`, `output_dir: <run>/output`, and
+  `acceleration.mixed_precision_mode: bf16`.
+
+The wrapper deep-merges `extra` last; `extra.preprocess` configures preparation only and is
+omitted from the native training config. Actual checkpoints were written under
+`<run>/output/checkpoints/`; the wrapper's event scraper writes `<run>/tensorboard/`.
 
 ## 5. GPU inventory backend
 
@@ -577,7 +596,7 @@ images/Dockerfile.base       nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
 images/Dockerfile.aitoolkit  FROM base; git clone ostris/ai-toolkit @ pinned commit → /opt/ai-toolkit;
                              /opt/venvs/aitoolkit with its requirements (own torch)
 images/Dockerfile.ltx        FROM base; git clone Lightricks/LTX-2 @ pinned commit → /opt/ltx-2;
-                             /opt/venvs/ltx with the trainer's requirements
+                             /opt/venvs/ltx with the trainer's requirements + TensorBoard event-write/read check
 images/Dockerfile.fake       python:3.12-slim + podagent only; for compose (no CUDA, no trainers)
 ```
 

@@ -75,8 +75,10 @@ Reference faces stay local so the Hub and pod readers cannot mistake them for tr
 Private dataset is the default. GPU rental displays
 prices and a budget before creation. Stop everything cancels local work, waits for it to
 settle and stops the rented computer. Close and quit warn while work or a computer is active;
-the project remains open if a stop cannot be confirmed. A stopped computer retains its billed
-temporary disk; explicitly Remove it before renting another. Separate network storage is kept.
+the project remains open if a stop cannot be confirmed. Stopping clears the temporary container
+disk; datasets and checkpoints on separate network storage remain, and that storage remains
+billed. Explicitly Remove the stopped computer before renting another. See
+[RunPod's storage rules](https://docs.runpod.io/pods/storage/types).
 If the app reopens with a saved running computer, Welcome exposes its cost and stop controls
 before you open a project. Missing credentials do not hide that retained computer.
 

@@ -1,8 +1,11 @@
 # POD-STATUS
 
-Current verification state as of 2026-10-10 19:18 UTC. Source, fake execution, live functional
-execution and caption quality are separate evidence below. The requested seven live
-checks are in progress; this file does not claim the complete pod handoff yet.
+Current verification state as of 2026-10-10 20:00 UTC. Real agent, caption, trainer,
+checkpoint/curve/Hub and GPU isolation proofs are recorded below. All three task-created
+pods are independently confirmed `EXITED`; no runtime work remains queued. The public
+base template is verified. Public trainer-image availability remains blocked, and the
+billing reads are partial posted amounts rather than a complete final charge. Source,
+fake execution, live functional execution and caption quality remain separate evidence.
 
 ## Implementation and local verification
 
@@ -23,7 +26,7 @@ not change these results. Commands use each package's existing development venv;
 run with `../agent/.venv/bin/python -m pytest tests -q`. These local counts establish source
 behavior, not CUDA execution.
 
-Three independently accepted changes are published:
+Four independently accepted runtime changes are published:
 
 - `52bedeea032aaa08a7923249bc06c127795f00d2`: existing vLLM allowlist verified; one stdlib
   LTX preprocess validator at API and isolated script boundaries; invalid flags are rejected
@@ -43,22 +46,33 @@ Three independently accepted changes are published:
   The four flags now return API 422 before process, logs or GPU booking. Parent independently
   checked 8 focused cases including all four pre-spawn API rejections. The unsuccessful
   CPU-only CLI help probe is not used as the absence witness.
+- `de6f152`: TensorBoard is installed into the actual isolated LTX trainer venv after
+  its final dependency sync. The build itself wrote and reread a CPU scalar, step 1/loss
+  0.5, with TensorBoard 2.21.0. An independent reviewer accepted the frozen Dockerfile and
+  completed build receipt; the later real GPU run also produced readable curve events.
 
 ## Images and fake compose
 
-All three CUDA images built and pushed on cx53 from accepted source `92136b1`, with that
-OCI revision label. Registry references share the tag `v0.1.0-verify20261010`:
+All three CUDA images built and pushed on cx53. Base and ai-toolkit carry accepted source
+`92136b1`; repaired LTX carries `de6f152`. Registry references share the tag
+`v0.1.0-verify20261010`:
 
 | image | final registry digest | bytes | publication |
 | --- | --- | --- | --- |
 | `ghcr.io/rationallyprime/concept-captioner-pod-base` | `sha256:e49e9d2de028ed8185d037b9dcf86ff8652a37923de660b26eb16c51d92c387a` | 10,290,568,891 | public; actual anonymous Docker pull succeeded with an empty isolated config |
-| `ghcr.io/rationallyprime/concept-captioner-pod-aitoolkit` | `sha256:6fcdd6259987203bed61913dd8585eae60a18dc28b184e2545b202fe9c4baf7b` | 14,147,141,514 | pushed, currently private; visibility/anonymous pull pending |
-| `ghcr.io/rationallyprime/concept-captioner-pod-ltx` | `sha256:61f90e3d40dec8cb3d2886ecad5787656276672a7bb1d4729e28353f17044945` | 13,874,943,964 | pushed, currently private; visibility/anonymous pull pending |
+| `ghcr.io/rationallyprime/concept-captioner-pod-aitoolkit` | `sha256:6fcdd6259987203bed61913dd8585eae60a18dc28b184e2545b202fe9c4baf7b` | 14,147,141,514 | pushed, private; latest actual anonymous Docker pull rejected as unauthorized |
+| `ghcr.io/rationallyprime/concept-captioner-pod-ltx` | `sha256:1d346fa7b00de3e95168929d838e39d52206af057e8fc35b5cf1aff35794f6ea` | 13,896,513,451 | pushed, private; latest actual anonymous Docker pull rejected as unauthorized |
 
 The initial live ai-toolkit proofs below used accepted source `c325cb4` under the same tag,
 with supported vLLM arguments. Their ai-toolkit digest was
 `sha256:56330d8c426efd6a1c8c939c8a0d0cbf6032e956edaf1d61716885f242d0a32d`.
-The tag was then rebuilt to the final digests above. Current LTX uses the final image.
+The tag was then rebuilt to the final digests above. Initial LTX used the pre-repair
+`92136b1` image. Its successful checkpoint proof exposed a missing TensorBoard dependency.
+The independently accepted Dockerfile repair, source
+`de6f152`, built and pushed the same LTX tag at new digest
+`sha256:1d346fa7b00de3e95168929d838e39d52206af057e8fc35b5cf1aff35794f6ea`; this is the
+current LTX image. Build CPU SummaryWriter/EventAccumulator verified step 1/loss 0.5 in the
+actual LTX venv, TensorBoard 2.21.0. The preceding LTX digest was `sha256:61f90e3d40dec8cb3d2886ecad5787656276672a7bb1d4729e28353f17044945`.
 
 Build import checks passed: base CPython 3.12.14, vLLM 0.31.0+cu129, torch 2.13.0+cu129,
 FlashInfer 0.7.0.post1 cache; ai-toolkit torch 2.13.0+cu130, flash-attn 2.8.3, natten 0.21.7,
@@ -74,8 +88,11 @@ proof mapped localhost 38800/38000. Compose exposes only 8800/8000; TensorBoard 
 loopback through `/tensorboard/`. Fake execution proves control integration, not GPU memory.
 
 The signed-in Chrome settings change made the base package public; REST read-back and
-anonymous Docker pull verified it. The next browser attempt found the Mac locked. Trainer
-visibility remains a concrete external blocker, with settings at
+anonymous Docker pull verified it, including a fresh anonymous pull after stage 5. The Mac
+was subsequently unlocked and the native app launched successfully, then computer-use
+transport failed with `Sky Computer Use native pipe closed before response`. Fresh bindings
+and resets did not recover it. This is the current browser blocker; trainer visibility
+still requires the authorized settings change, with settings at
 `https://github.com/users/RationallyPrime/packages/container/concept-captioner-pod-aitoolkit/settings`
 and the corresponding `concept-captioner-pod-ltx/settings` path.
 
@@ -87,21 +104,47 @@ and datasets remain on that volume; no volume or output has been terminated/dele
 
 | pod | hardware actually observed | compute rate | state at this update |
 | --- | --- | --- | --- |
-| `iqs4zrmjf097hf` | 1 × RTX PRO 4500 Blackwell; 32,623 MiB VRAM, 62 GB RAM, 12 vCPU, CUDA 13.2 | $0.72/hour | running useful LTX model preprocessing/training work |
-| `q833ws7hsuyrqn` | 2 × RTX PRO 4500 Blackwell; distinct GPU UUIDs, 32,623 MiB each, 125 GB RAM, 56 vCPU, CUDA 13.2 | $1.44/hour | stopped; fresh `EXITED` read-back after first bounded two-GPU API proof |
+| `iqs4zrmjf097hf` | 1 × RTX PRO 4500 Blackwell; 32,623 MiB VRAM, 62 GB RAM, 12 vCPU, CUDA 13.2 | $0.72/hour | `EXITED`; final independent read 19:58:55Z |
+| `q833ws7hsuyrqn` | 2 × RTX PRO 4500 Blackwell; distinct GPU UUIDs, 32,623 MiB each, 125 GB RAM, 56 vCPU, CUDA 13.2 | $1.44/hour | native stop 19:58:06Z, fresh native `EXITED` 19:58:07Z, independent read 19:58:55Z |
+| `ey4f2374hd3y62` | A100 PCIe 80 GB; 117 GB RAM, 31 vCPU, CA-MTL-3, CUDA 13.2 | $1.79/hour | cancelled experiment; stopped/read back `EXITED` 19:28:52Z, independently rechecked 19:58:55Z |
 
-Each has 50 GB container disk, published active-disk rate $0.10/GB/month ($5/month).
+The two training pods each had 50 GB container disk; the cancelled A100 had 100 GB.
+Container disk is ephemeral and is lost on stop/restart. Its published rate applies while
+the pod is running, $0.10/GB/month; no stopped-container-disk retention or continuing charge
+is claimed. The network volume is independent and is the continuing task storage charge.
 The one-GPU pod was created 18:30:26Z, initial container boot 18:37:21Z, first proxy health
 18:39:08Z. The preceding 64 GB reserved-RAM request failed capacity and created no pod.
 The two-GPU pod was created 18:34:47Z and stopped after its useful proof at approximately
 18:40:51Z. The one-GPU pod was stopped and read back `EXITED` at 19:06:34Z, then updated to
-the final LTX image and restarted for this queued trainer proof; agent boot logged 19:11:54Z.
+the pre-repair LTX image and restarted for the initial trainer proof; agent boot logged
+19:11:54Z. It stopped again at 19:24:57Z after outputs were secured. A subsequent start with
+the repaired image was refused by its original host's GPU capacity, so the existing pair
+resumed at 19:33:30Z for the remaining useful work. No extra replacement pod was created.
 
-At 19:16 UTC the billing API returned no finalized pod billing records for either exact pod
-in the 17:00–20:00 aligned window. This is reporting delay, not a claim of free compute.
-The exact volume already has one recorded 18:00–19:00 charge of $0.01944444514811039.
-Final settled compute totals and final stopped receipts remain pending. Rate fields on an
-`EXITED` pod are not evidence that its GPU is still billing.
+At 20:00:31Z exact-resource billing reads for the aligned 17:00–21:00 window returned:
+
+| resource | records returned | posted USD |
+| --- | --- | --- |
+| one-GPU pod `iqs4zrmjf097hf` | 18:00 and 19:00 buckets | 0.3690129272872582 |
+| two-GPU pod `q833ws7hsuyrqn` | 18:00 bucket only | 0.14567590539809316 |
+| cancelled A100 `ey4f2374hd3y62` | none yet | no posted amount; not a free-compute claim |
+| network volume `nydku2wmvd` | 18:00 and 19:00 buckets | 0.03888889029622078 |
+
+The currently posted task subtotal is **$0.5535777229815722**. It is incomplete: the pair's
+19:00 restart period and the cancelled A100 have not appeared in these reads. Rates and
+elapsed-time projections are separate from billing records. Rate fields on an `EXITED` pod
+do not establish active compute billing. No pre-existing account resource was changed.
+
+## Verified on a real pod
+
+The seven demonstrations were executed in the brief's order. The base template was created
+early as preparation and reread after trainer and device proofs for stage 6. Stage 1 built
+and pushed all images and passed fake compose; stages 2–3 exercised authenticated real
+agents and vision captioning; stage 4 produced both trainers' checkpoints, curves and Hub
+roundtrips; stage 5 demonstrated sequential release and simultaneous isolated GPU
+residency; stage 6 verified the public base template/image/token requirement; stage 7 is
+this evidence and cost report. Trainer images remain private, and simultaneous caption
+computation during training was not established by the delayed native request.
 
 ## Agent, topology and VRAM proof
 
@@ -113,8 +156,24 @@ subtree. Cookie-only health answered 401. Both children stopped with `group_aliv
 
 Single-GPU normal lifecycle releases were measured: vLLM stopped to 2 MiB idle before
 FLUX; FLUX exit returned to 2 MiB before the next vLLM; the second vLLM stop also returned
-2 MiB before pod stop. Actual concurrent vLLM/trainer device isolation on the two-GPU pod
-is still pending. The manual API-server crash/subreaper recovery check is also pending.
+2 MiB before pod stop.
+
+On the pair, Qwen3-VL-8B ran on GPU0 (service PID 1035, logged EngineCore PID 1401) while
+LTX resumed on GPU1 (PID 1821) from step 2 to step 22. The bounded 20-step functional
+extension ran 19:50:39.455908Z–19:53:59.942041Z and saved checkpoints at 5, 10, 15, 20 and
+22. Thirty-seven runtime samples recorded both distinct physical GPU UUIDs, vLLM at
+25,232 MiB on GPU0 and LTX up to 22,542 MiB observed on GPU1. After trainer exit GPU1
+dropped to 2 MiB while GPU0 remained at 25,232 MiB. Source fixes each child's
+`CUDA_VISIBLE_DEVICES`; supervisor `in_use_by` is bookkeeping, while these independent
+physical memory changes substantiate device isolation.
+
+At 19:50:39.983776Z a different service, `trainer-aitoolkit`, requested GPU0 and received
+actual API 409 `gpu_busy`, identifying vLLM's reservation. No second trainer spawned.
+The native synthetic caption returned HTTP 200 and parsed structured output, but its actual
+request began 19:54:34.348241Z and ended 19:55:47.535800Z, entirely after trainer exit.
+This proves simultaneous service allocation/residency and isolation, with no claim of
+simultaneous caption computation. No additional training run was added to manufacture an
+overlap. Manual API-server crash/subreaper recovery remains unverified.
 
 ## Captioning: functional proof and rejected quality outputs
 
@@ -138,10 +197,17 @@ text characters, `ACTIVE JOB CONFIGURATION`, the full held-trait/no-transcriptio
 focused overrides and one image. The instructions were present; no missing-Job source
 defect was found. HTTP success and caption quality are separate outcomes.
 
-A bounded stronger-model pass is queued after both tiny trainer proofs: official BF16
-Qwen/Qwen3-VL-32B-Instruct revision `0cfaf48183f594c314753d30a4c4974bc75f3ccb`, 66,714,912,872
-weight bytes, on an available suitable 80 GB GPU. The official FP8 variant is 35,516,966,184
-bytes and cannot fit the current single 32 GB GPU. No stronger-model pod has been created.
+The user cancelled the five-image caption/comparative-training experiment at 19:28 UTC
+because the dataset is too small to support the intended scientific comparison. Prepared
+notes and rejected outputs are retained as cancelled work, not training evidence. The
+briefly allocated A100 pod `ey4f2374hd3y62` was stopped and freshly read back `EXITED` at
+19:28:52Z; its pending local server-start wait was cancelled (exit 130), and no 32B caption
+batch executed. Creation-to-stop elapsed 117.223 seconds at $1.79/hour, a rate projection of
+$0.0582859 compute; exact billing still has no finalized record. Its 100 GB scratch container
+disk had no network/persistent mount and was lost on stop. The stopped pod configuration
+is retained; the pod was not terminated/deleted.
+The broader experiment is deferred until this evening with a rational dataset and statistical
+design. No further experiment resource or caption work is queued now.
 
 ## Dataset, FLUX checkpoints and curves
 
@@ -169,18 +235,45 @@ safetensors headers. SHA256 final:
 `e9b60bdce2c72e18d81ef0f691de9b119136ed9f5d31d625e12aa769f5c54dd9`;
 step 1: `867ef5a8bf24de84499f7ead0eac5026e0ac6faf8c2925b3716d547047b80614`.
 
-## LTX live proof in progress
+The authenticated TensorBoard scalar-history API returned HTTP 200 and all three points.
+Actual native Swift `PodAgentClient` reads of plan, services, logs and latest events also
+returned HTTP 200; native `TrainingPoint` decoded step 2/loss 0.05031000077724457.
 
-Run `tiny-ltx-proof-20261010` started 19:15:13.99Z on GPU0, final LTX image. It uses the same
+## LTX checkpoints and the curve repair
+
+Run `tiny-ltx-proof-20261010` started 19:15:13.99Z on GPU0, pre-repair `92136b1` LTX image. It uses the same
 four synthetic images, supported Hub source `Lightricks/LTX-2`, two steps, resolution 256,
 rank 2, batch 1, lr 0.0001, RunConfig seed 42, save every step and sampling off. The wrapper
 writes this seed to both root `seed` and `validation.seed`; pinned upstream `trainer.py:156`
 calls `set_seed(cfg.seed)` and its `config.py:802` declares the root reproducibility seed. The wrapper downloaded
 22 selected checkpoint, mirrored Gemma and tokenizer files in 76 seconds into the fixed
-workspace model directory, then loaded four captions for preprocessing. No manual model
-path/download/SSH was required. Checkpoint, curves and Hub push are not yet established.
+workspace model directory, then preprocessed all four images. No manual model
+path/download/SSH was required. The trainer exited 0 at 19:23:18Z, saved step-1/step-2 LoRA
+weights plus training states, and reported peak GPU memory 21.29 GB; post-exit memory was
+2 MiB. The log parser saw step-2 loss 0.0826/lr 0.00001, but the LTX venv lacked
+TensorBoard and wrote no curve file. This actual dependency failure drove the accepted image
+repair above; an import in the agent venv cannot satisfy the isolated trainer interpreter.
 
-The actual queued source-verified low-memory override is:
+The agent uploaded both checkpoints and run/config/model card to private
+`RationallyPrime/concept-captioner-tiny-ltx-proof-20261010`, commit
+`2c39837124df95f7b56fe3b7b78831c14b122295`. Downloaded safetensors are 27,062,728 bytes each,
+2,304 tensors with rank-2 shapes. Step-1 SHA256
+`caa0e2810ece786380cb0b64f33ad430e5e4e906454182e094d0a3ab75fe229d`; step-2
+`70d1d4e86d5b3d9859fdfae1e3096c1b3e425bd7f739f439e294e1f47257f1ce`. The one-GPU pod
+was stopped after securing outputs. Its next start was refused: "There are not enough free
+GPUs on the host machine to start this pod." It remains EXITED.
+
+The existing pair resumed at 19:33:30Z, pulled the repaired image by immutable digest and
+started run `tiny-ltx-default-proof-20261010` at 19:36:54.694383Z on GPU1: two steps, 512px,
+rank 16/alpha 16, batch 1, root seed 42, same low-memory recipe. It exited 0 at
+19:45:17.223928Z, saved both checkpoints and wrote one TensorBoard event file. The agent
+read step 2/loss 0.04809999838471413 and lr 0.000009999999747378752. The authenticated
+TensorBoard scalar-history API returned HTTP 200 with the final loss point; the actual
+native Swift `PodAgentClient.latest` also returned HTTP 200 and decoded the same
+`TrainingPoint`. This establishes the measured native-default functional recipe on one
+32 GB device, with this host's 125 GB RAM. No scientific quality claim follows.
+
+The exact successful low-memory override is:
 
 ```json
 {
@@ -196,41 +289,56 @@ The actual queued source-verified low-memory override is:
 }
 ```
 
-The wrapper already sets bf16 and gradient checkpointing. Upstream source recommends this
-memory-saving recipe for 32 GB; live success and memory measurements are still pending.
-The intended private output repo is `RationallyPrime/concept-captioner-tiny-ltx-proof-20261010`.
+The wrapper already sets bf16 and gradient checkpointing. The later ordinary resume from
+step 2 to step 22 skipped preprocessing and supplied the stage-5 physical GPU1 observation
+of 22,542 MiB. The upstream peak statistic on the pair is not used as an attributed GPU1
+peak: it reported 0.00 GB in the first run and 24.64 GB during resume, while physical GPU0
+already held vLLM. Its device attribution is unverified. The independent physical sample
+is an observation, not a captured training peak.
 
-## Stage 6 preparation: public RunPod template
+The successful 256px/rank2 run used a 62 GB RAM host; the 512px/rank16 run used 125 GB RAM.
+No required host-RAM minimum was established, and no minimum-RAM reservation was needed
+on either successful creation. The larger host observation is not a requirement claim.
+
+The agent uploaded both 512px/rank16 checkpoints and run/config/model card to private
+`RationallyPrime/concept-captioner-tiny-ltx-default-proof-20261010`, commit
+`bd22a74931355941824632455d094a0f29f38315`. Both were downloaded from that immutable commit:
+214,240,000 bytes each, 2,304 tensors, rank-16 shapes `[16,4096]` / `[4096,16]`. Step-1 SHA256
+`252b59eeb9f0adef28b2fe774838f6c2f8a022f340f0cdd61de66afe2c32ae6a`; step-2
+`0c0e949266054c3d9f87d0083cc6fa420954e6aa473b03a5b4d33ff1ce73226e`. The original two-step
+config/log/curve receipts and Hub commit were secured before the bounded isolation resume;
+later checkpoints and training state remain on the durable network volume.
+
+## Stage 6: public RunPod template
 
 Template `87fxs5v8fn`, **Concept Captioner — authenticated vLLM agent**, was created at
-approximately 19:17 UTC and freshly read back public. This is preparation; stage 6 acceptance
-remains pending until the preceding trainer and topology demonstrations pass. It points to the final public base tag, has no registry credential,
+approximately 19:17 UTC as preparation. Its final read-back at 19:58:55Z followed the trainer
+and topology demonstrations and confirmed public visibility. It points to the final public
+base tag, has no registry credential,
 HTTP ports 8800/8000, 50 GB disk, persistent `/workspace` 200 GB, CUDA 13.0/13.1/13.2,
 and no SSH/Jupyter. The API drops empty env values: `PODAGENT_TOKEN` is deliberately absent.
 The launcher must generate a unique 16+ character token per pod and supply it; the agent
 exits without one. vLLM uses the same token by default. HF token is supplied by the user when
 needed. The template itself does not include an account token or a paid GPU allocation.
+The final base image was freshly pulled anonymously after stage 5. A CPU launch of that
+actual image without a token exited 2 with the explicit refusal to start; it did not expose
+an unauthenticated agent. These final image/auth checks created no additional paid pod.
 
-## Unresolved source/spec notes
+## Remaining verification boundaries
 
 The initial handoff listed implementation details beyond the spec. Auth/body limits, stop
-timeout, TensorBoard routing, LTX Hub preparation and compose ports are now reflected in the
-spec. The remaining notes are retained here so live verification does not erase findings:
+timeout, TensorBoard routing, LTX Hub preparation, actual trainer mappings/entrypoints,
+compose ports and REST v2 lifecycle/storage semantics are now aligned in the spec. These
+remaining boundaries are retained so live verification does not erase untested behavior:
 
-- The LTX mapping in spec §4.3 still names `model.model_source`; the wrapper and current
-  upstream use `model.model_path`, root `seed`, explicit encoder paths and image bucket
-  dimensions. The quoted mapping needs alignment after the live result.
-- Spec §1 still shows legacy CLI pod-creation flags and a terminate-after cost guard; actual
-  native creation uses REST v2 `image`, `gpu.minCudaVersion`, network mount and ports. Driver
-  selection and explicit stop authority in this run are recorded above.
 - Transfer source additionally supports `metadata.csv`, repo sidecars and unlisted images,
   split-specific metadata, `<caption-column>_response` records, a resolved pinned revision and
   richer manifest fields. `--require-captions` swaps the dataset before returning 1. Push also
   includes nested `*/samples/*`, excludes preprocessed/dot directories and records `push.json`.
-- Wrapper resume behavior, H3 config/quantization keys and native TensorBoard locations have
-  not all been live verified. FLUX native and scraped curves are established; LTX remains in
-  progress. Empty-caption sampling disables validation; logging is optional when the trainer
-  environment lacks TensorBoard.
+- LTX ordinary resume and both trainers' native/scraped curves and TensorBoard locations
+  were observed. FLUX resume and H3 config/quantization keys remain unverified on live
+  hardware. Empty-caption sampling disables validation. The repaired LTX image supplies
+  TensorBoard to the trainer venv; the initial missing-dependency result is historical.
 - vLLM parameter bounds and defaults in source, including the current v0.31 flag allowlist,
   remain authoritative; the spec sample does not enumerate every rejected override.
 
@@ -238,14 +346,35 @@ spec. The remaining notes are retained here so live verification does not erase 
 
 Local receipts live under `/tmp/concept-captioner-pod-proof-20261010` (private directory).
 Sanitized agent receipts, prepared-request witness, runtime flag probe and downloaded
-FLUX/Hub receipt are retained there. Build/push logs and isolated Docker configs are on
+FLUX/LTX Hub receipts are retained there. Build/push logs and isolated Docker configs are on
 cx53 under `/home/hive/work/concept-captioner-pod-verify-20261010`; credentials are never
 part of this document. The notes experiment retains the rejected caption drafts.
 
-Remaining requested checks: LTX tiny checkpoints/curves/Hub roundtrip; two-GPU concurrent
-workload isolation; trainer public visibility and anonymous pulls; final settled task-only
-costs and stopped read-backs; stage 6 final template/image/auth verification after stages 4–5.
-Real parquet transfer, resume and manual crash recovery remain
-unproven optional historical checks; they are not substituted for the concrete seven proofs.
-The separate 512px/rank16 paired experiment is pending accepted boundary captions and both
-stream acceptances. No rejected caption batch has been promoted into training data.
+Principal local receipts:
+
+- `final-stopped-template-receipt.json`: independent final three-pod EXITED states, final
+  template read-back and storage scope; `final-task-billing-receipt.json`: exact resource
+  billing records, partial subtotal and separately labeled A100 elapsed-rate projection.
+- `flux-hub-receipt.json`, `ltx-hub-receipt.json`, `ltx-default-hub-receipt.json`: downloaded
+  checkpoint lengths, hashes and tensor headers; the adjacent directories contain weights.
+- `flux-tensorboard-curve.json`, `ltx-default-tensorboard-curve.json`, and
+  `ltx-default-stage4-{log,service,events}.json`: successful authenticated curve/run evidence.
+- `topology-runtime-samples.json` and `gpu-busy-api-proof.json`: physical two-GPU observations
+  and actual different-service reservation rejection.
+- `ltx-tensorboard-review-build.log`, `vllm-removed-flags-source-probe.json` and
+  `package-base-public.jpg`: causal repair/build, installed-wheel and public-package proof.
+
+Native receipts are separately at `/tmp/concept-captioner-swift-agent-flux-read.json`,
+`/tmp/concept-captioner-swift-agent-ltx-read.json`,
+`/tmp/concept-captioner-swift-qwen8-concurrent.json` (explicitly after trainer exit), and
+`/tmp/concept-captioner-swift-native-stop.json`. The final native stop proved actual app
+`RunPodProvider` status/stop/status, all HTTP 200, before independent MCP verification.
+
+The remaining distribution blocker is trainer public visibility and successful anonymous
+pulls. The current GUI transport failure prevents the already-authorized settings changes.
+Final settled task-only cost is delayed in billing; partial posted amounts are preserved
+without treating missing records as zero spend. No paid pod remains active or useful runtime
+work queued. Real parquet transfer, FLUX resume and manual crash recovery remain unproven
+historical checks. The five-image experiment is cancelled/deferred by the user; no rejected
+caption batch was promoted into training data. All tiny trainer runs are functional proof
+only and supply no scientific caption-quality comparison.

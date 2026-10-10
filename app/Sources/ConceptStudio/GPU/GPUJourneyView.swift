@@ -38,7 +38,7 @@ struct GPUJourneyView: View {
             Button("Remove computer", role: .destructive) { Task { await workspace.terminate() } }
         } message: {
             Text(
-                "Removing deletes the temporary disk. Saved network storage remains. Stop keeps both disks."
+                "Stopping clears temporary files. Removing deletes the computer. Saved network storage remains."
             )
         }
     }
@@ -106,7 +106,7 @@ struct GPUJourneyView: View {
                 .disabled(workspace.isBusy || workspace.pod != nil || workspace.quotedHourlyRate <= 0)
                 if workspace.pod != nil {
                     if !workspace.hasRunningPod {
-                        Text("Remove this stopped computer before renting another. Its temporary disk is still billed.")
+                        Text("Remove this stopped computer before renting another. Saved network storage remains.")
                             .font(.callout).foregroundStyle(.secondary)
                     }
                     Button("Remove computer…", role: .destructive) { confirmTermination = true }

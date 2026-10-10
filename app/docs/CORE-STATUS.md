@@ -101,6 +101,14 @@ retained pod token was bound to its user-configured endpoint and never printed. 
 core source hashes remained unchanged. This proves one native vLLM image request from Swift;
 the full concept-boundary prompt and training behavior are separate pod-stream checks.
 
+A final native request against the owned `q833ws7hsuyrqn` proxy returned HTTP 200 from
+requested/served `Qwen/Qwen3-VL-8B-Instruct`, with a decoded JSON caption for one synthetic
+blue-circle image. The existing probe used a 128-token maximum; reported usage was
+100 input and 17 output tokens. Its exact UTC start/end were
+19:54:34.348241–19:55:47.535800, both after the pod owner's trainer exit at
+19:53:59.942. This proves final 8B caption functionality and does not establish concurrent
+inference during training. No retry or additional training/caption run was made.
+
 ## Live native pod-agent read proof, 2026-10-10
 
 At 19:24:17–19:24:18 UTC, the Sol core agent compiled an exact copy of the current app's
@@ -152,3 +160,17 @@ This proves one native provider/image/schema/decode path with the current Gemini
 It does not establish caption quality, the full training prompt, a comparative dataset
 experiment or another model's behavior. No additional provider calls, GPU actions or GUI
 launches were performed.
+
+## Live native final shutdown proof, 2026-10-10
+
+After the pod owner confirmed all functional outputs were secured, a temporary probe using
+the exact current app `RunPodProvider` stopped only `q833ws7hsuyrqn`. Its authenticated
+status GET at 19:58:05 UTC returned HTTP 200 and decoded `RUNNING` with two GPUs. The
+single native stop POST at 19:58:06 returned HTTP 200 and `EXITED`; a separate fresh
+status GET at 19:58:07 returned HTTP 200 and decoded `EXITED`. Captured native source and
+executable hashes matched after shutdown. The pod owner received the result immediately.
+
+An offline wrong-ID check rejected execution before credential reading or transport
+creation. The live transport allowed only this pod's status reads and one stop action;
+no other pod, create, restart or terminate action occurred. This demonstrates the native
+provider's final stop/status path without a GUI launch. Existing tests remain network-free.

@@ -116,9 +116,15 @@ The pod owner built/pushed all three images and proved authenticated control on 
 two GPUs. Real open-weights Python and Swift caption requests passed. Both tiny trainers
 produced checkpoints, readable curves and downloaded Hub LoRAs; native app code decoded an
 actual loss point from each. Caption quality has not passed the experiment's boundary review.
-Concurrent device isolation, trainer-image public visibility and final cost remain in progress.
-Four local narrative commits and their decision sheets were tested and accepted against the
-earlier app snapshot; equality to the eventual verified tree is still pending.
+The two-GPU run recorded simultaneous service residency on separate physical devices and
+rejected double-booking. Its final caption request ran after training exited, so simultaneous
+inference during training remains unproved. The base image is anonymously pullable and its
+RunPod template is public. The native provider performed the final stop, and all three task-created pods were
+independently confirmed EXITED. Billing has posted a partial $0.553577723, with later charges
+still delayed; the retained network volume costs $14/month. Trainer-image public visibility
+and the GUI-control connection remain external blockers, including the app's first-run image
+default. The local narrative history, decision sheets and exact-tree receipt live in the
+sibling notes repository; that repository must not be published before the walkthrough.
 The five-image comparison configs had independent offline acceptance,
 but Hákon rejected that dataset as too small; neither treatment was trained. That proposed
 comparison is superseded, not ready to run.

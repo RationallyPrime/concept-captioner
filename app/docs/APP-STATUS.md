@@ -35,6 +35,11 @@ rental and a user action to start and select the authenticated app-created vLLM 
 one-GPU user can caption before training. Its pod token remains outside the job. Closing waits
 for local cancellation and confirmed provider stop before releasing project folder access.
 
+The trainer containers are built and tested but their GitHub packages remain private.
+The Advanced image field therefore still requires manual configuration; a working public
+default image for a fresh installation is pending their visibility change and anonymous pull
+verification. This is an unfinished first-run requirement, not a completed rental experience.
+
 Demo model outcomes include written, unusable, rejected and failed; Core supplies unmapped,
 skipped and protected-final outcomes. The model, assistance, publish and GPU demo actions use
 local data/fakes. No demo Keychain reads or network calls are performed; Apple Photos import is
@@ -50,8 +55,9 @@ separate from the user's configured key host, with injected-wire coverage for om
 Finite assistant draft schemas and decoding cover hosted strict structured-output constraints.
 The GPU module has stubbed-wire and fake-lifecycle tests, including retained state and confirmed
 stops. Idle and budget stops survive agent/proxy errors and Keychain failures; a stopped
-computer remains managed until explicit removal, preventing a new rental from orphaning its
-billed disk. GPU choices require current stock at the selected network volume’s location.
+computer remains managed until explicit removal, keeping one computer under the app's control.
+Stopping clears the temporary container disk; separate network storage persists and remains
+billed. GPU choices require current stock at the selected network volume’s location.
 The publish contract is replayed through the actual
 Core Hub source/Runner and the actual Python pod imagefolder collector/writer: three intended
 images with captions and no reference-image contamination. Vision revision 2 uses conservative
@@ -109,6 +115,11 @@ added to the image, a fresh 512-pixel, rank-16 LTX run completed two steps on on
 step 2 and loss 0.04809999838471413, exactly matching its real `scraped/loss` scalar.
 Both trainers now have actual native loss-point decoding evidence. Neither probe establishes
 rendered chart interaction or training quality.
+
+The actual native `RunPodProvider` also performed the required final shutdown of the owned
+two-GPU pod. At 19:58 UTC, an authenticated GET decoded RUNNING, its stop POST returned 200,
+and a separate fresh native GET decoded EXITED. This proves the provider stop/status path
+against a real pod; the app's complete interactive rental-to-shutdown flow remains unverified.
 
 The preview is unsigned and not notarized. Signing, notarization, sandbox runtime checks and
 distribution approval remain external release work described in `RUNNING.md`. This file does
