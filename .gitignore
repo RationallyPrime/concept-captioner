@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+
+# Jobs and outputs are user data and live beside datasets, not in this repo
+*.local.yaml
+captions/
+_receipts/
+*.jsonl

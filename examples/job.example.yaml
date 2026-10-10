@@ -1,0 +1,58 @@
+# Example job. Every value here is fictional. A real job lives next to your dataset, not in this repo.
+profile: h3-still            # h3-still | flux-image | ltx-image | plain | ./path/to/profile-dir
+
+concepts:
+  - trigger: NORA7
+    class_noun: woman
+    target_concept: facial_identity
+    traits_to_learn:
+      - distinctive facial structure and features necessary for recognition
+    attributes_to_describe:
+      - clothing and removable accessories
+      - hair presentation
+      - expression and gaze
+      - pose
+      - visible physique
+      - setting
+      - lighting
+      - framing and visible image treatment
+    explicit_boundary_decisions:
+      facial_geometry: Reserve for the identity trigger; do not describe facial morphology.
+      eye_color: Reserve for the identity trigger.
+      hair_color_and_styling: Describe visible presentation, including color when clear.
+      physique: Describe observable build; outside this facial-identity concept.
+      age: Do not infer exact age or biography.
+  - trigger: IVAN9
+    class_noun: man
+    target_concept: facial_identity
+    explicit_boundary_decisions:
+      facial_geometry: Reserve for the identity trigger; do not describe facial morphology.
+      eye_color: Reserve for the identity trigger.
+      hair_color_and_styling: Describe visible presentation, including color when clear.
+
+# sample id -> trigger -> locator. A locator is how the captioner binds a trigger to one visible person.
+# null holds a sample for review without any provider call. Never guess a mapping.
+samples:
+  solo.png:
+    NORA7: The only person in the crop.
+  pair.png:
+    NORA7: The woman on the left.
+    IVAN9: The man on the right.
+  unmapped.png: null
+
+single_subject_only: false
+captioner_thinking: low
+critic_thinking: high
+require_model_match: true
+minimum_caption_words: 1
+max_caption_attempts: 3
+
+# Endpoints are kind + options. Secrets come from the environment, never from here.
+endpoints:
+  captioner:
+    kind: gemini
+    model: gemini-3.8-flash
+  critic:
+    kind: openai
+    model: Qwen/Qwen3-VL-32B-Instruct
+    base_url: http://localhost:8000/v1
