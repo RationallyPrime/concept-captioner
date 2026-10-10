@@ -1,16 +1,19 @@
 # ConceptStudio app status
 
-Development preview prepared on 2026-10-10 at `app/dist/ConceptStudio.app`. It was built and
-its bundle metadata validated. Agent-driven GUI checks reached Welcome, demo Images and
-Concepts, with all nine navigation entries visible. Concepts showed the reference image,
-Learn/Describe boundary, guidance and next action at 1240 × 820 without obvious clipping.
-The user confirmed that Next: Concepts works and the app responds normally. Native control
-then disconnected again on the first attempted navigation, while the Mac was unlocked and
-the app remained running. This is a tool-transport failure, not an observed app crash;
-Mapping through Monitor and the complete interactive walkthrough remain unverified. The app is an
-unsigned macOS 15+ Swift 6 / SwiftUI executable, with SwiftPM and Yams as its only third-party
-dependency. `scripts/build-app.sh` produces the bundle; `RUNNING.md` covers first run and
-distribution requirements.
+The development preview at `app/dist/ConceptStudio.app` includes the 2026-10-10 native UI
+refinement using Impeccable. Its design direction is recorded in [DESIGN.md](../DESIGN.md),
+with APP-BRIEF remaining the product authority. The owner supplied hakonfreyr.com as a quality
+reference. The refinement uses a photo workspace, clearer hierarchy and progressive controls
+while preserving the nine-screen journey and the shared captioning/training contracts.
+
+The earlier agent-driven GUI checks reached Welcome, demo Images and Concepts before this
+refinement. The user confirmed that Next: Concepts works and the app responds normally.
+The native computer-control connection still fails with a closed transport pipe; the last
+read failure did not establish an app crash or a locked Mac. The refined UI has offscreen
+layout evidence described below, but its complete interactive walkthrough remains pending.
+The preview is an unsigned macOS 15+ Swift 6 / SwiftUI executable, with SwiftPM and Yams as
+its only third-party dependency. Its build and bundle metadata validate; `RUNNING.md` covers
+first run, the repeatable render command and distribution requirements.
 
 ## Implemented
 
@@ -97,8 +100,37 @@ and entitlement plist validated.
 The public-image default change then passed seven focused action tests, including eight
 cases observing the actual native create request for both trainers with missing, blank or
 custom preferences, and three save/reset cases. Parent review accepted the scoped change.
-The latest integration passes 238 Swift tests (31 app/GPU and 207 Core), strict lint and
+That integration passed 238 Swift tests (31 app/GPU and 207 Core), strict lint and
 formatting. The unsigned preview is rebuilt with the automatic image choice.
+
+The native UI refinement adds a shared type/spacing/color vocabulary, a contact-sheet gallery,
+Learn/Describe columns beside the reference, thumbnail mapping navigation, adaptive review,
+account-key guidance and explicit TensorBoard loading/error/reload states. All original model,
+skill, profile, GPU and trainer controls remain available. Review retains unsaved drafts across
+photo/screen navigation; explicit Save and Command-S write the active caption. Failed saves
+retain drafts, Discard restores the current saved version, and project replacement/close/quit
+warn before discarding. Cancelling a concept editor cancels only its owned draft request.
+
+The latest integration passes **246 executed offline Swift tests** (39 app/GPU and 207 Core).
+The separate opt-in rendering test is skipped by an ordinary run. Eight new draft tests cover
+navigation, explicit final saves, filesystem failure/retry, later-edit retention, discarded or
+undone drafts followed by a real demo recaption, and draft-only quit confirmation. Independent
+source review accepted the change and its bounded layout repair. Strict lint and formatting
+pass across 84 source/test files; the arm64 unsigned bundle and its plists validate. Later
+changes to layout only were built/linted and checked through the native renderer; they do not
+change the tested caption or service contracts.
+
+The render command uses the actual SwiftUI views in never-shown native windows, an isolated
+copy of the source and the existing local dependency checkout. It uses only the bundled demo
+and fake services. The visual matrix covers all nine screens plus Welcome and Settings at
+980 × 680 and 1240 × 820 in both appearances, and the concept editor at 660 × 650. Inspection
+found and repaired a minimum-height problem that pushed the shell header/footer out of view.
+Captioning's Start action and cost explanation now stay visible while choices and results
+scroll. Filled primary buttons use a darker tint than links to keep white labels readable in
+both appearances. Native sidebar/selection vibrancy is inaccurate in offscreen cached drawing; those
+pixels cannot establish live appearance contrast. The captures use a simulated active-control
+appearance and show initial viewports, not scrolling or input. The human walkthrough still
+needs to verify native focus, keyboard/menu actions, dialogs, VoiceOver and full live flow.
 
 The automated action tests above are headless checks. Complete pixel-layout and interactive
 keyboard/VoiceOver coverage remain pending. Keychain save/read, Apple Photos/iCloud selection,

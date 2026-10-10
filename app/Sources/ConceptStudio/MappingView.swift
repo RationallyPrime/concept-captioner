@@ -15,59 +15,103 @@ struct MappingView: View {
         (session.project?.images.count ?? 0) - session.unmappedCount
     }
 
+    private var selectedImage: ProjectImage? {
+        images.first { $0.id == session.selectedImageID }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                Text(
-                    "\(confirmedCount) / \(session.project?.images.count ?? 0) confirmed"
-                )
-                Toggle("Show unconfirmed only", isOn: $onlyUnmapped)
-                Spacer()
-                Button("Suggest on this Mac") { session.proposeMappings(useModel: false) }
-                Button("Ask model using references") { session.proposeMappings(useModel: true) }
-            }.disabled(session.busy)
+        VStack(alignment: .leading, spacing: 20) {
+            StudioSection(
+                title: "Match each photo to your concepts",
+                subtitle: "Identify who or what is present. "
+                    + "A suggestion becomes part of your project only when you confirm it."
+            ) {
+                HStack(spacing: 20) {
+                    Text("\(confirmedCount) / \(session.project?.images.count ?? 0) confirmed")
+                        .fontWeight(.medium)
+                    ProgressView(
+                        value: Double(confirmedCount),
+                        total: Double(max(session.project?.images.count ?? 0, 1))
+                    )
+                    .frame(maxWidth: 180).accessibilityLabel("Photos confirmed")
+                    Spacer()
+                    Toggle("Show unconfirmed only", isOn: $onlyUnmapped).toggleStyle(.checkbox)
+                }.font(.callout)
+                HStack(spacing: 10) {
+                    Button("Suggest on this Mac", systemImage: "person.crop.rectangle") {
+                        session.proposeMappings(useModel: false)
+                    }
+                    Button("Ask model using references", systemImage: "sparkles") {
+                        session.proposeMappings(useModel: true)
+                    }
+                }.disabled(session.busy)
+                Text(session.demoMode ? "Both actions run offline in the demo." :
+                    "Mac suggestions stay on this device. "
+                    + "Asking the model uses your selected provider and may use account credits.")
+                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
+            }
+            Divider()
             HSplitView {
                 List(images, selection: $session.selectedImageID) { image in
-                    Label(
-                        image.id,
-                        systemImage: session.project?.job.mapping(for: image.id) == nil ? "circle" : "checkmark.circle.fill"
-                    )
-                    .tag(image.id)
-                }.frame(minWidth: 145, idealWidth: 190, maxWidth: 240)
+                    HStack(spacing: 10) {
+                        PhotoView(url: image.url).frame(width: 52, height: 48)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(image.id).lineLimit(1).help(image.id)
+                            Label(
+                                session.project?.job.mapping(for: image.id) == nil ? "Unconfirmed" : "Confirmed",
+                                systemImage: session.project?.job.mapping(for: image.id) == nil ? "circle" :
+                                    "checkmark.circle.fill"
+                            ).font(.caption)
+                        }
+                    }.padding(.vertical, 4).tag(image.id)
+                }.listStyle(.inset).frame(minWidth: 190, idealWidth: 225, maxWidth: 280)
                 ScrollView {
-                    if let image = session.selectedImage {
-                        VStack(alignment: .leading, spacing: 16) {
-                            PhotoView(url: image.url, faces: session.analyses[image.id]?.faces ?? []).frame(height: 320)
+                    if let image = selectedImage {
+                        VStack(alignment: .leading, spacing: 20) {
+                            Text(image.id).font(.title3.weight(.semibold)).textSelection(.enabled)
+                            PhotoView(url: image.url, faces: session.analyses[image.id]?.faces ?? [])
+                                .frame(height: 320).frame(maxWidth: .infinity)
+                                .background(StudioStyle.surface)
                             if session.mappingProposals[image.id] != nil {
-                                Text("Suggestion only — check each person before confirming.").foregroundStyle(.orange)
+                                StudioNotice(
+                                    "Check every suggested subject against this photo before confirming.",
+                                    symbol: "person.crop.rectangle.badge.checkmark"
+                                )
                                 Button("Fill from suggestion") { load(proposal: true) }
                             }
-                            ForEach(session.project?.job.concepts ?? [], id: \.trigger) { concept in
-                                HStack {
-                                    Toggle(
-                                        concept.trigger,
-                                        isOn: Binding(get: { enabled.contains(concept.trigger) }, set: { value in
-                                            if value {
-                                                enabled.insert(concept.trigger)
-                                            } else {
-                                                enabled.remove(concept.trigger)
-                                            }
-                                        })
-                                    ).frame(width: 110)
-                                    TextField(
-                                        "Where is this subject? e.g. person on the left in a blue top",
-                                        text: Binding(
-                                            get: { locators[concept.trigger] ?? "" },
-                                            set: { locators[concept.trigger] = $0 }
-                                        )
-                                    ).disabled(!enabled.contains(concept.trigger))
+                            StudioSection(title: "Present in this photo") {
+                                ForEach(session.project?.job.concepts ?? [], id: \.trigger) { concept in
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        Toggle(
+                                            "\(concept.trigger) · \(concept.classNoun)",
+                                            isOn: Binding(get: { enabled.contains(concept.trigger) }, set: { value in
+                                                if value {
+                                                    enabled.insert(concept.trigger)
+                                                } else {
+                                                    enabled.remove(concept.trigger)
+                                                }
+                                            })
+                                        ).toggleStyle(.checkbox).fontWeight(.medium)
+                                        if enabled.contains(concept.trigger) {
+                                            TextField(
+                                                "Where is this subject? e.g. person on the left in a blue top",
+                                                text: Binding(
+                                                    get: { locators[concept.trigger] ?? "" },
+                                                    set: { locators[concept.trigger] = $0 }
+                                                ),
+                                                axis: .vertical
+                                            ).lineLimit(1 ... 3)
+                                                .accessibilityLabel("\(concept.trigger) location in this photo")
+                                        }
+                                    }.padding(.vertical, 4)
                                 }
+                                Text(
+                                    "Uncheck a learning word if its subject is absent. "
+                                        + "Confirming with none selected means none of your concepts appears."
+                                )
+                                .font(.callout).foregroundStyle(StudioStyle.supportingText)
                             }
-                            Text(
-                                "Uncheck a learning word if its subject is absent. "
-                                    + "An empty confirmed mapping means none of your concepts appears."
-                            )
-                            .font(.caption).foregroundStyle(.secondary)
+                            Divider()
                             Button("Confirm this photo") {
                                 session.confirmMapping(
                                     id: image.id,
@@ -77,7 +121,7 @@ struct MappingView: View {
                                     .first(where: { session.project?.job.mapping(for: $0.id) == nil }) {
                                     session.selectedImageID = next.id
                                 }
-                            }.buttonStyle(.borderedProminent)
+                            }.buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
                                 .disabled(session.busy || enabled.contains { (locators[$0] ?? "").isEmpty })
                             Button("Mark as unconfirmed") {
                                 do {
@@ -87,13 +131,28 @@ struct MappingView: View {
                                     session.errorMessage = StudioSession.describe(error)
                                 }
                             }.disabled(session.busy)
-                        }.padding(.leading, 18)
-                    } else { ContentUnavailableView("Select a photo", systemImage: "person.crop.rectangle") }
+                        }.padding(.leading, 20).padding(.bottom, 12)
+                    } else {
+                        ContentUnavailableView(
+                            onlyUnmapped && images.isEmpty ? "Every photo is confirmed" : "Select a photo",
+                            systemImage: onlyUnmapped && images.isEmpty ? "checkmark.circle" : "person.crop.rectangle",
+                            description: Text(onlyUnmapped && images
+                                .isEmpty ? "Turn off the filter to review your confirmed mappings." :
+                                "Choose a photo from the list to identify its subjects.")
+                        )
+                    }
                 }
             }
         }
-        .onAppear { load() }
+        .onAppear { selectVisiblePhoto(); load() }
+        .onChange(of: images.map(\.id)) { _, _ in selectVisiblePhoto() }
         .onChange(of: session.selectedImageID) { _, _ in load() }
+    }
+
+    private func selectVisiblePhoto() {
+        if !images.contains(where: { $0.id == session.selectedImageID }) {
+            session.selectedImageID = images.first?.id
+        }
     }
 
     private func load(proposal: Bool = false) {

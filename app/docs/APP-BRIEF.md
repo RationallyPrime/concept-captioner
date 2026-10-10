@@ -27,6 +27,7 @@ Lead with intent: what should be learned, what should stay changeable, and what 
 Explain necessary terms in place; require no outside research. Every screen explains itself
 in a sentence, has one obvious next action, gives actionable errors without stack traces, and
 shows money before spending it. Preserve meaningful control and inspectable project data.
+Use the native interface conventions in [DESIGN.md](../DESIGN.md) when implementing these rules.
 
 ## The user journey (one screen each, in this order)
 

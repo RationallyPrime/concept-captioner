@@ -228,6 +228,7 @@ extension StudioSession {
             guard var project = self.project else { return }
             try await project.saveCaption(id: id, text: text, final: final)
             self.project = project
+            self.clearSavedCaptionDraft(CaptionDraft(text: text, isFinal: final), for: id)
             self.message = final ? "Final caption saved. Model runs will skip it." : "Caption saved."
         }
     }

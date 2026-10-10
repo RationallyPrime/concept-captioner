@@ -83,6 +83,11 @@ billed. Explicitly Remove the stopped computer before renting another. See
 If the app reopens with a saved running computer, Welcome exposes its cost and stop controls
 before you open a project. Missing credentials do not hide that retained computer.
 
+Caption edits remain in the open project while moving between photos or screens. Save caption
+(or Command-S while Review is active) writes the selected draft; Discard edits restores the
+saved caption. Closing, quitting or switching projects warns before discarding unsaved drafts.
+Publishing uploads saved captions and warns when drafts still need saving.
+
 ## Building and distribution
 
 Developers can build the preview from the repository root:
@@ -96,6 +101,21 @@ scripts/build-app.sh release
 The script copies the executable and both SwiftPM resource bundles, writes the app Info.plist,
 and does not launch or sign it. Tests use Swift Testing; `swift test` and `swiftlint lint --strict`
 run from `app/`. `swiftformat Sources Tests --lint` checks formatting.
+
+The native UI conventions are in [DESIGN.md](../DESIGN.md). To inspect actual SwiftUI content
+without changing the desktop or using a live service, run this from the repository root after
+the normal app build has populated its Yams checkout:
+
+```sh
+scripts/render-app-preview.sh
+# Offscreen PNGs and source/render manifests in app/dist/visual-check
+```
+
+This opt-in Swift Testing render pass uses the bundled demo, fake GPU services and isolated
+preferences in a temporary source snapshot. It checks the minimum and default window sizes
+in light and dark appearances. The host window is never shown or activated. Offscreen bitmap
+rendering does not establish live keyboard, VoiceOver, titlebar or native vibrancy behavior;
+use the actual app for the human walkthrough. Ordinary `swift test` skips the render pass.
 
 `app/ConceptStudio.entitlements` declares the sandbox, user-selected read/write access,
 security-scoped bookmarks, network-client access and Photos access. Distribution still needs

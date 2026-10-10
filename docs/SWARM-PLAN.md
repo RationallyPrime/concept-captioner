@@ -107,8 +107,10 @@ preserve unresolved findings. Never put keys or private project material in the 
 ## Integration proof and final artifacts
 
 Current boundary: the initial app and GPU implementation have independent acceptance, and
-the measured caption-server settings and reuse repair are published. The latest integration
-passes 238 offline Swift tests, strict lint/format and a refreshed unsigned bundle.
+the measured caption-server settings and reuse repair are published. The app now also has an
+Impeccable-guided native photo-workspace refinement with protected
+caption drafts, clearer controls and offscreen layout checks. Current test counts, native
+rendering boundaries and the refreshed unsigned bundle are recorded in `app/docs/APP-STATUS.md`.
 Real Swift Hub upload/verify/download, native RunPod catalog/volume reads, and one direct
 Gemini structured caption request also passed. The GUI reached Welcome, demo Images and
 Concepts; the user confirmed the app responds normally. Native control disconnects on input,

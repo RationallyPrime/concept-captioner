@@ -2,6 +2,11 @@ import AppKit
 import ConceptCore
 import Observation
 
+struct CaptionDraft: Equatable {
+    var text: String
+    var isFinal: Bool
+}
+
 @MainActor @Observable
 final class StudioSession {
     var project: StudioProject?
@@ -18,6 +23,7 @@ final class StudioSession {
     var datasetAdvice = ""
     var mappingProposals: [String: Job.Mapping] = [:]
     var comparison = ""
+    private(set) var captionDrafts: [String: CaptionDraft] = [:]
     var usingPodCaptioner = false
     var startupRestored = false
     var recentPaths = ProjectAccess.recentPaths
@@ -50,6 +56,43 @@ final class StudioSession {
 
     var selectedImage: ProjectImage? {
         project?.images.first { $0.id == selectedImageID }
+    }
+
+    func captionDraft(for image: ProjectImage) -> CaptionDraft {
+        captionDrafts[image.id] ?? CaptionDraft(text: image.caption, isFinal: image.isFinal)
+    }
+
+    func setCaptionDraft(_ draft: CaptionDraft, for id: String) {
+        guard let image = project?.images.first(where: { $0.id == id }) else { return }
+        let saved = CaptionDraft(text: image.caption, isFinal: image.isFinal)
+        captionDrafts[id] = draft == saved ? nil : draft
+    }
+
+    func discardCaptionDraft(for image: ProjectImage) {
+        captionDrafts[image.id] = nil
+    }
+
+    func hasUnsavedCaption(for image: ProjectImage) -> Bool {
+        captionDraft(for: image) != CaptionDraft(text: image.caption, isFinal: image.isFinal)
+    }
+
+    var unsavedCaptionCount: Int {
+        project?.images.count(where: { hasUnsavedCaption(for: $0) }) ?? 0
+    }
+
+    var captionDiscardWarning: String? {
+        guard unsavedCaptionCount > 0 else { return nil }
+        return "\(unsavedCaptionCount) unsaved caption edits will be discarded. "
+            + "Save those captions on Review to keep them. Saved captions are unchanged."
+    }
+
+    var needsCloseConfirmation: Bool {
+        unsavedCaptionCount > 0 || busy || gpu.hasRunningPod || gpu.isBusy
+    }
+
+    func clearSavedCaptionDraft(_ draft: CaptionDraft, for id: String) {
+        // A later edit must survive completion of an earlier save.
+        if captionDrafts[id] == draft { captionDrafts[id] = nil }
     }
 
     var unmappedCount: Int {
@@ -113,6 +156,7 @@ final class StudioSession {
             errorMessage = "Stop the rented computer before switching to the demo."
             return
         }
+        guard confirmDiscardCaptionDrafts() else { return }
         perform("Opening the offline demo…") {
             await self.releaseProject()
             self.demoMode = true
@@ -131,6 +175,7 @@ final class StudioSession {
             errorMessage = "Finish the current computer action or Stop everything before changing projects."
             return
         }
+        guard confirmDiscardCaptionDrafts() else { return }
         guard let url = ProjectAccess.chooseFolder(prompt: "Create project here") else { return }
         perform("Creating your project…") {
             await self.releaseProject()
@@ -152,6 +197,7 @@ final class StudioSession {
             errorMessage = "Finish the current computer action or Stop everything before changing projects."
             return
         }
+        guard confirmDiscardCaptionDrafts() else { return }
         guard let selected = url ?? ProjectAccess.chooseFolder(prompt: "Open project") else { return }
         perform("Opening your project…") {
             await self.releaseProject()
@@ -189,6 +235,7 @@ final class StudioSession {
         mappingProposals = [:]
         datasetAdvice = ""
         comparison = ""
+        captionDrafts = [:]
         usingPodCaptioner = false
         requestBaseURL = ""
     }
@@ -206,7 +253,13 @@ final class StudioSession {
     }
 
     func saveProject() {
-        do { try project?.save(); message = "Project saved." } catch { errorMessage = Self.describe(error) }
+        do {
+            try project?.save()
+            message = unsavedCaptionCount > 0
+                ? "Project configuration saved. "
+                + "Save your \(unsavedCaptionCount) caption drafts on Review before closing."
+                : "Project saved."
+        } catch { errorMessage = Self.describe(error) }
     }
 
     func next() {

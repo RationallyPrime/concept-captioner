@@ -3,7 +3,18 @@ import SwiftUI
 
 @MainActor
 extension StudioSession {
+    func confirmDiscardCaptionDrafts() -> Bool {
+        guard let warning = captionDiscardWarning else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Discard unsaved caption edits?"
+        alert.informativeText = warning
+        alert.addButton(withTitle: "Keep editing")
+        alert.addButton(withTitle: "Discard edits")
+        return alert.runModal() == .alertSecondButtonReturn
+    }
+
     func confirmClose() -> Bool {
+        guard confirmDiscardCaptionDrafts() else { return false }
         guard gpu.hasRunningPod || busy || gpu.isBusy else { return true }
         let alert = NSAlert()
         alert.messageText = gpu.hasRunningPod ? "Stop the rented computer before closing?" : "Cancel the current work?"
@@ -27,7 +38,7 @@ final class StudioAppDelegate: NSObject, NSApplicationDelegate {
     weak var session: StudioSession?
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let session, session.busy || session.gpu.hasRunningPod || session.gpu.isBusy else { return .terminateNow }
+        guard let session, session.needsCloseConfirmation else { return .terminateNow }
         guard session.confirmClose() else { return .terminateCancel }
         Task {
             await session.closeProject()

@@ -22,34 +22,35 @@ struct CaptioningView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                GroupBox("Captioning choices") {
+            VStack(alignment: .leading, spacing: StudioStyle.contentSpacing) {
+                StudioSection(
+                    title: "How captions are written",
+                    subtitle: "Choose a model and the format your training model needs."
+                ) {
                     Form {
                         Picker("Account", selection: $session.endpointKind) {
                             ForEach(ModelChoices.providers, id: \.self) { Text(ModelChoices.title($0)).tag($0) }
                         }
                         TextField("Model", text: $session.modelName)
-                            .help("Your gateway can use many models with one saved key.")
-                        Picker(
-                            "Caption format",
-                            selection: Binding(get: { session.project?.job.profile ?? "flux-image" }, set: {
-                                session.project?.job.profile = $0; session.saveProject()
-                            })
-                        ) {
-                            ForEach(profiles, id: \.self) { Text($0).tag($0) }
+                            .help(
+                                "Use the model identifier from your provider. "
+                                    + "A gateway can use many models with one key."
+                            )
+                        Picker("Caption format", selection: Binding(
+                            get: { session.project?.job.profile ?? "flux-image" },
+                            set: { session.project?.job.profile = $0; session.saveProject() }
+                        )) {
+                            ForEach(profiles, id: \.self) { Text(profileTitle($0)).tag($0) }
                         }
-                        HStack {
-                            Text(session.project?.job.skill == nil ? "Bundled concept-boundary instructions" : session
-                                .project?.job.skill ?? "")
-                                .lineLimit(1).truncationMode(.middle)
-                            Spacer()
-                            Button("Choose skill folder…") { session.chooseSkill() }
-                            if session.project?.job.skill != nil {
-                                Button("Use bundled") { session.project?.job.skill = nil; session.saveProject() }
-                            }
-                        }
-                        Toggle("Have a second model check the caption", isOn: $session.useCritic)
-                        if session.useCritic {
+                    }.formStyle(.columns)
+                    Text(
+                        "Your concept boundaries guide every caption. "
+                            + "The format controls how that description is written."
+                    )
+                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                    Toggle("Have a second model check the caption", isOn: $session.useCritic)
+                    if session.useCritic {
+                        Form {
                             Picker("Reviewer account", selection: $session.criticKind) {
                                 ForEach(ModelChoices.providers, id: \.self) { Text(ModelChoices.title($0)).tag($0) }
                             }
@@ -60,8 +61,34 @@ struct CaptioningView: View {
                                     text: $session.criticRequestBaseURL
                                 )
                             }
-                        }
-                        DisclosureGroup("Advanced controls") {
+                        }.formStyle(.columns)
+                        Text(
+                            "The reviewer can reject a caption with notes. "
+                                + "This adds a second provider request per photo."
+                        )
+                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                    }
+                    DisclosureGroup("Caption instructions and custom skills") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(session.project?.job.skill == nil
+                                ? "Using the bundled concept-boundary instructions."
+                                : "Using your selected instruction folder:")
+                            if let path = session.project?.job.skill {
+                                Text(path).font(.callout).textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            HStack {
+                                Button("Choose skill folder…") { session.chooseSkill() }
+                                if session.project?.job.skill != nil {
+                                    Button("Use bundled") { session.project?.job.skill = nil; session.saveProject() }
+                                }
+                            }
+                            Text("A skill folder supplies the caption-writing instructions and its available formats.")
+                                .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                        }.padding(.top, 12)
+                    }
+                    DisclosureGroup("Advanced model and batch controls") {
+                        Form {
                             Picker("Thinking effort", selection: $session.modelThinking) {
                                 ForEach(ThinkingLevel.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                             }
@@ -74,68 +101,89 @@ struct CaptioningView: View {
                                 ForEach(OutputMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                             }
                             Stepper("\(session.concurrency) photos at once", value: $session.concurrency, in: 1 ... 16)
-                            if session.endpointKind == "vllm" { TextField(
-                                "Server URL for this project (blank uses Settings)",
-                                text: $session.requestBaseURL
-                            ) }
+                            if session.endpointKind == "vllm" {
+                                TextField(
+                                    "Server URL for this project (blank uses Settings)",
+                                    text: $session.requestBaseURL
+                                )
+                            }
                             Toggle("Re-caption existing model captions", isOn: $overwrite)
                             Text("Final captions are always protected. Turn this on to replace earlier model captions.")
-                                .font(.caption)
-                        }
-                    }.padding(10)
+                                .font(.caption).foregroundStyle(StudioStyle.supportingText)
+                        }.formStyle(.columns).padding(.top, 12)
+                    }
                 }.disabled(session.busy)
-                GroupBox("Caption on a rented computer") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Hosted captioning needs no rented GPU. For a local model, rent a computer first, "
-                            + "caption on GPU 0, then return to training after Review and Publish.")
-                        HStack {
-                            Button("Rent or choose a captioning computer") { session.step = .pods }
-                            Button("Start caption server and use this computer") { session.usePodCaptionServer() }
-                                .disabled(session.busy || !session.gpu.hasRunningPod)
-                        }
+                Divider()
+                DisclosureGroup("Optional: caption on a rented computer") {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Hosted captioning needs no rented GPU. To use a local model, rent a computer, "
+                            + "caption on GPU 0, then review and publish before training.")
+                            .foregroundStyle(StudioStyle.supportingText)
+                        Button("Rent or choose a captioning computer") { session.step = .pods }
+                        Button("Start caption server and use this computer") { session.usePodCaptionServer() }
+                            .disabled(session.busy || !session.gpu.hasRunningPod)
                         if session.usingPodCaptioner {
-                            Text("Using your authenticated computer's caption server.").font(.caption)
+                            StudioNotice("Using your authenticated computer’s caption server.", symbol: "server.rack")
                             Button("Use my Settings server instead") {
                                 session.usingPodCaptioner = false
                                 session.requestBaseURL = ""
                             }
                         }
-                    }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
-                }
-                if session.demoMode {
-                    Picker("Demo outcome to try", selection: $session.scenario) {
-                        ForEach(DemoScenario.allCases) { Text($0.rawValue.capitalized).tag($0) }
+                    }.padding(.top, 12)
+                }.disabled(session.busy)
+                Divider()
+                StudioSection(title: "Write and watch") {
+                    if session.demoMode {
+                        Picker("Demo outcome to try", selection: $session.scenario) {
+                            ForEach(DemoScenario.allCases) { Text($0.rawValue.capitalized).tag($0) }
+                        }
+                        Text(
+                            "Enable the reviewer to try Rejected. Clear a mapping on Mapping to try Needs mapping."
+                        )
+                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
                     }
-                    Text(
-                        "Rejected demonstrates the optional critic; enable it for that outcome. "
-                            + "Clear a mapping on the Mapping screen to try Needs mapping."
-                    )
-                    .font(.caption).foregroundStyle(.secondary)
-                }
-                if session.unmappedCount > 0 {
-                    Label(
-                        "\(session.unmappedCount) photos still need mapping. "
-                            + "They will be skipped until you confirm them.",
-                        systemImage: "person.crop.rectangle"
-                    )
-                    .foregroundStyle(.orange)
-                }
-                Text(session
-                    .demoMode ? "Demo captioning costs $0 and stays offline." :
-                    "Uses your provider account credits. No rented GPU is needed for hosted captioning.")
-                    .foregroundStyle(.secondary)
-                Button("Start captioning", systemImage: "play.fill") { session.caption(overwrite: overwrite) }
-                    .buttonStyle(.borderedProminent).disabled(session.busy || session.project?.images.isEmpty != false)
-                ForEach(session.project?.images ?? []) { image in
-                    HStack {
-                        Text(image.id).frame(width: 170, alignment: .leading)
-                        Text(image.status?.rawValue.replacingOccurrences(of: "_", with: " ") ?? "Ready")
-                            .font(.callout.bold())
-                        Text(image.notes.joined(separator: "; ")).foregroundStyle(.secondary)
-                    }.padding(.vertical, 4)
+                    if session.unmappedCount > 0 {
+                        StudioNotice(
+                            "\(session.unmappedCount) photos still need mapping. "
+                                + "They will be skipped until you confirm them.",
+                            symbol: "person.crop.rectangle"
+                        )
+                    }
+                    if session.project?.images.isEmpty == true {
+                        ContentUnavailableView(
+                            "Add photos first",
+                            systemImage: "photo.on.rectangle",
+                            description: Text("Import your image set on Images, then return here.")
+                        )
+                    }
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        ForEach(session.project?.images ?? []) { image in
+                            let status = captionStatus(for: image)
+                            HStack(alignment: .top, spacing: 14) {
+                                PhotoView(url: image.url).frame(width: 72, height: 64)
+                                    .background(StudioStyle.surface, in: RoundedRectangle(cornerRadius: 6))
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(image.id).font(.headline).textSelection(.enabled)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Label(
+                                        status.title,
+                                        systemImage: status.symbol
+                                    )
+                                    .font(.callout)
+                                    if !image.notes.isEmpty {
+                                        Text(image.notes.joined(separator: "; "))
+                                            .foregroundStyle(StudioStyle.supportingText)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }.frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            Divider()
+                        }
+                    }.padding(.top, 8)
                 }
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) { captionAction }
         .onChange(of: session.endpointKind) { _, kind in
             switch kind {
             case "google": session.modelName = "gemini-3.8-flash"
@@ -148,7 +196,46 @@ struct CaptioningView: View {
         }
     }
 
+    private var captionAction: some View {
+        VStack(spacing: 12) {
+            Divider()
+            HStack(spacing: 16) {
+                Button("Start captioning", systemImage: "play.fill") { session.caption(overwrite: overwrite) }
+                    .buttonStyle(.borderedProminent).tint(StudioStyle.actionTint).fixedSize()
+                    .disabled(session.busy || session.project?.images.isEmpty != false)
+                Text(session.demoMode
+                    ? "Demo captioning costs $0 and stays offline."
+                    : "Uses your provider account credits. Hosted captioning needs no rented GPU.")
+                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }.padding(.vertical, 10)
+        }.background(StudioStyle.canvas)
+    }
+
     private var profiles: [String] {
         (try? session.selectedSkill().profiles()) ?? [session.project?.job.profile ?? "flux-image"]
+    }
+
+    private func profileTitle(_ profile: String) -> String {
+        [
+            "flux-image": "FLUX · image captions",
+            "ltx-image": "LTX · image captions",
+            "h3-still": "H3 · still-image captions",
+            "plain": "Plain prose",
+        ][profile] ?? profile
+    }
+
+    private func captionStatus(for image: ProjectImage) -> (title: String, symbol: String) {
+        if image.isFinal { return ("Final · protected", "lock.fill") }
+        switch image.status {
+        case .written: return ("Written", "checkmark.circle")
+        case .skipped: return ("Skipped", "arrow.right.circle")
+        case .needsMapping: return ("Needs mapping", "person.crop.rectangle")
+        case .unusable: return ("Unusable", "exclamationmark.triangle")
+        case .rejected: return ("Rejected", "hand.raised")
+        case .failed: return ("Failed", "exclamationmark.circle")
+        case nil: return ("Ready", "circle")
+        }
     }
 }

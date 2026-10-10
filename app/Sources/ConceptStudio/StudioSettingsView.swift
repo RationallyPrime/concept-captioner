@@ -13,71 +13,114 @@ struct StudioSettingsView: View {
     private let advanced = ["google", "anthropic", "openai", "vllm", "huggingface", "runpod"]
 
     var body: some View {
-        Form {
-            Section("One gateway key is enough to start") {
-                Text(
-                    "Bring an account you already hold. A gateway gives access to many models with one key. "
-                        + "ConceptStudio sells no credits."
-                )
-                ForEach(gateways, id: \.self) { kind in
-                    LabeledContent(
-                        title(kind),
-                        value: keyStatus(kind)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Accounts & settings").font(.title2.weight(.semibold))
+                    Text("Connect once, then choose your model on Captioning.")
+                        .foregroundStyle(StudioStyle.supportingText)
+                }
+                Spacer()
+                if session.demoMode { DemoBadge() }
+            }.padding(24)
+            Form {
+                Section("One gateway account is enough to start") {
+                    Text("A gateway gives you several captioning models through one account. "
+                        + "An account key lets this app use that service. ConceptStudio sells no credits.")
+                        .fixedSize(horizontal: false, vertical: true)
+                    Picker("Account", selection: $account) {
+                        Section("Gateways") {
+                            ForEach(gateways, id: \.self) { Text(title($0)).tag($0) }
+                        }
+                        Section("Direct providers and training") {
+                            ForEach(advanced, id: \.self) { Text(title($0)).tag($0) }
+                        }
+                    }
+                    if let url = accountKeyURL {
+                        Link("Get a key from \(title(account))", destination: url)
+                    }
+                    SecureField("Paste account key", text: $enteredKey)
+                        .help("Saved in your Mac's Keychain, never in the project.")
+                    Text("Keys are saved in your Mac’s Keychain and never included in a project upload.")
+                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                    HStack {
+                        Button("Save in Keychain") { save() }.buttonStyle(.borderedProminent)
+                            .tint(StudioStyle.actionTint)
+                            .disabled(session.demoMode || enteredKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                                .isEmpty)
+                        Button("Remove saved key") { remove() }
+                            .disabled(session.demoMode || keyStatuses[account] != true)
+                        Spacer()
+                        Text(keyStatus(account)).font(.callout).foregroundStyle(StudioStyle.supportingText)
+                    }
+                }
+                Section("Test your captioning connection") {
+                    LabeledContent("Account", value: ModelChoices.title(session.endpointKind))
+                    LabeledContent("Model", value: session.modelName)
+                        .textSelection(.enabled)
+                    Text("Tests the choices on Captioning, shown above. Live tests may use provider credits.")
+                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                    HStack {
+                        Button(testing ? "Testing connection…" : "Test captioning connection") { test() }
+                            .disabled(session.busy)
+                        if testing {
+                            ProgressView().controlSize(.small)
+                            Button("Cancel test") { session.cancel() }
+                        }
+                    }
+                }
+                DisclosureGroup("Saved accounts") {
+                    ForEach(gateways + advanced, id: \.self) { kind in
+                        LabeledContent(title(kind), value: keyStatus(kind))
+                    }
+                }
+                DisclosureGroup("Advanced: custom servers and training images") {
+                    TextField("User-configured vLLM server URL", text: $session.customBaseURL)
+                    Text("The vLLM key goes only to this host. A downloaded job cannot redirect it.")
+                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                    TextField("Custom training image (optional)", text: $session.podImageName)
+                    TextField("Existing RunPod network volume ID (optional)", text: $session.volumeID)
+                    Text(
+                        "The training image is chosen automatically. "
+                            + "Clear and save an override to restore the included image."
                     )
+                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                    Button("Save preferences") {
+                        session.rememberChoices(); session.configureGPU(); status = "Preferences saved."
+                    }.disabled(session.demoMode)
                 }
+                Section("Try every step for free") {
+                    Text(session.demoMode ? "Demo is on. No saved keys or network connections are used." :
+                        "The offline demo walks through the whole journey without an account or spending.")
+                    Button("Try the offline demo") { session.useDemo() }
+                        .disabled(session.busy || session.gpu.hasRunningPod || session.gpu.isBusy)
+                    Text("Open or create a real project to leave demo mode.")
+                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                }
+            }.formStyle(.grouped)
+            if !status.isEmpty {
+                Text(status).font(.callout).textSelection(.enabled)
+                    .padding(.horizontal, 24).padding(.vertical, 12)
             }
-            Section("Save an account key") {
-                Picker("Account", selection: $account) {
-                    ForEach(gateways + advanced, id: \.self) { Text(title($0)).tag($0) }
-                }
-                SecureField("Paste key (never stored in the project)", text: $enteredKey)
-                HStack {
-                    Button("Save in Keychain") { save() }.disabled(session.demoMode || enteredKey.isEmpty)
-                    Button("Remove saved key") { remove() }.disabled(session.demoMode || keyStatuses[account] != true)
-                    Button("Test captioning connection") { test() }.disabled(session.busy)
-                    if testing { Button("Cancel test") { session.cancel() } }
-                }
-                Text(
-                    "The connection test uses the account and model selected on Captioning. "
-                        + "Live tests may use provider credits."
-                )
-                .font(.caption).foregroundStyle(.secondary)
-            }
-            DisclosureGroup("Advanced: direct providers, Hub and GPU accounts") {
-                ForEach(advanced, id: \.self) { kind in
-                    LabeledContent(
-                        title(kind),
-                        value: session.demoMode ? "Demo — no key used" : keyStatuses[kind] == true ? "Saved" : "Not set"
-                    )
-                }
-                TextField("User-configured vLLM server URL", text: $session.customBaseURL)
-                Text("The vLLM key goes only to this host. A downloaded job cannot redirect it.").font(.caption)
-                TextField("Custom training image (optional)", text: $session.podImageName)
-                TextField("Existing RunPod network volume ID (optional)", text: $session.volumeID)
-                Text("The included training image is selected automatically. Clear and save an override to restore it.")
-                    .font(.caption)
-                Button("Save preferences") {
-                    session.rememberChoices(); session.configureGPU(); status = "Preferences saved."
-                }
-                .disabled(session.demoMode)
-            }
-            Section("Demo mode") {
-                Text(session
-                    .demoMode ? "Demo is on. No Keychain or network is used." :
-                    "Demo walks the full journey without an account or spending.")
-                Button("Try the offline demo") { session.useDemo() }
-                    .disabled(session.busy || session.gpu.hasRunningPod || session.gpu.isBusy)
-                Text("Open or create a real project to leave demo mode.").font(.caption)
-            }
-            if !status.isEmpty { Text(status).foregroundStyle(.secondary) }
         }
-        .formStyle(.grouped).padding(16).frame(width: 650, height: 680)
+        .tint(StudioStyle.accent)
+        .frame(width: 700, height: 680)
         .onAppear { reload() }
+        .onChange(of: account) { _, _ in enteredKey = "" }
         .onChange(of: session.demoMode) { _, _ in
             if testing { session.cancel() }
             enteredKey = ""; reload()
         }
         .onDisappear { if testing { session.cancel() } }
+    }
+
+    private var accountKeyURL: URL? {
+        switch account {
+        case "openrouter": URL(string: "https://openrouter.ai/settings/keys")
+        case "vercel": URL(string: "https://vercel.com/docs/ai-gateway/authentication-and-byok/api-keys")
+        case "gateway": URL(string: "https://logfire.pydantic.dev")
+        default: nil
+        }
     }
 
     private func keyStatus(_ account: String) -> String {
