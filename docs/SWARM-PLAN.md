@@ -115,17 +115,23 @@ checkpoints, readable curves and a downloaded Hub LoRA. Caption quality has not 
 experiment's boundary review. LTX training, concurrent device isolation, public distribution
 and final cost remain in progress. Four local narrative commits and their decision sheets
 were tested and accepted against the app snapshot; equality to the eventual hardware/experiment
-tree is still pending. The paired experiment configs have independent offline acceptance;
-neither treatment has been trained.
+tree is still pending. The five-image comparison configs had independent offline acceptance,
+but Hákon rejected that dataset as too small; neither treatment was trained. That proposed
+comparison is superseded, not ready to run.
 
 Connect the Mac to the verified agent through the provider proxy. Demonstrate the full shared
 data flow, user-configured endpoint/key behavior, observable failures, cancellation, cost
 controls, result publication and pod shutdown. Actual hardware behavior and API outcomes are
 recorded separately from automated app checks; the automated agent does not launch the GUI.
 
-Once both streams work, run the same-image comparison from the handoff: trigger-only versus
-concept-boundary captions, two LoRAs, an inference grid and a written result. Make conclusions
-about caption quality from that evidence rather than promising disentanglement in advance.
+Hákon has deferred the comparison until this evening, with a dataset and experiment design
+large enough to support the intended statistical conclusions. Do not run the five-image
+proposal or make further experimental GPU rentals now. Define the outcome, independent runs
+and evaluation sample size before that later comparison. Hákon has provided a Gemini API key
+source for ordinary hosted captioning; the required
+open-weights inference path has already been demonstrated separately. Complete the functional
+app and pod handoff work now. Tiny trainer runs establish execution, curves and transfers,
+not caption-policy effectiveness or LoRA quality.
 
 Then prepare the second repository's proposed narrative commits from v0.1.0, each building and
 passing its tests, ending in a tree identical to the verified one, with the required one-page
