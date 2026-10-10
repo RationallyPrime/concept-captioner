@@ -740,16 +740,20 @@ def test_non_envelope_error_body_is_wrapped(agent: FakeAgent, run: Callable[...,
     assert err.splitlines()[0] == "podctl: error http (500): boom"
 
 
-def test_gateway_error_is_connection_failure(agent: FakeAgent, run: Callable[..., Any]) -> None:
-    agent.on("GET", "/health", lambda _: httpx.Response(502, text="<html>bad gateway</html>"))
+@pytest.mark.parametrize("status", [502, 503, 504, *range(520, 527)])
+def test_gateway_error_is_connection_failure(
+    agent: FakeAgent, run: Callable[..., Any], status: int
+) -> None:
+    agent.on("GET", "/health", lambda _: httpx.Response(status, text="<html>bad gateway</html>"))
     code, _, err = run("health")
     assert code == 3 and "cannot reach the agent" in err
 
 
+@pytest.mark.parametrize("status", [502, 503, 504, *range(520, 527)])
 def test_gateway_status_with_envelope_is_agent_error(
-    agent: FakeAgent, run: Callable[..., Any]
+    agent: FakeAgent, run: Callable[..., Any], status: int
 ) -> None:
-    agent.on("GET", "/health", (503, envelope("internal", "draining")))
+    agent.on("GET", "/health", (status, envelope("internal", "draining")))
     assert run("health")[0] == 1
 
 

@@ -30,7 +30,8 @@ trainer config forbids unknown keys, so a key the wrapper writes and the user do
 must be deletable). ``extra.preprocess`` is not a trainer key: ``{"resolution_buckets":
 "768x768x49", "args": ["--decode"]}`` overrides the preprocessing bucket (needed for video
 datasets; the default ``<max>x<max>x1`` is for stills; several buckets separate with ``;``)
-and appends raw arguments to the preprocess command.
+and appends allowlisted arguments to the preprocess command. Paths, columns and device
+remain fixed by the wrapper; switches take no value and numeric options use --flag=value.
 
 Model files. LTX-2 loads only local files (no Hub ids, no URLs): ``base_model`` must be the
 checkpoint ``.safetensors`` under the workspace (``/workspace/models/...``) and becomes
@@ -72,6 +73,7 @@ import json
 import math
 import os
 import re
+import runpy
 import shlex
 import signal
 import subprocess
@@ -684,8 +686,6 @@ MEDIA_SUFFIXES = frozenset(
 )
 VIDEO_SUFFIXES = frozenset({".mp4", ".mov", ".webm", ".mkv"})
 PREPROCESS_KEY = "preprocess"  # the one `extra` key that is not a trainer config key
-# Buckets are WxHxF, several separated by ";" (process_dataset.py splits on ";", not ",").
-BUCKET_RE = re.compile(r"\d+x\d+x\d+(?:;\d+x\d+x\d+)*")
 # model.<key> -> process_dataset.py flag. The preprocessor loads the same files as the trainer
 # (text embeddings and latents), so both phases read them from the merged `model` block.
 MODEL_PATH_FLAGS = (
@@ -742,28 +742,14 @@ def build_dataset_entries(dataset_dir: Path, caption_ext: str) -> tuple[list[dic
 
 
 def preprocess_options(cfg: dict[str, Any]) -> tuple[str, list[str]]:
-    """``(resolution bucket, extra preprocess args)`` from the config and ``extra.preprocess``."""
-    size = max(cfg["resolution"])
-    bucket = f"{size}x{size}x1"  # WxHxF; F=1 for still images (W, H multiples of 32; F % 8 == 1)
-    args: list[str] = []
-    options = cfg["extra"].get(PREPROCESS_KEY)
-    if options is None:
-        return bucket, args
-    if not isinstance(options, dict):
-        raise ConfigError("extra.preprocess: must be an object")
-    override = options.get("resolution_buckets")
-    if override is not None:
-        if not isinstance(override, str) or not BUCKET_RE.fullmatch(override):
-            raise ConfigError("extra.preprocess.resolution_buckets: must look like WxHxF[;WxHxF]")
-        bucket = override
-    raw_args = options.get("args", [])
-    if not isinstance(raw_args, list) or not all(isinstance(a, str) for a in raw_args):
-        raise ConfigError("extra.preprocess.args: must be a list of strings")
-    args = list(raw_args)
-    unknown = sorted(set(options) - {"resolution_buckets", "args"})
-    if unknown:
-        raise ConfigError("extra.preprocess: unknown keys: " + ", ".join(unknown))
-    return bucket, args
+    """Use the same stdlib-only validator as the API, including under ``python -I``."""
+    rules = runpy.run_path(
+        str(Path(__file__).resolve().parents[1] / "agent/src/podagent/ltx_preprocess.py")
+    )
+    try:
+        return rules["preprocess_options"](cfg["extra"].get(PREPROCESS_KEY), max(cfg["resolution"]))
+    except ValueError as error:
+        raise ConfigError(str(error)) from error
 
 
 def explicit_bucket(cfg: dict[str, Any]) -> bool:

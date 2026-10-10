@@ -2,7 +2,7 @@
 
 One method per endpoint, each returning the decoded JSON body. Agent errors (any status >= 400)
 become ``AgentAPIError`` carrying the error envelope; a gateway answer that is not the agent's
-envelope (the RunPod proxy's 502/503/504 while the pod is booting) becomes
+envelope (the RunPod proxy's 502/503/504 or Cloudflare 520-526) becomes
 ``AgentUnreachable``; transport failures stay ``httpx`` exceptions. ``podctl.cli`` maps these
 to exit codes 1 / 3 / 3.
 """
@@ -14,7 +14,7 @@ from urllib.parse import quote
 
 import httpx
 
-GATEWAY_STATUSES: frozenset[int] = frozenset({502, 503, 504})
+GATEWAY_STATUSES: frozenset[int] = frozenset({502, 503, 504, *range(520, 527)})
 _MESSAGE_LIMIT = 300
 
 

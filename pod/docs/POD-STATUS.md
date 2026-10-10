@@ -18,6 +18,17 @@ Last full pass: 2026-10-10, every tree green (commands in "How the numbers were 
 | podctl | `podctl` | `podctl/src/podctl/{cli,client}.py`, `podctl/tests/test_cli.py` | done 2026-10-10 | all eleven §8 commands, tables and `--json`, `--wait` and `--follow` loops, exit codes 0/1/2/3/130, gateway 502/503/504 → 3, `MockTransport` only; 95 tests |
 | Status doc + pod README | `status-doc` | `docs/POD-STATUS.md`, `README.md` | done 2026-10-10 | this file and `pod/README.md`; spec drift staged below, `POD-SPEC.md` edit pending (see "Spec drift") |
 
+## Foundation repair, 2026-10-10
+
+The existing vLLM allowlist was verified against its catalog/API tests. LTX preprocess arguments
+now use one stdlib validator at the API and in the isolated wrapper, rejecting path, device and
+column overrides before a run is prepared or a subprocess starts. The images copy the validator
+into the wrapper's source-relative layout. `podctl` classifies proxy Cloudflare 520-526 responses
+without an agent error envelope as unreachable (exit 3); actual agent envelopes still exit 1.
+Fake scripts: 238 passed; podctl: 113 passed; lint and formatting clean in both trees.
+The agent tree and independent acceptance remain pending.
+No Docker image or real pod claim is established by this repair.
+
 ## How the numbers were produced
 
 2026-10-10, macOS, CPython 3.13.12 in the dev venvs (the images use 3.12.14; both packages

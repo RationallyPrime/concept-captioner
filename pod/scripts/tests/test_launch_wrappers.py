@@ -805,6 +805,68 @@ def test_ltx_rejects_bad_extra_preprocess(workspace: Path, preprocess: Any) -> N
         ltx.preprocess_argv(run, cfg)
 
 
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--output-dir=/opt/venvs/agent"],
+        ["--output-dir", "/opt/venvs/agent"],
+        ["--model-path=/etc/passwd"],
+        ["--text-encoder-path=/etc/passwd"],
+        ["--video-vae-path=/etc/passwd"],
+        ["--audio-vae-path=/etc/passwd"],
+        ["--device=cuda:1"],
+        ["--caption-column=other"],
+        ["--video-column=other"],
+        ["--resolution-buckets=512x512x1"],
+        ["--help"],
+        ["--unknown"],
+        ["--decode=true"],
+        ["--batch-size"],
+        ["--batch-size=0"],
+        ["--batch-size=65"],
+        ["--batch-size=1.5"],
+        ["--decode", "--decode"],
+        ["--batch-size=1", "--batch-size=2"],
+        ["--batch-size=1\n--output-dir=/tmp"],
+    ],
+)
+def test_ltx_preprocess_rejects_before_writing_or_spawning(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    def refuse_spawn(*_args: Any, **_kwargs: Any) -> None:
+        pytest.fail("invalid preprocess arguments reached a subprocess")
+
+    monkeypatch.setattr(ltx.subprocess, "Popen", refuse_spawn)
+    run_json = write_run_json(
+        workspace, ltx_run_config(workspace, extra={"preprocess": {"args": args}})
+    )
+    assert ltx.main(["--config", str(run_json)]) == 2
+    assert not (run_json.parent / "dataset.json").exists()
+    assert not (run_json.parent / "config.yaml").exists()
+
+
+def test_ltx_allowlisted_preprocess_options_reach_argv(workspace: Path) -> None:
+    args = [
+        "--decode",
+        "--vae-tiling",
+        "--load-text-encoder-in-8bit",
+        "--skip-audio",
+        "--remove-llm-prefixes",
+        "--overwrite",
+        "--batch-size=2",
+        "--reference-downscale-factor=2",
+        "--reference-temporal-scale-factor=2",
+    ]
+    cfg = ltx.validate_run_config(
+        ltx_run_config(workspace, extra={"preprocess": {"args": args}}), workspace
+    )
+    run = workspace / "runs" / RUN_ID
+    argv = ltx.preprocess_argv(run, cfg)
+    assert argv[-len(args) :] == args
+    assert argv[argv.index("--output-dir") + 1] == str(run / "preprocessed")
+    assert argv.count("--output-dir") == 1
+
+
 def test_ltx_dry_run_fails_without_captioned_media(
     workspace: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -777,6 +777,49 @@ def test_unknown_service_is_404_on_every_service_route(client: TestClient) -> No
         assert error["detail"] == {"known": list(SERVICE_NAMES)}
 
 
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--output-dir=/opt/venvs/agent"],
+        ["--output-dir", "/tmp"],
+        ["--model-path=/etc/passwd"],
+        ["--text-encoder-path=/etc/passwd"],
+        ["--video-vae-path=/etc/passwd"],
+        ["--audio-vae-path=/etc/passwd"],
+        ["--device=cuda:0"],
+        ["--caption-column=other"],
+        ["--video-column=other"],
+        ["--help"],
+        ["--decode=true"],
+        ["--batch-size=0"],
+        ["--decode", "--decode"],
+        ["--batch-size=1", "--batch-size=2"],
+    ],
+)
+def test_ltx_preprocess_rejected_before_prepare(
+    client: TestClient, settings: Settings, args: list[str]
+) -> None:
+    params = run_config(settings, extra={"preprocess": {"args": args}})
+    error = expect_error(
+        client.post("/services/trainer-ltx/start", json={"gpus": [1], "params": params}),
+        422,
+        "invalid_params",
+    )
+    assert error["detail"][0]["loc"] == ["extra", "preprocess"]
+    assert not settings.paths.run_dir("nora7-h3-001").exists()
+    assert client.get("/services/trainer-ltx").json()["state"] == "idle"
+
+
+def test_ltx_preprocess_allowlisted_at_api(client: TestClient, settings: Settings) -> None:
+    args = ["--decode", "--batch-size=2", "--load-text-encoder-in-8bit"]
+    params = run_config(settings, extra={"preprocess": {"args": args}})
+    state = start(client, "trainer-ltx", [1], params)
+    assert state["params"]["extra"]["preprocess"]["args"] == args
+    stored = json.loads((settings.paths.run_dir("nora7-h3-001") / "run.json").read_text())
+    assert stored["extra"]["preprocess"]["args"] == args
+    assert client.post("/services/trainer-ltx/stop").status_code == 200
+
+
 def test_start_invalid_params_422(client: TestClient, settings: Settings) -> None:
     error = expect_error(
         client.post("/services/vllm/start", json={"gpus": [0], "params": {}}),

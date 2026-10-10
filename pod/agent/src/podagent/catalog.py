@@ -39,6 +39,7 @@ from pydantic import (
 )
 from pydantic_core import InitErrorDetails, PydanticCustomError
 
+from .ltx_preprocess import preprocess_options
 from .settings import Paths, Settings
 
 RUN_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
@@ -540,6 +541,24 @@ def parse_params(
     """
     model = CATALOG[name].params_model
     params = model.model_validate(dict(raw), context={"fake": fake})
+    if name == "trainer-ltx":
+        assert isinstance(params, RunConfig)
+        sizes = [params.resolution] if isinstance(params.resolution, int) else params.resolution
+        try:
+            preprocess_options(params.extra.get("preprocess"), max(sizes))
+        except ValueError as error:
+            raise ValidationError.from_exception_data(
+                type(params).__name__,
+                [
+                    {
+                        "type": PydanticCustomError(
+                            "preprocess_args", "{reason}", {"reason": str(error)}
+                        ),
+                        "loc": ("extra", "preprocess"),
+                        "input": params.extra.get("preprocess"),
+                    }
+                ],
+            ) from error
     validate(params, paths)
     return params
 

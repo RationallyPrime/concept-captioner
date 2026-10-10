@@ -351,7 +351,7 @@ Params (`VllmParams`):
 | `max_num_seqs` | int 1–1024 | 16 | captioning is latency-bound, not throughput-bound |
 | `served_model_name` | str or null | null | lets the app keep `vllm:<short>` stable |
 | `api_key` | str or null | null | → `VLLM_API_KEY` env; default `PODAGENT_TOKEN` |
-| `extra_args` | list[str] | `[]` | each item must match `^--[a-z0-9-]+(=[^\s]*)?$`; appended verbatim as its own argv element |
+| `extra_args` | list[str] | `[]` | flags and values must pass `VLLM_EXTRA_FLAGS` in `catalog.py`; each flag appears at most once. Paths, binding, auth, remote code and flags already emitted by the builder are excluded. Fake service switches are accepted only in fake mode |
 
 argv: `[/opt/venvs/vllm/bin/vllm, serve, <model>, --host, 0.0.0.0, --port, <port>, --max-model-len, …,
 --gpu-memory-utilization, …, --dtype, …, --max-num-seqs, …, --download-dir, /workspace/models/hf-cache,
@@ -504,6 +504,15 @@ before exiting, so the supervisor never frees GPUs a trainer still holds.
 | `extra` | deep-merged last |
 
 Command: `/opt/venvs/aitoolkit/bin/python /opt/ai-toolkit/run.py <run>/config.yaml`.
+
+`extra.preprocess.args` is checked both at the start API and by the standalone wrapper.
+The single stdlib validator is `agent/src/podagent/ltx_preprocess.py`, copied into the image's
+`/opt/pod/agent/src/podagent/` layout for the isolated wrapper. Supported switches are
+`--vae-tiling`, `--decode`, `--remove-llm-prefixes`, `--skip-audio`,
+`--load-text-encoder-in-8bit`, and `--overwrite`. Supported integer options are
+`--batch-size`, `--reference-downscale-factor`, and `--reference-temporal-scale-factor`,
+using `--flag=value` with values 1 through 64. Duplicates, unknown flags and values on switches
+are rejected. Model paths, output paths, device and column names remain wrapper-owned.
 
 `launch_ltx.py` mapping (two phases): preprocess
 (`scripts/process_dataset.py` VERIFY: dataset JSON with `caption`/`media_path`, resolution

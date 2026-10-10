@@ -22,7 +22,12 @@ BASE_DOCKERFILE = POD / "images" / "Dockerfile.base"
 
 # What a package build of pod/agent needs and nothing else (hatchling reads README.md for the
 # `readme` field). The developer's .venv, caches and tests live beside these and must stay out.
-AGENT_PACKAGE_INPUTS = {"pod/agent/pyproject.toml", "pod/agent/README.md", "pod/agent/src/"}
+AGENT_PACKAGE_INPUTS = {
+    "pod/agent/pyproject.toml",
+    "pod/agent/README.md",
+    "pod/agent/src/",
+    "pod/agent/src/podagent/ltx_preprocess.py",  # shared with the isolated wrapper
+}
 
 # Agent, vLLM, TensorBoard: the ports the app declares at pod creation (POD-SPEC §1).
 HTTP_PORTS = (8800, 8000, 6006)
