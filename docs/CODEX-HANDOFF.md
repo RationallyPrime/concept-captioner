@@ -1,6 +1,8 @@
 # Handoff, updated 2026-10-11
 
-Read CLAUDE.md and docs/v0.2-plan.md first. Ordinary verified commits and pushes to main are
+Read CLAUDE.md, docs/v0.2-plan.md and [ADR-LOG](ADR-LOG.md) first.
+Accepted decisions remain in force after implementation; preserve their text and record any
+owner-approved replacement as a dated superseding decision. Ordinary verified commits and pushes to main are
 authorized in this lab repository. Preserve concurrent work; curated history remains deferred.
 
 ## What exists

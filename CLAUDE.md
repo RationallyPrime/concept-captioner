@@ -32,6 +32,11 @@ stated design is the session's to make.
 
 ## Decisions already taken (do not reopen without the owner)
 
+The app's five 2026-10-11 owner decisions are preserved verbatim in
+[docs/ADR-LOG.md](docs/ADR-LOG.md). Read them before changing the app or its contracts.
+Implementation does not retire a decision; retain it and record any owner-approved
+supersession explicitly.
+
 - **pydantic-ai is the model layer.** The injection point is a pydantic-ai model spec string
   (`google:`, `anthropic:`, `openai:`, `openrouter:`, `vllm:`, or any prefix pydantic-ai
   resolves) or a `Model` instance. No hand-rolled provider adapters.

@@ -2,6 +2,9 @@
 
 Working name ConceptStudio; Hákon may rename it.
 
+The five standing owner decisions are preserved verbatim in [ADR-LOG](../../docs/ADR-LOG.md).
+They remain required when implemented; this brief summarizes them and does not supersede them.
+
 ## What it is
 
 A native Mac app that takes images or clips to a diffusion LoRA trained on a rented GPU, without
