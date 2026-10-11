@@ -84,6 +84,7 @@ struct GPURunHistoryTests {
             volumeID: "storage"
         )
         workspace.agent = agent
+        workspace.hubToken = "fixture-hub"
         return workspace
     }
 
@@ -112,8 +113,8 @@ struct GPURunHistoryTests {
             datasetContainsVideo: trainer == "ltx", paramsJSON: JSONValue.object(params).pythonDumpsData(),
             volumeID: "storage",
             startedAt: Date(), updatedAt: Date(), result: TrainingResult(
-                runID: "saved-run", outputRepo: "", destination: .download, volumeID: "storage",
-                state: .saved(folder: "/synthetic/saved")
+                runID: "saved-run", outputRepo: "me/saved-model", destination: .hub, volumeID: "storage",
+                state: .pushed(repo: "me/saved-model")
             ), points: [TrainingPoint(step: 200, loss: 0.1)],
             checkpoints: [RunFile(path: "saved-run/chosen.safetensors", size: 10, sha256: "synthetic")],
             hourlyRateUSD: 1, estimatedGPUCostUSD: 0.4, podSpendAtStart: 0
@@ -172,6 +173,7 @@ struct GPURunHistoryTests {
         let agent = HistoryAgent()
         session.gpu = makeWorkspace(GPUTransport(), preferences)
         session.gpu.projectFolder = project.directory
+        session.gpu.hubToken = "fixture-hub"
         let previous = fixtureRun(trainer: containsVideo ? "aitoolkit" : "ltx")
         session.gpu.runHistory = [previous]
         session.gpu.repeatSettings(from: previous)
@@ -565,7 +567,7 @@ extension GPURunHistoryTests {
         let agent = HistoryAgent()
         let workspace = connected(folder, preferences: preferences, agent: agent)
         let selected = fixtureRun()
-        #expect(selected.localSavedFolder == "/synthetic/saved")
+        #expect(selected.localSavedFolder == nil)
         await workspace.downloadRun(selected)
         #expect(workspace.message.contains("original project"))
         #expect(await agent.listedRunIDs.isEmpty)

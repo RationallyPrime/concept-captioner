@@ -134,7 +134,7 @@ public extension Endpoints {
         case .openrouter:
             return OpenAICompatibleClient(
                 baseURL: OpenAICompatibleClient.openRouterBaseURL, apiKey: apiKey, model: spec.model,
-                transport: transport, reasoningDialect: .openRouter
+                transport: transport, reasoningDialect: .openRouter, acceptsVideo: true
             )
         case .vercel:
             return OpenAICompatibleClient(
@@ -146,7 +146,9 @@ public extension Endpoints {
             guard let base = try baseURL(spec) else {
                 throw ConfigurationError("kind vllm needs base_url")
             }
-            return OpenAICompatibleClient(baseURL: base, apiKey: apiKey, model: spec.model, transport: transport)
+            return OpenAICompatibleClient(
+                baseURL: base, apiKey: apiKey, model: spec.model, transport: transport, acceptsVideo: true
+            )
         case .anthropic:
             return AnthropicClient(apiKey: apiKey ?? "", model: spec.model, transport: transport)
         case .google:

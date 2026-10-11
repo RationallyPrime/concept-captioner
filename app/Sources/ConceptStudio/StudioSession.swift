@@ -66,7 +66,12 @@ enum WorkGate {
 
 @MainActor @Observable
 final class StudioSession {
-    var project: StudioProject?
+    var project: StudioProject? {
+        didSet {
+            if step == .mapping, project?.job.requiresLocatorMapping == false { step = .captioning }
+        }
+    }
+
     var demoMode = false
     var step: StudioStep? = .images
     var selectedImageID: String?
@@ -77,6 +82,7 @@ final class StudioSession {
     /// The edit gate is occupied (see `WorkGate.edit`).
     var editing = false
     var completed = 0
+    var partialCaptions: [String: String] = [:]
     var task: Task<Void, Never>?
     var editTask: Task<Void, Never>?
     @ObservationIgnored var runTitle = ""
@@ -485,10 +491,6 @@ final class StudioSession {
                 + "Save your \(unsavedCaptionCount) caption drafts on Review before closing."
                 : "Project saved."
         } catch { errorMessage = Self.describe(error) }
-    }
-
-    func next() {
-        step = StudioStep(rawValue: min((step ?? .images).rawValue + 1, 8))
     }
 
     // MARK: Photos and analysis

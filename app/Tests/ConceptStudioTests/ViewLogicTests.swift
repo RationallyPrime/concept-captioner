@@ -8,11 +8,17 @@ import Testing
 @MainActor
 struct ViewLogicTests {
     @Test func journeyOrderComesFromAllCases() {
-        #expect(StudioStep.allCases.first?.stepBefore == nil)
-        #expect(StudioStep.allCases.last?.stepAfter == nil)
+        let preferences = IsolatedDefaults()
+        defer { preferences.remove() }
+        let session = StudioSession(preferences: preferences.defaults, secrets: MemorySecretStore())
+        #expect(session.previousStep == nil)
+        session.step = .monitor
+        #expect(session.nextStep == nil)
         for (earlier, later) in zip(StudioStep.allCases, StudioStep.allCases.dropFirst()) {
-            #expect(earlier.stepAfter == later)
-            #expect(later.stepBefore == earlier)
+            session.step = earlier
+            #expect(session.nextStep == later)
+            session.step = later
+            #expect(session.previousStep == earlier)
         }
     }
 

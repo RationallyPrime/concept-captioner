@@ -80,7 +80,8 @@ public struct Runner: Sendable {
         let (stream, continuation) = AsyncThrowingStream<Outcome, any Error>.makeStream()
         let driver = Task {
             do {
-                try await drive(source: source, sink: sink, only: only) { continuation.yield($0) }
+                try await drive(source: source, sink: sink, only: only, onPartialCaption: nil) { continuation.yield($0)
+                }
                 continuation.finish()
             } catch {
                 continuation.finish(throwing: error)
@@ -102,12 +103,13 @@ public struct Runner: Sendable {
         source: some ImageSource,
         sink: some CaptionSink,
         only: Set<String>? = nil,
+        onPartialCaption: (@Sendable (String, String) async -> Void)? = nil,
         onOutcome: @escaping @Sendable (Outcome) async -> Void = { _ in }
     ) async throws -> RunSummary {
         let clock = ContinuousClock()
         let started = clock.now
         let log = OutcomeLog()
-        try await drive(source: source, sink: sink, only: only) { outcome in
+        try await drive(source: source, sink: sink, only: only, onPartialCaption: onPartialCaption) { outcome in
             await log.append(outcome)
             await onOutcome(outcome)
         }
@@ -132,6 +134,7 @@ public struct Runner: Sendable {
         source: some ImageSource,
         sink: some CaptionSink,
         only: Set<String>?,
+        onPartialCaption: (@Sendable (String, String) async -> Void)?,
         yield: @escaping @Sendable (Outcome) async -> Void
     ) async throws {
         try await withThrowingTaskGroup(of: Outcome.self) { group in
@@ -150,7 +153,7 @@ public struct Runner: Sendable {
                         inFlight -= 1
                         await yield(outcome)
                     }
-                    group.addTask { await guarded(sample, sink: sink) }
+                    group.addTask { await guarded(sample, sink: sink, onPartialCaption: onPartialCaption) }
                     inFlight += 1
                 }
             } catch {
@@ -176,12 +179,18 @@ public struct Runner: Sendable {
 
     /// `runner.py::_guarded`: any error that escapes `process` becomes a `failed` outcome with no
     /// record, noted as `"<TypeName>: <description>"`.
-    private func guarded(_ sample: Sample, sink: some CaptionSink) async -> Outcome {
+    private func guarded(
+        _ sample: Sample, sink: some CaptionSink,
+        onPartialCaption: (@Sendable (String, String) async -> Void)?
+    ) async -> Outcome {
+        let outcome: Outcome
         do {
-            return try await process(sample, sink: sink)
+            outcome = try await process(sample, sink: sink, onPartialCaption: onPartialCaption)
         } catch {
-            return Outcome(sampleID: sample.sampleID, status: .failed, notes: [Self.describe(error)])
+            outcome = Outcome(sampleID: sample.sampleID, status: .failed, notes: [Self.describe(error)])
         }
+        await onPartialCaption?(sample.sampleID, "")
+        return outcome
     }
 
     static func describe(_ error: any Error) -> String {
@@ -209,12 +218,21 @@ public struct Runner: Sendable {
         let image: UserContent
         let isVideo: Bool
         let instructions: String
+        let onPartialText: (@Sendable (String) async -> Void)?
         let validate: @Sendable (Caption) -> [String]
     }
 
-    private func context(for sample: Sample, mapping: Job.Mapping) throws -> SampleContext {
+    private func context(
+        for sample: Sample, mapping: Job.Mapping,
+        onPartialCaption: (@Sendable (String, String) async -> Void)?
+    ) throws -> SampleContext {
         let media = try MediaInput.content(data: sample.data, suffix: sample.suffix)
         let deps = CaptionDeps(mapping: mapping, triggers: job.triggers)
+        let progress: (@Sendable (String) async -> Void)? = if let onPartialCaption {
+            { text in await onPartialCaption(sample.sampleID, PartialCaption.text(from: text)) }
+        } else {
+            nil
+        }
         return try SampleContext(
             sampleID: sample.sampleID,
             mapping: mapping,
@@ -227,6 +245,7 @@ public struct Runner: Sendable {
                 mapping: mapping,
                 isVideo: Sources.isVideo(sample.suffix)
             ),
+            onPartialText: progress,
             validate: { caption in
                 caption.usable ? Triggers.triggerProblems(caption: caption.caption, deps: deps) : []
             }
@@ -234,7 +253,10 @@ public struct Runner: Sendable {
     }
 
     /// `runner.py::_process`, step for step, with deviation 1.
-    private func process(_ sample: Sample, sink: some CaptionSink) async throws -> Outcome {
+    private func process(
+        _ sample: Sample, sink: some CaptionSink,
+        onPartialCaption: (@Sendable (String, String) async -> Void)?
+    ) async throws -> Outcome {
         let sampleID = sample.sampleID
         guard let mapping = job.mapping(for: sampleID) else {
             return Outcome(sampleID: sampleID, status: .needsMapping, notes: ["no subject mapping"])
@@ -248,7 +270,7 @@ public struct Runner: Sendable {
         }
 
         var record = baseRecord(for: sampleID)
-        let context = try context(for: sample, mapping: mapping)
+        let context = try context(for: sample, mapping: mapping, onPartialCaption: onPartialCaption)
         let opening: [ChatMessage] = [.user([.text(Prompt.userTurn), context.image])]
         var run: StageRun<Caption>
         switch try await captionRound(context, messages: opening, attempt: 1, record: &record, sink: sink) {
@@ -307,7 +329,8 @@ public struct Runner: Sendable {
                 instructions: context.instructions,
                 messages: messages,
                 validate: context.validate,
-                retryMessage: Triggers.retryMessage
+                retryMessage: Triggers.retryMessage,
+                onPartialText: context.onPartialText
             )
         } catch let StageFailure.rejected(problems, lastReply, requests, servedModel) {
             record.status = .rejected

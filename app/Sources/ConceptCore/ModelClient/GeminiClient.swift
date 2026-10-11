@@ -41,17 +41,14 @@ public struct GeminiClient: ModelClient {
         instructions: String,
         messages: [ChatMessage],
         output: OutputRequest,
-        settings: RequestSettings
+        settings: RequestSettings,
+        onPartialText: (@Sendable (String) async -> Void)? = nil
     ) async throws -> ModelReply {
         var headers = ["x-goog-api-key": apiKey]
         if bearerAuth { headers["Authorization"] = "Bearer \(apiKey)" }
         settings.mergeExtraHeaders(into: &headers)
         let body = requestBody(instructions: instructions, messages: messages, output: output, settings: settings)
-        if messages.flatMap(\.content).contains(where: { if case .video = $0 { return true }; return false }),
-           JSONValue.object(body).pythonDumpsData().count >= 20 * 1024 * 1024 {
-            throw ConfigurationError("This clip exceeds Gemini’s 20 MB inline request limit. Trim a shorter segment "
-                + "or save its caption manually; no partial video was sent.")
-        }
+        try MediaInput.checkVideoRequest(body, messages: messages)
         let envelope = try await ProviderHTTP.post(
             body,
             to: baseURL.appendingPathComponent("models/\(requestedModel):generateContent"),

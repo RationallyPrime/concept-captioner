@@ -62,7 +62,9 @@ extension StudioProject {
         if included { images.append(updated) } else { excludedImages.append(updated) }
         let previousJob = job
         do {
-            if included, let mapping = job.wholeImageStyleMapping { try job.setMapping(mapping, for: id) }
+            if included {
+                try job.setMapping(job.mappingIncludingWholeTargets(job.mapping(for: id)), for: id)
+            }
             try save()
         } catch {
             _ = try? moveTarget(moved, to: image.url.deletingLastPathComponent())
@@ -97,6 +99,18 @@ extension StudioProject {
     }
 
     mutating func approveTarget(id: String, data: Data, name: String, selection: MediaSelection) throws {
+        try approveTarget(id: id, name: name, selection: selection) { try AtomicFile.write(data, to: $0) }
+    }
+
+    mutating func approveTarget(id: String, sourceFile: URL, name: String, selection: MediaSelection) throws {
+        try approveTarget(id: id, name: name, selection: selection) {
+            try FileManager.default.copyItem(at: sourceFile, to: $0)
+        }
+    }
+
+    private mutating func approveTarget(
+        id: String, name: String, selection: MediaSelection, write: (URL) throws -> Void
+    ) throws {
         guard let image = images.first(where: { $0.id == id }) else {
             throw StudioError.message("Include this sample before approving its crop or segment.")
         }
@@ -110,11 +124,11 @@ extension StudioProject {
         let oldMapping = job.mapping(for: id)
         let previousSelection = mediaState.selections[id]
         do {
-            try AtomicFile.write(data, to: target)
+            try write(target)
             images.removeAll { $0.id == id }
             images.append(ProjectImage(url: target))
             job.samples.removeValue(forKey: id)
-            try job.setMapping(job.wholeImageStyleMapping, for: target.lastPathComponent)
+            try job.setMapping(job.mappingIncludingWholeTargets(nil), for: target.lastPathComponent)
             mediaState.selections[id] = nil
             mediaState.selections[target.lastPathComponent] = selection
             try save()
@@ -154,7 +168,7 @@ extension StudioProject {
             do {
                 images.removeAll { $0.id == newID }; images.append(image)
                 job.samples.removeValue(forKey: newID)
-                let restoredMapping = job.wholeImageStyleMapping ?? (job.concepts == concepts ? mapping : nil)
+                let restoredMapping = job.mappingIncludingWholeTargets(job.concepts == concepts ? mapping : nil)
                 try job.setMapping(restoredMapping, for: image.id)
                 mediaState.selections[newID] = nil
                 mediaState.selections[image.id] = selection

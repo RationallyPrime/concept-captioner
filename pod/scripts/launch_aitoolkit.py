@@ -48,6 +48,7 @@ import json
 import math
 import os
 import re
+import runpy
 import shlex
 import signal
 import subprocess
@@ -115,7 +116,9 @@ def _is_number(value: Any) -> bool:
     return isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value)
 
 
-def _validate_dataset(value: Any, workspace: Path | None, errors: list[str]) -> dict[str, str]:
+def _validate_dataset(
+    value: Any, workspace: Path | None, errors: list[str], *, allow_missing: bool = False
+) -> dict[str, str]:
     out = {"path": "", "caption_ext": "txt"}
     if not isinstance(value, dict):
         errors.append("dataset: must be an object with path and caption_ext")
@@ -132,7 +135,7 @@ def _validate_dataset(value: Any, workspace: Path | None, errors: list[str]) -> 
             root = (workspace / "datasets").resolve()
             if not resolved.is_relative_to(root):
                 errors.append(f"dataset.path: must resolve under {root}")
-            elif not resolved.is_dir():
+            elif not resolved.is_dir() and not (allow_missing and not resolved.exists()):
                 errors.append(f"dataset.path: {resolved} is not a directory")
         out["path"] = str(resolved)
     ext = value.get("caption_ext", "txt")
@@ -165,7 +168,9 @@ def _validate_hub(value: Any, errors: list[str]) -> dict[str, Any] | None:
     return out
 
 
-def validate_run_config(raw: Any, workspace: Path | None = None) -> dict[str, Any]:
+def validate_run_config(
+    raw: Any, workspace: Path | None = None, *, allow_missing_dataset: bool = False
+) -> dict[str, Any]:
     """Validate a decoded run.json (POD-SPEC §4.1) and return it with defaults applied.
 
     ``alpha`` defaults to ``rank``; ``resolution`` is always a list; ``dataset.path`` is resolved
@@ -204,7 +209,9 @@ def validate_run_config(raw: Any, workspace: Path | None = None) -> dict[str, An
     if not isinstance(run_id, str) or not RUN_ID_RE.match(run_id):
         errors.append("run_id: must match ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
     cfg["run_id"] = run_id
-    cfg["dataset"] = _validate_dataset(raw.get("dataset"), workspace, errors)
+    cfg["dataset"] = _validate_dataset(
+        raw.get("dataset"), workspace, errors, allow_missing=allow_missing_dataset
+    )
     cfg["triggers"] = get_str_list("triggers", required=True)
     profile = raw.get("profile")
     if profile is not None and not isinstance(profile, str):
@@ -309,12 +316,28 @@ def require_model_ref(errors: list[str], label: str, value: Any, roots: tuple[Pa
         )
 
 
-def load_run(config_path: Path) -> tuple[Path, dict[str, Any]]:
+def load_run(
+    config_path: Path, *, restore_missing_dataset: bool = True
+) -> tuple[Path, dict[str, Any]]:
     """run.json path -> (run directory, validated config). The run directory holds run.json."""
     config_path = config_path.expanduser().resolve()
     raw = json.loads(config_path.read_text(encoding="utf-8"))
-    cfg = validate_run_config(raw, workspace_root())
+    workspace = workspace_root()
+    cfg = validate_run_config(
+        raw,
+        workspace,
+        allow_missing_dataset=restore_missing_dataset
+        and isinstance(raw, dict)
+        and raw.get("resume") is True,
+    )
     run_dir = config_path.parent
+    restore = runpy.run_path(str(Path(__file__).with_name("restore_dataset.py")))["restore_dataset"]
+    try:
+        if restore_missing_dataset:
+            restore(cfg, run_dir, workspace)
+    except (OSError, ValueError) as error:
+        raise ConfigError(str(error)) from error
+    cfg = validate_run_config(cfg, workspace)
     if run_dir.name != cfg["run_id"]:
         say(f"note: run directory {run_dir} is not named after run_id {cfg['run_id']!r}")
     return run_dir, cfg
@@ -823,7 +846,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        run_dir, cfg = load_run(Path(args.config))
+        run_dir, cfg = load_run(Path(args.config), restore_missing_dataset=not args.dry_run)
         native = build_native_config(cfg, run_dir)
     except (OSError, ValueError) as exc:
         say(f"invalid run config {args.config}: {exc}")

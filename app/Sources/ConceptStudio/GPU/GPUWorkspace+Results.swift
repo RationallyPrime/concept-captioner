@@ -41,6 +41,10 @@ struct TrainingResult: Codable, Equatable {
 }
 
 enum RunArtifacts {
+    static func validRunID(_ value: String) -> Bool {
+        value.range(of: "\\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\\z", options: .regularExpression) != nil
+    }
+
     private static let keptExtensions: Set = ["safetensors", "yaml", "yml", "json", "txt", "log"]
     private static let sampleExtensions: Set = ["png", "jpg", "jpeg", "webp", "mp4", "gif"]
 
@@ -111,9 +115,12 @@ struct ProjectTrainingRecord: Codable, Equatable {
 
     init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        results = try values.decodeIfPresent([TrainingResult].self, forKey: .results) ?? []
-        runs = try values.decodeIfPresent([TrainingRun].self, forKey: .runs) ?? []
-        comparisons = try values.decodeIfPresent([GeneratedComparison].self, forKey: .comparisons) ?? []
+        results = try (values.decodeIfPresent([TrainingResult].self, forKey: .results) ?? [])
+            .filter { RunArtifacts.validRunID($0.runID) }
+        runs = try (values.decodeIfPresent([TrainingRun].self, forKey: .runs) ?? [])
+            .filter { RunArtifacts.validRunID($0.runID) }
+        comparisons = try (values.decodeIfPresent([GeneratedComparison].self, forKey: .comparisons) ?? [])
+            .filter { RunArtifacts.validRunID($0.runID) && RunArtifacts.validRunID($0.sourceRunID) }
     }
 
     static func url(in project: URL) -> URL {
@@ -122,7 +129,34 @@ struct ProjectTrainingRecord: Codable, Equatable {
 
     static func load(from project: URL) -> ProjectTrainingRecord {
         guard let data = try? Data(contentsOf: url(in: project)) else { return ProjectTrainingRecord() }
-        return (try? JSONDecoder().decode(Self.self, from: data)) ?? ProjectTrainingRecord()
+        guard var record = try? JSONDecoder().decode(Self.self, from: data) else { return ProjectTrainingRecord() }
+        func confined(_ folder: String, runID: String) -> Bool {
+            let expected = project.resolvingSymlinksInPath().appendingPathComponent("results/\(runID)")
+            let actual = URL(fileURLWithPath: folder).standardizedFileURL
+            return actual.resolvingSymlinksInPath().path == expected.path
+        }
+        func checked(_ result: TrainingResult) -> TrainingResult {
+            var result = result
+            if case let .saved(folder) = result.state, !confined(folder, runID: result.runID) {
+                result.state = .pending
+            }
+            return result
+        }
+        record.results = record.results.map(checked)
+        for index in record.runs.indices {
+            if let folder = record.runs[index].localFolder, !confined(folder, runID: record.runs[index].runID) {
+                record.runs[index].localFolder = nil
+            }
+            record.runs[index].result = record.runs[index].result.map(checked)
+        }
+        for index in record.comparisons.indices {
+            if let folder = record.comparisons[index].folder,
+               !confined(folder, runID: record.comparisons[index].runID) {
+                record.comparisons[index].folder = nil
+                if record.comparisons[index].state == .saved { record.comparisons[index].state = .pending }
+            }
+        }
+        return record
     }
 
     func save(to project: URL) throws {
@@ -209,6 +243,16 @@ extension GPUWorkspace {
         if !strayPods.isEmpty {
             message = "\(strayPods.count) more running computer(s) from this app are billing on your RunPod "
                 + "account. Stop them below or in RunPod."
+        }
+        await pruneAgentSecrets(provider)
+    }
+
+    /// Removes agent secrets that no pod references any more: a removal that failed, or a pod
+    /// removed in the RunPod console. The current pod's secret is kept even if the listing lags.
+    private func pruneAgentSecrets(_ provider: any GPUProvider) async {
+        guard let orphans = try? await provider.orphanedSecrets(prefix: PodSecrets.agentPrefix) else { return }
+        for name in orphans where name != saved?.agentSecret {
+            try? await provider.deleteSecret(name: name)
         }
     }
 
@@ -338,13 +382,32 @@ extension GPUWorkspace {
 
     func download(_ file: RunFile, runID: String, into folder: URL, agent: any PodAgent) async throws {
         let manager = FileManager.default
-        let root = folder.standardizedFileURL
+        guard RunArtifacts.validRunID(runID) else { throw StudioError.message("Invalid saved run identifier.") }
+        let root = folder.resolvingSymlinksInPath().standardizedFileURL
         let destination = root.appendingPathComponent(file.path).standardizedFileURL
-        guard destination.path.hasPrefix(root.path + "/") else {
+        // Foundation can leave a nonexistent leaf unresolved. Inspect every existing parent
+        // before creating directories, so a nested symlink cannot redirect that creation.
+        let parts = file.path.split(separator: "/", omittingEmptySubsequences: false)
+        guard !parts.contains(where: { ["", ".", ".."].contains(String($0)) }) else {
+            throw StudioError.message("The computer listed an invalid run file: \(file.path).")
+        }
+        var parent = root
+        for part in parts.dropLast() {
+            parent.appendPathComponent(String(part))
+            if (try? manager.destinationOfSymbolicLink(atPath: parent.path)) != nil {
+                throw StudioError.message("The run file's parent is a symbolic link: \(file.path).")
+            }
+        }
+        guard destination.path.hasPrefix(root.path + "/"),
+              destination.deletingLastPathComponent().resolvingSymlinksInPath().path.hasPrefix(root.path + "/")
+              || destination.deletingLastPathComponent().resolvingSymlinksInPath().path == root.path,
+              destination.resolvingSymlinksInPath().path.hasPrefix(root.path + "/") else {
             throw StudioError.message("The computer listed a file outside the run: \(file.path).")
         }
         try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         let partial = destination.appendingPathExtension("part")
+        // A stale partial is disposable; remove it before the downloader opens it.
+        try? manager.removeItem(at: partial)
         defer { try? manager.removeItem(at: partial) }
         try await agent.download(runID: runID, path: file.path, to: partial)
         guard try RunArtifacts.sha256(of: partial) == file.sha256.lowercased() else {
@@ -383,6 +446,7 @@ extension GPUWorkspace {
     }
 
     func resultsFolder(for runID: String) throws -> URL {
+        guard RunArtifacts.validRunID(runID) else { throw StudioError.message("Invalid saved run identifier.") }
         let base: URL = if let projectFolder {
             projectFolder.appendingPathComponent("results")
         } else if demoMode {
@@ -392,7 +456,14 @@ extension GPUWorkspace {
                 for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
             ).appendingPathComponent("ConceptStudio/results")
         }
-        return base.appendingPathComponent(runID, isDirectory: true)
+        let parent = base.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL
+        let root = parent.appendingPathComponent(base.lastPathComponent).standardizedFileURL
+        let folder = root.appendingPathComponent(runID, isDirectory: true).standardizedFileURL
+        guard root.resolvingSymlinksInPath().path == root.path,
+              folder.resolvingSymlinksInPath().path == folder.path else {
+            throw StudioError.message("The project results folder points outside its saved location.")
+        }
+        return folder
     }
 
     func loadProjectRecord() {

@@ -1,6 +1,6 @@
 """The service catalog: fixed argv builders over validated params (POD-SPEC §3, §4.1).
 
-Six services, one ``ServiceSpec`` each. Everything a client sends arrives as ``params`` and
+Nine services, one ``ServiceSpec`` each. Everything a client sends arrives as ``params`` and
 passes two checks before anything is built:
 
 1. ``spec.params_model.model_validate(raw)``: shape, patterns and ranges, including the rules
@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 import re
+import runpy
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -44,9 +45,12 @@ from pydantic_core import InitErrorDetails, PydanticCustomError
 from typing_extensions import TypedDict
 
 from .artifacts import resolve_run_file
+from .checkpoints import checkpoint_step, latest_checkpoint
 from .errors import AgentError
 from .ltx_rules import LTX_HUB_MODEL, LTX_HUB_REVISION, check_preprocess
 from .settings import Paths, Settings
+from .storage import RUN_STATE_FILE, cleanup_datasets
+from .uploads import claim_stage
 
 RUN_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
 NAME_PATTERN = RUN_ID_PATTERN  # dataset folder names follow the run-id rule
@@ -396,7 +400,8 @@ class LtxRunConfig(RunConfig):
 
 
 class PullDatasetParams(ServiceParams):
-    repo_id: str = Field(pattern=REPO_ID_PATTERN)
+    repo_id: str | None = Field(default=None, pattern=REPO_ID_PATTERN)
+    local_name: str | None = Field(default=None, pattern=NAME_PATTERN)
     name: str | None = Field(default=None, pattern=NAME_PATTERN)  # default: the repo name
     split: str = "train"
     revision: str | None = None
@@ -418,8 +423,16 @@ class PullDatasetParams(ServiceParams):
 
     @model_validator(mode="after")
     def _name_defaults_to_repo_name(self) -> PullDatasetParams:
+        if (self.repo_id is None) == (self.local_name is None):
+            raise ValueError("Exactly one of repo_id or local_name is required")
+        if self.local_name is not None and (
+            not self.only_metadata or self.revision is not None or self.hf_token is not None
+        ):
+            raise ValueError(
+                "Local mode requires only_metadata and accepts no Hub revision or token"
+            )
         if self.name is None:
-            candidate = self.repo_id.rsplit("/", 1)[1]
+            candidate = self.local_name or self.repo_id.rsplit("/", 1)[1]
             if not re.fullmatch(NAME_PATTERN, candidate):
                 raise ValueError(
                     f"repo name {candidate!r} is not a valid dataset folder name; pass 'name'"
@@ -656,28 +669,41 @@ def _validate_training_start(name: str, params: RunConfig, paths: Paths) -> None
             params,
             "Resume preserves the saved settings. Use Repeat to change: " + ", ".join(changed),
         )
-    if name == "trainer-aitoolkit":
-        if "training_folder" in params.extra or "config" in params.extra:
+    trainer = name.removeprefix("trainer-")
+    if trainer == "aitoolkit" and ("training_folder" in params.extra or "config" in params.extra):
+        _invalid(
+            params,
+            "Resume supports the wrapper's default checkpoint layout. Use Repeat for custom layouts.",
+        )
+    if trainer == "ltx":
+        model = params.extra.get("model")
+        checkpoints = params.extra.get("checkpoints")
+        if (isinstance(model, dict) and "load_checkpoint" in model) or (
+            isinstance(checkpoints, dict) and checkpoints.get("no_resume") not in (False, None)
+        ):
             _invalid(
                 params,
-                "Resume supports the wrapper's default checkpoint layout. Use Repeat for custom layouts.",
+                "Resume requires the latest native checkpoint and training state. "
+                "Use Repeat for load_checkpoint or no_resume overrides.",
             )
-        weights = list((run_dir / "output" / params.run_id).glob(f"{params.run_id}*.safetensors"))
-        weights = [
-            p for p in weights if not any(s in p.name for s in ("_LoRA", "_refiner", "_t2i", "_cn"))
-        ]
-    else:
-        weights = list((run_dir / "output").rglob("*.safetensors"))
-    if not weights:
-        _invalid(params, "No trainer checkpoint is available to resume")
-    latest = max(weights, key=lambda p: (p.stat().st_mtime_ns, str(p)))
-    if name == "trainer-ltx":
-        match = re.search(r"step_(\d+)", latest.name)
-        state = latest.parent / f"training_state_step_{match.group(1)}.pt" if match else None
-        if state is None or not state.is_file():
-            _invalid(
-                params, "LTX resume needs the matching training_state_step file on this storage"
-            )
+    try:
+        latest = latest_checkpoint(run_dir, trainer, params.run_id)
+        if latest is None:
+            raise ValueError("No trainer checkpoint is available to resume")
+        step = checkpoint_step(latest, trainer)
+    except (OSError, ValueError, AgentError) as error:
+        _invalid(params, str(error))
+    if params.steps <= step:
+        _invalid(params, f"Resume steps must exceed the saved checkpoint step {step}")
+    helper = paths.scripts / "restore_dataset.py"
+    if not helper.is_file():
+        helper = Path(__file__).resolve().parents[3] / "scripts" / "restore_dataset.py"
+    try:
+        runpy.run_path(str(helper))["restore_arguments"](
+            params.model_dump(), run_dir, paths.workspace
+        )
+    except (OSError, ValueError) as error:
+        _invalid(params, f"Cannot restore Resume inputs: {error}")
 
 
 def _generation_source(params: GenerationParams, paths: Paths) -> tuple[dict[str, Any], Path]:
@@ -853,10 +879,41 @@ def _trainer_env(params: ServiceParams, settings: Settings) -> dict[str, str]:
     return {"PYTHONUNBUFFERED": "1", **_hf_env(params, settings)}
 
 
+def _prestart_cleanup(params: ServiceParams, paths: Paths) -> None:
+    keep = {params.run_id}
+    datasets: set[Path] = set()
+    if isinstance(params, GenerationParams):
+        keep.add(params.source_run_id)
+    elif isinstance(params, RunConfig):
+        relative = Path(params.dataset.path).resolve().relative_to(paths.datasets.resolve())
+        if not relative.parts:
+            return  # a custom dataset rooted at datasets/ uses every child
+        datasets.add(paths.datasets / relative.parts[0])
+    cleanup_datasets(paths, keep_run_ids=keep, keep_datasets=datasets)
+
+
+def _cleanup_prepare(_: ServiceParams, paths: Paths) -> None:
+    report = cleanup_datasets(paths)
+    paths.logs.mkdir(parents=True, exist_ok=True)
+    (paths.logs / "dataset-cleanup.json").write_text(json.dumps(report) + "\n")
+
+
+def _cleanup_argv(_: ServiceParams, _gpus: list[int], paths: Paths) -> list[str]:
+    return [
+        paths.venv_bin("agent", "python"),
+        "-m",
+        "podagent.storage",
+        "--report",
+        str(paths.logs / "dataset-cleanup.json"),
+    ]
+
+
 def _trainer_prepare(params: ServiceParams, paths: Paths) -> None:
     """Create ``<runs>/<id>/`` (with ``tensorboard/``) and write ``run.json``, secrets stripped."""
     cfg = _as(params, RunConfig)
     run_dir = paths.run_dir(cfg.run_id)
+    _prestart_cleanup(cfg, paths)
+    (run_dir / RUN_STATE_FILE).unlink(missing_ok=True)
     (run_dir / "tensorboard").mkdir(parents=True, exist_ok=True)
     payload = cfg.model_dump(mode="json", exclude=set(SECRET_FIELDS))
     tmp = run_dir / f"{RUN_JSON}.tmp"
@@ -871,6 +928,7 @@ def _trainer_prepare(params: ServiceParams, paths: Paths) -> None:
 def _generation_prepare(params: ServiceParams, paths: Paths) -> None:
     cfg = _as(params, GenerationParams)
     source, checkpoint = _generation_source(cfg, paths)
+    _prestart_cleanup(cfg, paths)
     for key in SECRET_FIELDS:
         source.pop(key, None)
     run_dir = paths.run_dir(cfg.run_id)
@@ -917,8 +975,8 @@ def _pull_dataset_argv(params: ServiceParams, _gpus: list[int], paths: Paths) ->
     argv = [
         paths.venv_bin("agent", "python"),
         str(paths.scripts / "pull_dataset.py"),
-        "--repo",
-        p.repo_id,
+        "--local-dir" if p.local_name else "--repo",
+        str(paths.uploads / p.local_name) if p.local_name else p.repo_id,
         "--to",
         str(paths.datasets / p.name),
         "--split",
@@ -935,6 +993,12 @@ def _pull_dataset_argv(params: ServiceParams, _gpus: list[int], paths: Paths) ->
     if p.only_metadata:
         argv.append("--only-metadata")
     return argv
+
+
+def _pull_dataset_prepare(params: ServiceParams, paths: Paths) -> None:
+    p = _as(params, PullDatasetParams)
+    if p.local_name is not None:
+        claim_stage(paths, p.local_name)
 
 
 def _push_lora_argv(params: ServiceParams, _gpus: list[int], paths: Paths) -> list[str]:
@@ -1007,6 +1071,18 @@ CATALOG: dict[str, ServiceSpec] = {
         prepare=_trainer_prepare,
         run_id=_params_run_id,
     ),
+    "cleanup-datasets": ServiceSpec(
+        name="cleanup-datasets",
+        params_model=ServiceParams,
+        gpus=(0, 0),
+        port=None,
+        argv=_cleanup_argv,
+        cwd=_workspace,
+        log_path=_logs("cleanup-datasets"),
+        env=_no_env,
+        prepare=_cleanup_prepare,
+        run_id=_no_run_id,
+    ),
     "pull-dataset": ServiceSpec(
         name="pull-dataset",
         params_model=PullDatasetParams,
@@ -1016,7 +1092,7 @@ CATALOG: dict[str, ServiceSpec] = {
         cwd=_workspace,
         log_path=_logs("pull-dataset"),
         env=_hf_env,
-        prepare=_noop_prepare,
+        prepare=_pull_dataset_prepare,
         run_id=_no_run_id,
     ),
     "push-lora": ServiceSpec(

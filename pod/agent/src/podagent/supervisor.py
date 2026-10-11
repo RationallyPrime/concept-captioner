@@ -52,6 +52,8 @@ from .errors import (
 )
 from .gpus import GpuBackend, GpuInfo, InventoryUnavailable
 from .settings import Settings
+from .storage import write_run_state
+from .uploads import release_stage
 
 log = logging.getLogger(__name__)
 
@@ -134,6 +136,7 @@ class _Run:
     # When (monotonic) the process group was last sent SIGTERM, and whether SIGKILL went out.
     group_term_at: float | None = None
     group_killed: bool = False
+    recorded_terminal: tuple[str, int | None, bool] | None = None
 
 
 def _now() -> datetime:
@@ -429,7 +432,13 @@ class Supervisor:
         )
         # Truncate at every start so a tail always shows the current run. The parent closes its
         # handle right after the spawn; the child keeps its own file descriptor.
-        with log_path.open("wb") as log_file:
+        try:
+            opened_log = log_path.open("wb")
+        except OSError:
+            if spec.name == "pull-dataset" and getattr(parsed, "local_name", None):
+                release_stage(paths, parsed.local_name)
+            raise
+        with opened_log as log_file:
             try:
                 proc = subprocess.Popen(
                     argv,
@@ -446,10 +455,12 @@ class Supervisor:
                 log.error("%s (argv[0]=%r)", message, argv[0])
                 state.state = "failed"
                 state.ended_at = _now()
+                self._record_training_state(state)
                 self._runs[spec.name] = _Run(state=state)
                 raise AgentError(message, detail={"argv0": argv[0]}) from None
         state.state = "running"
         state.pid = proc.pid
+        self._record_training_state(state)
         self._runs[spec.name] = _Run(state=state, proc=proc, finalized=False)
         log.info("started %s pid=%d gpus=%s log=%s", spec.name, proc.pid, gpus, log_path)
         return state
@@ -656,7 +667,33 @@ class Supervisor:
                 )
         if state.group_alive and state.pid is not None:
             self._reclaim_group(run)
+        terminal = (state.state, state.exit_code, state.group_alive)
+        if (
+            run.finalized
+            and run.recorded_terminal != terminal
+            and self._record_training_state(state)
+        ):
+            run.recorded_terminal = terminal
         return state
+
+    def _record_training_state(self, state: ServiceState) -> bool:
+        try:
+            if (
+                state.name == "pull-dataset"
+                and state.state in {"failed", "stopped", "exited"}
+                and not state.group_alive
+            ):
+                local_name = (state.params or {}).get("local_name")
+                if local_name:
+                    release_stage(self.settings.paths, local_name)
+            write_run_state(self.settings.paths, state)
+            return True
+        except (OSError, AgentError):
+            log.exception(
+                "Could not record completion evidence for %s; its dataset stays protected",
+                state.name,
+            )
+            return False
 
     def _reclaim_group(self, run: _Run) -> None:
         state = run.state

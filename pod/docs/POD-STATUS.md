@@ -1,15 +1,16 @@
 # POD-STATUS
 
-State of the pod side during the 2026-10-11 overnight feature round. The new generation,
-run-history and approved-video code is published in public images. The current tag,
-`v0.2.1-clean-20261011`, is a clean build of `main` at `ce52a220382f1121b8dd0c986e2c62c0de2423f9`
-with the repository Dockerfiles and no overlay; it has had anonymous pulls and a CPU smoke but
-no real-pod run yet. The real-pod evidence below was gathered on the earlier
+State after the 2026-10-11 source review repairs. The current tag,
+`v0.2.2-clean-20261011`, is a clean build of `main` at `2789c1d33a4aec015ad1728f24b72be3445e4b8f`
+(the review repairs and the direct dataset upload included) with the repository Dockerfiles and
+no overlay; it has had anonymous pulls by digest and a CPU smoke but no real-pod run yet. The
+earlier clean tag `v0.2.1-clean-20261011` (from `ce52a220`, before those repairs) stays
+published. The real-pod evidence below was gathered on the overnight
 `v0.2.0-overnight20261011-r2` tag (accepted source `98708207`, with two files overlaid onto older
-layers), which stays published. Actual FLUX generation and Resume passed on the r1 AI Toolkit
-image; r2 AI Toolkit has a CPU witness only, and its checkpoint-snapshot path has not run on a
-FLUX GPU. LTX approved-video training, Resume and matched video generation passed on the final
-r2 image. Both proof pods were stopped after verification and terminated in the
+layers), which also stays published. Actual FLUX generation and Resume passed on the r1 AI
+Toolkit image; r2 AI Toolkit has a CPU witness only, and its checkpoint-snapshot path has not
+run on a FLUX GPU. LTX approved-video training, Resume and matched video generation passed on
+the final r2 image. Both proof pods were stopped after verification and terminated in the
 owner-authorized afternoon cleanup; outputs were secured locally and on the network volume.
 Historical live checks date from lab commit `e620882` (2026-10-10, last live read 21:26 UTC). The
 contract is [POD-SPEC.md](POD-SPEC.md). The day-by-day record, with every timestamp, digest,
@@ -19,14 +20,16 @@ hash and billing bucket, is in
 ## What exists
 
 - **Control agent** (`pod/agent`): authenticated HTTP API for GPU inventory, topology plan,
-  a fixed service catalog (vLLM, both trainers, TensorBoard), supervisor, logs and training
+  a nine-service catalog (vLLM, both trainers, both generators, TensorBoard, dataset pull,
+  LoRA push and dataset cleanup), supervisor, logs and training
   events. TensorBoard listens on loopback and is reached only through the agent's
   authenticated `/tensorboard/` proxy. vLLM and LTX preprocessing arguments are allowlisted.
-- **Transfer scripts and trainer wrappers** (`pod/scripts`): Hub dataset pull, AI Toolkit
+- **Transfer scripts and trainer wrappers** (`pod/scripts`): Hub dataset pull or authenticated
+  local dataset installation, AI Toolkit
   (FLUX) and LTX launchers, LoRA push.
 - **podctl** (`pod/podctl`): command-line client for the agent.
-- **Images**, public on GHCR under tag `v0.2.1-clean-20261011` (clean build from commit
-  `ce52a220`; digests in [images/README](../images/README.md)): `concept-captioner-pod-base`,
+- **Images**, public on GHCR under tag `v0.2.2-clean-20261011` (clean build from commit
+  `2789c1d3`; digests in [images/README](../images/README.md)): `concept-captioner-pod-base`,
   `-aitoolkit`, `-ltx`; plus a fake image for compose tests. Public RunPod template
   `87fxs5v8fn` points at the base image; it carries no token, and the agent refuses to start
   without one.
@@ -54,6 +57,25 @@ published), with a SHA-256 manifest. Build and push logs are on cx53 under
 
 ## Verified offline only
 
+- **Review repairs, 2026-10-11:** agent **660 passed**, scripts **291 passed**, podctl
+  **125 passed**; Ruff and formatting clean. Independent source review covers generation
+  completion, SIGTERM custody, Resume/retention and the direct-upload integration. These are
+  source/CPU checks, not evidence that the published images contain these changes.
+- The app reads `comparison.json.state` and preserves partial failed files with a visible
+  error. The generator catches ordinary SIGTERM, marks an existing manifest failed and
+  removes its private checkpoint copy on Stop and early validation errors. A real local
+  subprocess SIGTERM test exercises this; SIGKILL/container loss cannot guarantee cleanup.
+- Resume validates total steps against the checkpoint itself and refuses overrides that bypass
+  the saved LTX state. Dataset cleanup runs at validated training/generation start or by
+  explicit catalog action. It preserves current/active/failed/unknown/shared inputs and the
+  latest three resumable completed runs; checkpoints, results and caches are retained.
+  Pruned Hub inputs restore from their recorded revision. LTX result generation uses its saved
+  configuration/checkpoint without downloading pruned training data.
+- Authenticated file upload streams to a confined stage with exact length and 2 GiB/file,
+  20 GiB/dataset limits. The local pull mode installs the metadata-listed set atomically before
+  training. Tests cover auth-before-body, interrupted uploads, atomic replacement, path/size
+  refusals, no Hub calls and matching Swift/Python Unicode input digests. Local Resume requires
+  the original input digest; edited inputs require a new run. Base-model access is unchanged.
 - **agent + scripts 892 passed** in the overnight combined gate (the venv has the `pod`
   extra, including TensorBoard and datasets); **podctl 125 passed** in the preceding fix round. Fresh venvs per [pod/README.md](../README.md);
   ruff check and format clean on all three. These counts establish source behavior, not CUDA
@@ -115,7 +137,7 @@ dependencies; Ruff check/format clean. These checks use fake agent/model seams, 
   `/tmp/concept-captioner-overnight-upstream/manifest.json`: AI Toolkit `f7a1fb9…`, LTX-2
   `9ec55f9…`. The old public `v0.1.0-verify20261010` tags do not include these services or the
   preceding hardening round. The `v0.2.0-overnight20261011-r2` images do, and
-`v0.2.1-clean-20261011` rebuilds them from `main` at `ce52a220` without the overlay (verified
+`v0.2.2-clean-20261011` rebuilds them from `main` at `2789c1d3` without the overlay (verified
 by anonymous digest pulls, the base `check_vllm_flags.py` build step, a CPU control smoke on the
 published base image, and TensorBoard 2.21.0 plus the LTX-2 `9ec55f9f` pin in the LTX image).
 The r2 history: runtime source
@@ -204,6 +226,10 @@ The r2 history: runtime source
 
 ## Open
 
+- **Separate assigned tickets:** clean image rebuild/publication and app image-default update,
+  RunPod Hub-token secret reference, and CI's macOS runner repair. No image or CI work was
+  performed in this source-repair round. Direct uploads, cleanup and the repaired Resume/
+  generation behavior need the rebuilt agent before live acceptance; no new GPU was rented.
 - **Caption quality.** The 3B and 8B captions failed the concept boundary in the cancelled
   five-image experiment; none is training data. The larger comparison is deferred by Hákon.
 - **Caption inference while training runs.** Both services were resident at once, but the

@@ -32,9 +32,12 @@ struct ConceptsView: View {
                     VStack(alignment: .leading, spacing: 14) {
                         Toggle("Configure multiple concepts in one LoRA", isOn: $multipleConcepts)
                             .disabled(concepts.count > 1)
-                        Text("Each concept needs its own trigger and a confirmed assignment in every relevant sample. "
-                            + "Use this only when you intend to train the concepts together.")
-                            .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                        Text(
+                            "Each concept needs its own trigger. Confirm locations for people, objects and characters; "
+                                + "style and motion apply to the whole target automatically. "
+                                + "Use this only when you intend to train the concepts together."
+                        )
+                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
                         if multipleConcepts || concepts.count > 1 {
                             Button("Add concept…", systemImage: "plus") { editor = EditorSelection(existing: nil) }
                                 .disabled(session.busy || session.editing)
@@ -42,6 +45,19 @@ struct ConceptsView: View {
                     }.padding(.top, 10)
                 }
             }.frame(maxWidth: 820, alignment: .leading)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(alignment: .leading, spacing: 10) {
+                Divider()
+                Button(concepts.count == 1 ? "Confirm concept and continue" : "Confirm concepts and continue") {
+                    session.confirmConcepts()
+                }
+                .buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
+                .keyboardShortcut(.return, modifiers: .command)
+                .help("Save these concepts and open \(session.nextStep?.title ?? "the next step") (⌘↩)")
+                .disabled(session.project == nil || session.busy || session.editing)
+            }.padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading)
+                .background(StudioStyle.canvas)
         }
         .sheet(item: $editor) { ConceptEditor(session: session, existing: $0.existing) }
         .onAppear { multipleConcepts = concepts.count > 1 }
@@ -61,7 +77,7 @@ struct ConceptsView: View {
             Text(concept.targetConcept.captionExplanation)
                 .foregroundStyle(StudioStyle.supportingText).fixedSize(horizontal: false, vertical: true)
             HStack(alignment: .top, spacing: 20) {
-                if concept.targetConcept != .style, concept.targetConcept != .motion,
+                if concept.targetConcept.requiresLocator,
                    let reference = session.references[concept.trigger] {
                     PhotoView(url: reference).frame(width: 110, height: 120)
                         .accessibilityLabel("Reference for \(concept.trigger)")
@@ -69,7 +85,7 @@ struct ConceptsView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Button("Edit concept…", systemImage: "pencil") { editor = EditorSelection(existing: concept) }
                         .disabled(session.busy || session.editing)
-                    if concept.targetConcept != .style, concept.targetConcept != .motion {
+                    if concept.targetConcept.requiresLocator {
                         Button(concept.targetConcept
                             .isPersonIdentity ? "Choose reference photo…" : "Choose reference image…") {
                                 if let url = ProjectAccess.chooseImages(multiple: false).first {

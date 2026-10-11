@@ -65,7 +65,9 @@ extension GPUWorkspace {
             let own = services.first { $0.name == "generate-\(generation.trainer)" && $0.runID == generation.runID }
             if own?.active == true { return }
             let files = try await agent.runFiles(runID: generation.runID)
-            guard files.contains(where: { ["png", "mp4"].contains(($0.path as NSString).pathExtension) }) else {
+            guard files.contains(where: { $0.path == "comparison.json"
+                    || ["png", "mp4"].contains(($0.path as NSString).pathExtension)
+            }) else {
                 generation.state = .failed
                 generation.failure = "Generation ended without outputs. Read its saved log before retrying."
                 self.generation = generation
@@ -100,28 +102,41 @@ extension GPUWorkspace {
             message = "Downloading generated output \(file.path)…"
             try await download(file, runID: generation.runID, into: folder, agent: agent)
         }
-        generation.state = .saved
         generation.folder = folder.path
+        let manifest = comparisonManifest(generation)
+        let complete = manifest?.state == "complete" && manifest?.pairs.isEmpty == false
+            && manifest?.pairs.allSatisfy { pair in
+                comparisonFile(pair.basePath, in: generation) != nil
+                    && comparisonFile(pair.loraPath, in: generation) != nil
+            } == true
+        generation.state = complete ? .saved : .failed
+        generation.failure = complete ? nil
+            : "Generation did not complete every base/LoRA pair. Available files are saved; inspect the run log."
         self.generation = generation
         saveProjectRecord()
         persist()
-        message = "Generated outputs saved into this project. The computer can now be stopped."
+        message = complete ? "Generated outputs saved into this project. The computer can now be stopped."
+            : generation.failure ?? "Generation did not finish."
     }
 
     func comparisonManifest(_ comparison: GeneratedComparison) -> ComparisonManifest? {
         guard let folder = comparison.folder,
+              let expected = try? resultsFolder(for: comparison.runID),
+              URL(fileURLWithPath: folder).resolvingSymlinksInPath().path == expected.path,
               let data = try? Data(contentsOf: URL(fileURLWithPath: folder).appendingPathComponent("comparison.json"))
         else { return nil }
         return try? JSONDecoder().decode(ComparisonManifest.self, from: data)
     }
 
     func comparisonFile(_ path: String, in comparison: GeneratedComparison) -> URL? {
-        guard let folder = comparison.folder else { return nil }
+        guard let folder = comparison.folder, let expected = try? resultsFolder(for: comparison.runID),
+              URL(fileURLWithPath: folder).resolvingSymlinksInPath().path == expected.path else { return nil }
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
         guard !parts.contains(where: { ["", ".", ".."].contains(String($0)) }) else { return nil }
         let root = URL(fileURLWithPath: folder).standardizedFileURL
         let file = root.appendingPathComponent(path).standardizedFileURL
         guard file.path.hasPrefix(root.path + "/"),
+              file.resolvingSymlinksInPath().path.hasPrefix(root.path + "/"),
               FileManager.default.fileExists(atPath: file.path) else { return nil }
         return file
     }

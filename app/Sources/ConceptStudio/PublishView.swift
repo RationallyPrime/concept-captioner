@@ -9,7 +9,7 @@ struct PublishView: View {
                 StudioSection(
                     title: "Prepare the training dataset",
                     subtitle: "Upload the included images or clips and their saved captions "
-                        + "so the training computer can download them."
+                        + "so the training computer can use them."
                 ) {
                     if let project = session.project {
                         LabeledContent("Included samples", value: "\(project.images.count)")
@@ -43,43 +43,61 @@ struct PublishView: View {
                     }
                 }
                 Divider()
-                StudioSection(
-                    title: "Choose the destination",
-                    subtitle: "Use a dataset in your own Hugging Face account."
-                ) {
-                    TextField("Hugging Face owner/dataset", text: $session.repoID).textFieldStyle(.roundedBorder)
-                    Toggle("Private dataset", isOn: $session.privateDataset)
-                    Text("Private datasets are visible only to accounts with access. Keep this on for private photos.")
-                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
-                    StudioNotice(
-                        "Your Hugging Face write token goes in Settings. It is never saved in the project.",
-                        symbol: "key"
-                    )
-                }.disabled(session.busy)
+                if session.gpu.usesLocalDataset {
+                    StudioSection(title: "Upload directly to your training computer") {
+                        Text("No Hugging Face token is configured. Check your saved training data here, then rent a "
+                            + "computer and start training. The app uploads your included targets directly over its "
+                            + "authenticated connection. No dataset account is required.")
+                        Text("Up to 2 GiB per file and 20 GiB per dataset. "
+                            + "Some starting models still require their own account or license access.")
+                            .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                    }
+                } else {
+                    StudioSection(
+                        title: "Choose the destination",
+                        subtitle: "Use a dataset in your own Hugging Face account."
+                    ) {
+                        TextField("Hugging Face owner/dataset", text: $session.repoID).textFieldStyle(.roundedBorder)
+                        Toggle("Private dataset", isOn: $session.privateDataset)
+                        Text("Private datasets are visible only to accounts with access. "
+                            + "Keep this on for private images and clips.")
+                            .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                        StudioNotice(
+                            "Your Hugging Face write token goes in Settings. It is never saved in the project.",
+                            symbol: "key"
+                        )
+                    }.disabled(session.busy)
+                }
                 Divider()
                 StudioSection(
-                    title: "Publish",
+                    title: session.gpu.usesLocalDataset ? "Check training data" : "Publish",
                     subtitle: session.demoMode
                         ? "Offline simulation: no files leave your Mac and no money is spent."
+                        : session.gpu.usesLocalDataset ? "Checks the included targets and saved captions on your Mac."
                         : "Uploads to your own account. This action does not rent a computer."
                 ) {
                     Button(
-                        session.demoMode ? "Simulate dataset upload" : "Publish dataset",
+                        session.demoMode ? "Simulate dataset upload"
+                            : session.gpu.usesLocalDataset ? "Check training data" : "Publish dataset",
                         systemImage: "arrow.up.doc"
                     ) {
                         session.publish()
                     }.buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
                         .keyboardShortcut(.return, modifiers: .command)
-                        .help("Publish the dataset (⌘↩)")
-                        .disabled(session.busy || (!session.demoMode && session.repoID.isEmpty))
+                        .help(session.gpu.usesLocalDataset
+                            ? "Check saved training data (⌘↩)" : "Publish the dataset (⌘↩)")
+                        .disabled(session
+                            .busy || (!session.demoMode && !session.gpu.usesLocalDataset && session.repoID.isEmpty))
                     if session.busy { ProgressView(session.message) }
                     Text(
-                        "After publishing, continue to GPU pods to choose a training computer and review its price."
+                        "Continue to GPU pods to choose a training computer and review its price. "
+                            + "Training uses your saved captions and included media."
                     )
                     .font(.callout).foregroundStyle(StudioStyle.supportingText)
                 }
             }.frame(maxWidth: 760, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .onAppear { session.preparePublishing() }
     }
 }

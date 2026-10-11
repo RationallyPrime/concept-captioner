@@ -257,7 +257,7 @@ struct MediaWorkflowTests {
         project.job.samples = ["garden.png": nil]
         try project.setIncluded("studio.png", false)
         let opened = try await StudioProject.open(at: project.directory)
-        let expected = try #require(opened.job.wholeImageStyleMapping)
+        let expected = try #require(opened.job.mappingIncludingWholeTargets(nil))
         #expect(opened.images.allSatisfy { opened.job.mapping(for: $0.id) == expected })
         #expect(opened.job.mapping(for: "studio.png") == nil)
         let stored = try Job.load(contentsOf: opened.jobURL)
@@ -406,8 +406,9 @@ struct MediaWorkflowTests {
         project.job.concepts = try [Concept(trigger: "NORA7", classNoun: "style", targetConcept: .style)]
         try project.setIncluded(id, true)
         #expect(project.job.unmapped([id]).isEmpty)
-        #expect(project.job.mapping(for: id) == project.job.wholeImageStyleMapping)
-        #expect(try Job.load(contentsOf: project.jobURL).mapping(for: id) == project.job.wholeImageStyleMapping)
+        #expect(project.job.mapping(for: id) == project.job.mappingIncludingWholeTargets(nil))
+        #expect(try Job.load(contentsOf: project.jobURL).mapping(for: id) == project.job
+            .mappingIncludingWholeTargets(nil))
     }
 
     @Test(arguments: [TargetConcept.style, .object])
@@ -421,7 +422,7 @@ struct MediaWorkflowTests {
         )
         project.job.concepts = try [Concept(trigger: "OBJECT8", classNoun: "object", targetConcept: category)]
         try project.undoCuration()
-        #expect(project.job.mapping(for: id) == project.job.wholeImageStyleMapping)
+        #expect(project.job.mapping(for: id) == project.job.mappingIncludingWholeTargets(nil))
         if category == .object { #expect(project.job.unmapped([id]) == [id]) }
         #expect(project.images.contains { $0.id == id })
     }

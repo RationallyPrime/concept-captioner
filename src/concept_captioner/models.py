@@ -45,6 +45,7 @@ with ``store`` false, so OpenAI does not retain captions or images, matching the
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import typing
 from dataclasses import dataclass
@@ -77,6 +78,36 @@ GATEWAY_UPSTREAMS = frozenset(
 
 OPENAI_ORIGIN = "https://api.openai.com/v1"
 ANTHROPIC_ORIGIN = "https://api.anthropic.com"
+VIDEO_KINDS = frozenset({"google", "openrouter", "gateway/google", "gateway/google-cloud"})
+MAX_VIDEO_REQUEST_BYTES = 20 * 1024 * 1024
+"""Conservative client policy on the full encoded video request, not a provider maximum."""
+
+
+async def _check_video_request_size(request: httpx2.Request) -> None:
+    body = await request.aread()
+    if len(body) < MAX_VIDEO_REQUEST_BYTES:
+        return
+    try:
+        payload = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        return
+    # The actual public SDK wire shapes. Text mentioning video is not a media part.
+    parts = [part for content in payload.get("contents", []) for part in content.get("parts", [])]
+    blobs = [part.get("inlineData") or part.get("inline_data") or {} for part in parts]
+    google_video = any(
+        str(blob.get("mimeType") or blob.get("mime_type", "")).startswith("video/")
+        for blob in blobs
+    )
+    chat_video = any(
+        isinstance(message.get("content"), list)
+        and any(part.get("type") == "video_url" for part in message["content"])
+        for message in payload.get("messages", [])
+    )
+    if google_video or chat_video:
+        raise ConfigurationError(
+            "This video request exceeds the 20 MiB client limit, including the clip, instructions "
+            "and response schema. Select a shorter segment; no video was sent."
+        )
 
 
 @dataclass(frozen=True)
@@ -86,6 +117,15 @@ class Resolved:
     output_mode: OutputMode
     requested: str  # the model name as requested, for the response record
     concurrency: int = 4
+    kind: str | None = None
+
+    def require_video(self) -> None:
+        if self.kind not in VIDEO_KINDS:
+            raise ConfigurationError(
+                "This Python provider route does not accept video clips. Choose a video-capable "
+                "Gemini or OpenRouter model; Python vLLM video awaits library support. "
+                "No still frame was sent as video."
+            )
 
     def output_type(self, schema: type[BaseModel]) -> Any:
         if self.output_mode == "native":
@@ -197,10 +237,8 @@ def _model(spec: EndpointSpec, http_client: httpx2.AsyncClient | None) -> Model:
             f"{spec.kind!r} is not a supported gateway upstream; use one of "
             + ", ".join(f"gateway/{name}" for name in sorted(GATEWAY_UPSTREAMS))
         )
-    if http_client is not None and spec.kind not in {"openai", "anthropic"}:
-        raise ConfigurationError(
-            f"http_client applies to kinds openai, anthropic and vllm, not {spec.kind!r}"
-        )
+    if http_client is not None and spec.kind not in {"openai", "anthropic"} | VIDEO_KINDS:
+        raise ConfigurationError(f"http_client is not supported for kind {spec.kind!r}")
     try:
         if spec.kind == "openai":
             from pydantic_ai.providers.openai import OpenAIProvider
@@ -222,6 +260,26 @@ def _model(spec: EndpointSpec, http_client: httpx2.AsyncClient | None) -> Model:
                 spec.model,
                 provider=AnthropicProvider(base_url=ANTHROPIC_ORIGIN, http_client=http_client),
             )
+        if spec.kind in VIDEO_KINDS:
+            from pydantic_ai.models import create_async_httpx2_client
+            from pydantic_ai.providers.gateway import gateway_provider
+            from pydantic_ai.providers.google import GoogleProvider
+            from pydantic_ai.providers.openrouter import OpenRouterProvider
+
+            client = http_client or create_async_httpx2_client()
+            hooks = client.event_hooks
+            if _check_video_request_size not in hooks["request"]:
+                client.event_hooks = {
+                    **hooks,
+                    "request": [*hooks["request"], _check_video_request_size],
+                }
+            if spec.kind == "google":
+                provider = GoogleProvider(http_client=client)
+            elif spec.kind == "openrouter":
+                provider = OpenRouterProvider(http_client=client)
+            else:
+                provider = gateway_provider(spec.kind.removeprefix("gateway/"), http_client=client)
+            return infer_model(spec.spec, provider_factory=lambda _name: provider)
         return infer_model(spec.spec)
     except UserError as error:
         hint = " (Gemini is kind: google)" if spec.kind == "gemini" else ""
@@ -278,7 +336,9 @@ def resolve(
     """Build the model for ``spec``.
 
     ``http_client`` replaces pydantic-ai's default HTTP client for the providers this module builds
-    itself (``openai``, ``anthropic``, ``vllm``); tests pass one with a mock transport. Pass a fresh
+    itself (``openai``, ``anthropic``, ``vllm`` and the supported video routes); tests pass one with
+    a mock transport. Video routes measure the SDK's full encoded request before every send.
+    Pass a fresh
     client per call: on a vLLM route that gets no key, the client gains a request hook that strips
     ``Authorization`` from every request it sends afterwards, for any endpoint.
     """
@@ -295,4 +355,5 @@ def resolve(
         output_mode=endpoint.output_mode,
         requested=endpoint.model,
         concurrency=endpoint.concurrency,
+        kind=endpoint.kind,
     )

@@ -1,26 +1,27 @@
 # images
 
-Current public release: `ghcr.io/rationallyprime/concept-captioner-pod-{base,aitoolkit,ltx}:v0.2.1-clean-20261011`,
-a **clean build from commit `ce52a220382f1121b8dd0c986e2c62c0de2423f9`** (`main`): the three
-Dockerfiles as committed, built on cx53 with `docker buildx build --no-cache` after pruning the
-build cache, and no overlay. The images carry no OCI revision label; this table is the record of
+Current public release: `ghcr.io/rationallyprime/concept-captioner-pod-{base,aitoolkit,ltx}:v0.2.2-clean-20261011`,
+a **clean build from commit `2789c1d33a4aec015ad1728f24b72be3445e4b8f`** (`main`): the three
+Dockerfiles as committed, built on cx53 with `docker buildx build` and no overlay (the base image
+reused the layer cache of the previous clean build; the two trainer images were built after the
+build cache had been pruned). The images carry no OCI revision label; this table is the record of
 which commit they came from.
 
 | image suffix | public manifest digest |
 | --- | --- |
-| `base` | `sha256:9c4bfd89dd2479ed1e5c526d12d1cd12e652ef4e9c9cb7ccfadbef29bb7c593e` |
-| `aitoolkit` | `sha256:6aa4ba60254f971a0b8e4d0f34599f3875ffa7aef7187855d471ffaf0ea4f820` |
-| `ltx` | `sha256:e73a8df079c969f9dd04cc77514ef21d7614377ae1554e34c9fafb33d92175c5` |
+| `base` | `sha256:5a10967a5302c4484a390673b9a6f8422e011a1a7d4f97e071410e19d5cf8779` |
+| `aitoolkit` | `sha256:c8fc06b7552114e8ad9050e9d16cdd92bb42a5821245a7601792fd4884dc158f` |
+| `ltx` | `sha256:e1c4a492ddd889db3e3ebc1f48e1c887051fd3eafe7ebbee77f34ba2f8b561c6` |
 
 Checked on cx53 after the push: each image pulled anonymously by digest with an empty Docker
 client configuration, and each tag resolves anonymously to the digest above. The base build ran
 `check_vllm_flags.py` (23 flags found, build passed). The CPU control smoke ran against the
-digest-pulled base image: authentication (401 without the bearer), service catalog,
+pushed base image: authentication (401 without the bearer), service catalog,
 TensorBoard session and its cookie scope, run files with a range read, and planning with two
 fake GPUs all passed. The LTX image has TensorBoard 2.21.0, LTX-2 at `9ec55f9f` and
 `LTX_HUB_REVISION` `dfcc2108383fe1aaa0584bdf55d368a4bdadd90c`. No real-pod run has used these
 images yet; that is the owner's training run. Receipts are on cx53 under
-`/home/hive/work/cc-clean-logs`. Docker is not installed on the Mac; this x86 build host
+`/home/hive/work/cc-clean2-logs` (the `v0.2.1-clean-20261011` receipts stay under `cc-clean-logs`). Docker is not installed on the Mac; this x86 build host
 produces the images.
 
 The previous release, `v0.2.0-overnight20261011-r2` (base `sha256:65e6b5ec…7551e`, aitoolkit
@@ -184,7 +185,7 @@ refuses to start without the token, so a pod created without it exits immediatel
 Actual builds, anonymous pulls, runtime receipts and their exact scope are recorded in
 [POD-STATUS](../docs/POD-STATUS.md). The three repository Dockerfiles built successfully on
 cx53 with the pinned vLLM cu129 stack, FlashInfer cache, AI Toolkit stack and LTX workspace, and
-`v0.2.1-clean-20261011` is that build from `main` with nothing overlaid.
+`v0.2.2-clean-20261011` is that build from `main` with nothing overlaid.
 
 On the real CUDA 13.0 Blackwell hosts used for this project, vLLM returned structured captions,
 both trainers produced checkpoints and loss curves, FLUX generation/Resume completed, and the

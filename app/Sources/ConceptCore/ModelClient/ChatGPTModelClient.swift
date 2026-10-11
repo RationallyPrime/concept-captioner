@@ -94,7 +94,8 @@ public struct ChatGPTModelClient: ModelClient {
         instructions: String,
         messages: [ChatMessage],
         output: OutputRequest,
-        settings: RequestSettings
+        settings: RequestSettings,
+        onPartialText: (@Sendable (String) async -> Void)? = nil
     ) async throws -> ModelReply {
         let body = try requestBody(instructions: instructions, messages: messages, output: output, settings: settings)
         try await usageLimit.check()
@@ -115,7 +116,7 @@ public struct ChatGPTModelClient: ModelClient {
             let response = try await transport.stream(request)
             defer { response.cancel() }
             guard (200 ..< 300).contains(response.status) else { throw try await httpFailure(response) }
-            return try await completedReply(response, mode: output.mode)
+            return try await completedReply(response, mode: output.mode, onPartialText: onPartialText)
         } catch is CancellationError {
             throw CancellationError()
         } catch let error as ChatGPTInferenceError {
@@ -180,10 +181,21 @@ public struct ChatGPTModelClient: ModelClient {
         )
     }
 
-    private func completedReply(_ response: HTTPStreamResponse, mode: OutputMode) async throws -> ModelReply {
+    private func completedReply(
+        _ response: HTTPStreamResponse, mode: OutputMode,
+        onPartialText: (@Sendable (String) async -> Void)?
+    ) async throws -> ModelReply {
         var completedItems: [Int: JSONValue] = [:]
+        var partialText = ""
         for try await event in response.events {
             try Task.checkCancellation()
+            if let envelope = try? JSONValue(parsing: Data(event.data.utf8)),
+               envelope.field("type")?.stringValue == "response.output_text.delta",
+               let delta = envelope.field("delta")?.stringValue {
+                partialText += delta
+                await onPartialText?(partialText)
+                try Task.checkCancellation()
+            }
             if let reply = try terminalReply(event, response: response, mode: mode, completedItems: &completedItems) {
                 return reply
             }

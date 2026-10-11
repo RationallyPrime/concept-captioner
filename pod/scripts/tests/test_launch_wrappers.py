@@ -1666,3 +1666,37 @@ def test_ltx_missing_or_invalid_timing_is_refused(broken):
         probe["frames"][2]["best_effort_timestamp_time"] = "nan"
     with pytest.raises(ltx.ConfigError, match="Cannot validate complete frame timing"):
         ltx.check_constant_frame_timing(probe, 9, Path("approved.mp4"))
+
+
+@pytest.mark.parametrize("wrapper", [aitoolkit, ltx])
+def test_resume_load_restores_missing_inputs_after_config_validation(
+    wrapper, workspace, monkeypatch
+):
+    import shutil
+
+    cfg = run_config_for(wrapper, workspace, resume=True)
+    path = write_run_json(workspace, cfg)
+    dataset = Path(cfg["dataset"]["path"])
+    shutil.rmtree(dataset)
+    calls = []
+
+    def restore(raw, run_dir, root):
+        calls.append((raw, run_dir, root))
+        dataset.mkdir(parents=True)
+
+    monkeypatch.setattr(wrapper.runpy, "run_path", lambda _: {"restore_dataset": restore})
+    with pytest.raises(wrapper.ConfigError, match="not a directory"):
+        wrapper.load_run(path, restore_missing_dataset=False)
+    assert not calls
+    _, restored = wrapper.load_run(path)
+    assert len(calls) == 1 and calls[0][1] == path.parent and calls[0][2] == workspace
+    assert restored["resume"] and dataset.is_dir()
+    cfg["unknown_override"] = True
+    path.write_text(json.dumps(cfg))
+    with pytest.raises(wrapper.ConfigError, match="unknown keys"):
+        wrapper.load_run(path)
+    assert len(calls) == 1
+    path.write_text("[]")
+    with pytest.raises(wrapper.ConfigError, match="JSON object"):
+        wrapper.load_run(path)
+    assert len(calls) == 1

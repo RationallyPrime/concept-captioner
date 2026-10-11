@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from .types import ConfigurationError
 
@@ -174,6 +174,17 @@ class Job(BaseModel):
     """A captioning job: concepts, per-sample subject mappings, skill, profile, endpoints."""
 
     model_config = ConfigDict(extra="forbid")
+    _directory: Path | None = PrivateAttr(default=None)
+
+    @property
+    def directory(self) -> Path | None:
+        """Loading context only; never a job field or part of content equality."""
+        return self._directory
+
+    def __eq__(self, other: object) -> bool:
+        if type(other) is not type(self):
+            return NotImplemented
+        return self.model_dump() == other.model_dump()
 
     skill: str | None = None  # a skill directory; None: the bundled default
     profile: str = "h3-still"  # a profile in the skill, or a path to a .md file
@@ -249,11 +260,14 @@ class Job(BaseModel):
 
     @classmethod
     def load(cls, path: str | Path) -> Job:
-        raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+        path = Path(path).expanduser().resolve()
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             raise ConfigurationError("job file must be a YAML mapping")
         try:
-            return cls.model_validate(raw)
+            job = cls.model_validate(raw)
+            job._directory = path.parent
+            return job
         except ValueError as error:
             raise ConfigurationError(str(error)) from None
 

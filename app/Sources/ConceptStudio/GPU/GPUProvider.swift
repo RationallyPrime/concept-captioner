@@ -1,5 +1,6 @@
 import ConceptCore
 import Foundation
+import Security
 
 struct GPUOffer: Identifiable, Decodable {
     struct Prices: Decodable { let secure: Double }
@@ -119,8 +120,43 @@ struct PodCreation {
     /// Lowest host CUDA version the image's wheels run on, as `major.minor`.
     let minCudaVersion: String
     let volume: GPUVolume
-    let agentToken: String
-    let hubToken: String
+    /// The environment the container boots with. Credentials are never literal here: the
+    /// workspace stores them as account secrets first and passes `PodSecrets.reference` values.
+    let env: [String: String]
+}
+
+/// RunPod account secrets stand in for credentials in a pod's environment. A pod listing returns
+/// `env` verbatim, so a literal token there is readable by anyone who can read the account; a
+/// `{{ RUNPOD_SECRET_<name> }}` placeholder is substituted only inside the container when it
+/// boots, and a secret's value can never be read back (`account/secrets` in the v2 schema).
+enum PodSecrets {
+    /// The user's Hub token, rewritten before every rental so a rotated token takes effect.
+    static let hubTokenName = "conceptstudio_hf_token"
+    /// One agent bearer per pod, deleted when the pod is removed.
+    static let agentPrefix = "conceptstudio_agent_"
+    private static let marker = "RUNPOD_SECRET_"
+
+    static func reference(_ name: String) -> String {
+        "{{ \(marker)\(name) }}"
+    }
+
+    /// The secret a placeholder names; nil for a literal value.
+    static func referencedName(in value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("{{"), trimmed.hasSuffix("}}") else { return nil }
+        let inner = trimmed.dropFirst(2).dropLast(2).trimmingCharacters(in: .whitespaces)
+        guard inner.hasPrefix(marker), inner.count > marker.count else { return nil }
+        return String(inner.dropFirst(marker.count))
+    }
+
+    /// `conceptstudio_agent_` plus 96 random bits, hex encoded.
+    static func newAgentSecretName() throws -> String {
+        var bytes = [UInt8](repeating: 0, count: 12)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+            throw StudioError.message("Your Mac could not generate a key for the computer. Try again.")
+        }
+        return agentPrefix + bytes.map { String(format: "%02x", $0) }.joined()
+    }
 }
 
 protocol GPUProvider: Sendable {
@@ -135,6 +171,23 @@ protocol GPUProvider: Sendable {
     func terminate(id: String) async throws
     /// The HTTPS URL that reaches `port` on the pod.
     func url(for pod: RentedPod, port: Int) -> URL
+    /// Writes `value` under `name` in the account's secret store, replacing an existing value.
+    func storeSecret(name: String, value: String) async throws
+    /// Removes the named secret. A secret that does not exist is not an error.
+    func deleteSecret(name: String) async throws
+    /// Secrets whose name starts with `prefix` that no pod on the account, in any state, references.
+    func orphanedSecrets(prefix: String) async throws -> [String]
+}
+
+/// One page of `GET /v2/pods`, decoded as whatever the caller needs from each pod.
+private struct PodPage<Entry: Decodable>: Decodable {
+    struct Pagination: Decodable {
+        let nextCursor: String?
+        let hasNextPage: Bool
+    }
+
+    let pods: [Entry]
+    let pagination: Pagination?
 }
 
 /// Uses RunPod's REST v2 schema, fetched from api.runpod.io/v2/openapi.json on 2026-10-10 and
@@ -179,7 +232,9 @@ struct RunPodProvider: GPUProvider {
                 "volumeId": .string(request.volume.id), "path": .string("/workspace"),
             ])])]),
             "ports": .array([.string("\(PodPort.agent)/http"), .string("\(PodPort.inference)/http")]),
-            "env": .object(["PODAGENT_TOKEN": .string(request.agentToken), "HF_TOKEN": .string(request.hubToken)]),
+            "env": .object(JSONObject(
+                request.env.sorted { $0.key < $1.key }.map { ($0.key, JSONValue.string($0.value)) }
+            )),
         ]
         return try await JSONDecoder().decode(RentedPod.self, from: call("pods", method: "POST", body: payload))
     }
@@ -189,27 +244,26 @@ struct RunPodProvider: GPUProvider {
     }
 
     func list() async throws -> [RentedPod] {
-        struct Pagination: Decodable {
-            let nextCursor: String?
-            let hasNextPage: Bool
-        }
-        struct Page: Decodable {
-            let pods: [PodListEntry]
-            let pagination: Pagination?
-        }
         var pods: [RentedPod] = []
+        for entry in try await podPages(PodListEntry.self) where entry.name.map(PodNaming.isFromThisApp) == true {
+            try pods.append(entry.pod.get())
+        }
+        return pods
+    }
+
+    /// Every pod on the account, newest first, across the cursor-paginated pages.
+    private func podPages<Entry: Decodable>(_: Entry.Type) async throws -> [Entry] {
+        var entries: [Entry] = []
         var cursor: String?
         for _ in 0 ..< 20 {
             var query = [URLQueryItem(name: "limit", value: "200")]
             if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
-            let page = try await JSONDecoder().decode(Page.self, from: call("pods", query: query))
-            for entry in page.pods where entry.name.map(PodNaming.isFromThisApp) == true {
-                try pods.append(entry.pod.get())
-            }
+            let page = try await JSONDecoder().decode(PodPage<Entry>.self, from: call("pods", query: query))
+            entries.append(contentsOf: page.pods)
             guard page.pagination?.hasNextPage == true, let next = page.pagination?.nextCursor else { break }
             cursor = next
         }
-        return pods
+        return entries
     }
 
     func stop(id: String) async throws {
@@ -218,6 +272,52 @@ struct RunPodProvider: GPUProvider {
 
     func terminate(id: String) async throws {
         _ = try await call("pods/\(id)", method: "DELETE")
+    }
+
+    private struct Secret: Decodable {
+        let id: String
+        let name: String
+    }
+
+    private struct SecretList: Decodable { let secrets: [Secret] }
+
+    /// `GET account/secrets?name=` filters case-insensitively; the exact name is kept here.
+    private func secrets(named name: String) async throws -> [Secret] {
+        let listed = try await JSONDecoder().decode(
+            SecretList.self, from: call("account/secrets", query: [URLQueryItem(name: "name", value: name)])
+        )
+        return listed.secrets.filter { $0.name == name }
+    }
+
+    func storeSecret(name: String, value: String) async throws {
+        if let existing = try await secrets(named: name).first {
+            _ = try await call("account/secrets/\(existing.id)", method: "PATCH", body: ["value": .string(value)])
+        } else {
+            _ = try await call("account/secrets", method: "POST", body: [
+                "name": .string(name), "value": .string(value),
+                "description": .string("Written by ConceptStudio and referenced from its pods' environment."),
+            ])
+        }
+    }
+
+    func deleteSecret(name: String) async throws {
+        for secret in try await secrets(named: name) {
+            _ = try await call("account/secrets/\(secret.id)", method: "DELETE")
+        }
+    }
+
+    func orphanedSecrets(prefix: String) async throws -> [String] {
+        struct Environment: Decodable { let env: [String: String]? }
+        let names = try await JSONDecoder().decode(SecretList.self, from: call("account/secrets")).secrets
+            .map(\.name).filter { $0.hasPrefix(prefix) }
+        guard !names.isEmpty else { return [] }
+        var referenced: Set<String> = []
+        for pod in try await podPages(Environment.self) {
+            for value in (pod.env ?? [:]).values {
+                if let name = PodSecrets.referencedName(in: value) { referenced.insert(name) }
+            }
+        }
+        return names.filter { !referenced.contains($0) }.sorted()
     }
 
     /// RunPod's HTTP proxy: `https://<pod-id>-<port>.proxy.runpod.net` (POD-SPEC §1).
@@ -302,5 +402,14 @@ actor DemoGPUProvider: GPUProvider {
 
     nonisolated func url(for pod: RentedPod, port: Int) -> URL {
         URL(string: "https://demo.invalid:\(port)")!
+    }
+
+    /// The demo has no account: secrets are accepted and forgotten.
+    func storeSecret(name: String, value: String) {}
+
+    func deleteSecret(name: String) {}
+
+    func orphanedSecrets(prefix: String) -> [String] {
+        []
     }
 }

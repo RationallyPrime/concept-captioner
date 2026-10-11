@@ -14,8 +14,8 @@ class Caption(BaseModel):
     usable: bool = Field(
         default=True,
         description=(
-            "False when a mapped subject is absent, too small, obscured, or cannot be bound to "
-            "one visible person. Then leave the caption empty and explain in note."
+            "False when the declared training target cannot be found in the sample. "
+            "Then leave the caption empty and explain in note."
         ),
     )
     note: str | None = Field(default=None, description="Why the sample is not usable.")

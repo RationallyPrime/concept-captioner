@@ -18,6 +18,9 @@ private actor ImageChoiceTransport: HTTPTransport {
                 + #""dataCenters":[{"id":"test","availability":"HIGH"}]}]}"#
         } else if url.path().hasSuffix("network-volumes") {
             body = #"{"networkVolumes":[{"id":"test","name":"Data","size":100,"dataCenter":"test"}]}"#
+        } else if url.path().contains("account/secrets") {
+            // Credentials are stored as account secrets before the pod is created (POD-SPEC §1).
+            body = request.httpMethod == "GET" ? #"{"secrets":[]}"# : #"{"id":"secret","name":"secret"}"#
         } else {
             if url.path() == "/v2/pods", request.httpMethod == "POST" {
                 let payload = try JSONValue(parsing: #require(request.httpBody)).objectValue
@@ -52,7 +55,7 @@ struct StudioSessionTests {
         let expected = if let saved, !saved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             saved.replacingOccurrences(of: "{trainer}", with: trainer)
         } else {
-            "ghcr.io/rationallyprime/concept-captioner-pod-\(trainer):v0.2.1-clean-20261011"
+            "ghcr.io/rationallyprime/concept-captioner-pod-\(trainer):v0.2.2-clean-20261011"
         }
         #expect(await transport.createdImages == [expected])
         await session.gpu.stopEverything()
@@ -71,7 +74,7 @@ struct StudioSessionTests {
         #expect(session.podImageName == loaded.podImageName)
         #expect(preferences.string(forKey: "podImage") == session.podImageName)
         if changed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            #expect(session.podImageName.contains("concept-captioner-pod-{trainer}:v0.2.1-clean-20261011"))
+            #expect(session.podImageName.contains("concept-captioner-pod-{trainer}:v0.2.2-clean-20261011"))
         } else {
             #expect(session.podImageName == changed)
         }

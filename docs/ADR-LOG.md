@@ -21,7 +21,8 @@ tracks verification. Other owner decisions already recorded in [CLAUDE.md](../CL
 remain in force; this restoration does not replace or reopen them.
 
 Implementation notes below are a source/evidence snapshot at `d184557` on 2026-10-11, not new
-decisions or a claim that every requirement has passed a live user walkthrough.
+decisions or a claim that every requirement has passed a live user walkthrough. Dated follow-ups
+record repairs without erasing that snapshot or changing the accepted decision text.
 
 | Record | Decision | Decision status |
 | --- | --- | --- |
@@ -57,6 +58,13 @@ Its [Hub loader](../src/concept_captioner/sources/hf.py) still cannot load the a
 image/clip datasets correctly; that repair remains required by the
 [overnight review decisions](process/overnight-review-2026-10-11.md#owner-decisions-on-the-items-above-2026-10-11-afternoon).
 
+**Review repair, 2026-10-11:** Python now retains the loaded job's folder for relative skill
+and `.md` profile paths. Explicit CLI overrides remain working-directory-relative. The Hub
+imagefolder source reads images and clips by file name, and its sink updates the existing
+metadata without forcing mixed media into an image column. Focused offline tests cover a
+job loaded outside its folder and exact mixed-media bytes. See [CORE-SPEC](../app/docs/CORE-SPEC.md)
+for the current contract and [APP-STATUS](../app/docs/APP-STATUS.md) for the final verification.
+
 ## ADR-0002 — ChatGPT plan access and streaming
 
 **Status: Accepted. Decision date: 2026-10-11.**
@@ -86,6 +94,12 @@ but returns only the completed caption. [UI progress](../app/Sources/ConceptStud
 advances when each sample settles; visible progress from the stream while that caption is
 being written is still missing. Plan usage currently has a management link and limit handling,
 but no in-app usage/remaining-allowance display. Both remain requirements.
+
+**Review repair, 2026-10-11:** real ChatGPT text deltas now flow through the client, structured
+stage and runner to a display-only per-sample caption preview. Retries and settled, failed or
+cancelled runs clear that preview; only a validated completed caption is saved. The owner has
+confirmed native sign-in and live captioning with ChatGPT and OpenRouter. The remaining
+in-app plan-usage/allowance display is still a requirement; this repair does not close it.
 
 ## ADR-0003 — Money safety and running computers
 
