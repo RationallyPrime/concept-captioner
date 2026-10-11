@@ -22,6 +22,7 @@ jobs:
   swift:
     name: swift (app/)
     runs-on: macos-26
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: app
@@ -33,7 +34,8 @@ jobs:
       - run: swift --version
       - run: brew install swiftlint swiftformat
       - run: swift build
-      - run: swift test
+      - name: swift test (sampled and killed if it hangs for 5 minutes)
+        run: ../.github/scripts/swift-test-watchdog.sh
       - run: swiftlint lint --strict --quiet
       - run: swiftformat Sources Tests --lint
 
