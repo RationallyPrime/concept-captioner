@@ -12,7 +12,7 @@ struct StudioProjectTests {
     }
 
     @Test func demoUsesSharedJobAndSidecars() async throws {
-        var project = try await DemoProject.create()
+        var project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
         #expect(project.images.count == 3)
         #expect(try Job.load(contentsOf: project.jobURL) == project.job)
@@ -43,7 +43,7 @@ struct StudioProjectTests {
 
     @Test(arguments: [DemoScenario.success, .unusable, .rejected, .failed])
     func demoOutcomesUseCorePipeline(_ scenario: DemoScenario) async throws {
-        let project = try await DemoProject.create()
+        let project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
         let endpoint = ResolvedEndpoint(client: DemoModelClient(scenario: scenario))
         let runner = try Runner(
@@ -66,7 +66,7 @@ struct StudioProjectTests {
     }
 
     @Test func importsAvoidSidecarStemCollisions() async throws {
-        var project = try await DemoProject.create()
+        var project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
         let data = try Data(contentsOf: project.images[0].url)
         let name = try project.importData(data, name: "garden.jpg")

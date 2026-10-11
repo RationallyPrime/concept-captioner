@@ -1,5 +1,7 @@
 import ConceptCore
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 
 struct BoundaryDecision: Decodable {
     let detail: String
@@ -62,35 +64,134 @@ struct MappingDraft: Decodable {
     }
 }
 
+/// Dataset-level advice: one batch's review, and the merged review across batches.
+struct DatasetAdvice: Decodable, Equatable {
+    var summary: String
+    var suggestions: [String]
+    static let schema: JSONValue = .object([
+        "type": .string("object"),
+        "properties": .object([
+            "summary": .object(["type": .string("string")]),
+            "suggestions": .object(["type": .string("array"), "items": .object(["type": .string("string")])]),
+        ]),
+        "required": .array([.string("summary"), .string("suggestions")]),
+        "additionalProperties": .bool(false),
+    ])
+
+    var text: String {
+        ([summary] + suggestions.map { "• " + $0 }).joined(separator: "\n")
+    }
+}
+
 struct StudioAssistant {
+    /// At most this many photos are sent for dataset advice, chosen evenly across the set. Advice is
+    /// about variety and repetition, which a sample of this size shows, and it keeps the cost and
+    /// request sizes bounded for sets of hundreds of photos.
+    static let critiquePhotoLimit = 48
+    /// Photos per request. With `critiqueThumbnailPixels` thumbnails a request stays well under
+    /// providers' inline image limits (roughly 12 × 60 KB).
+    static let critiqueBatchSize = 12
+    /// Longest side of the thumbnail sent for each photo; enough to judge framing, clothing,
+    /// background and obvious quality problems.
+    static let critiqueThumbnailPixels = 512
+
     let endpoint: ResolvedEndpoint
     let demo: Bool
 
-    func critique(_ project: StudioProject, warnings: [String: ImageAnalysis]) async throws -> String {
+    func critique(
+        _ project: StudioProject,
+        warnings: [String: ImageAnalysis],
+        progress: @escaping @MainActor @Sendable (Int, Int) -> Void = { _, _ in }
+    ) async throws -> String {
         if demo {
             try await Task.sleep(for: .milliseconds(200))
             return "These synthetic portraits share one framing. Add real examples with different angles, "
                 + "clothing and backgrounds. Remove duplicates and avoid photos with obscured faces "
                 + "before renting a computer."
         }
-        let stage = StructuredStage<Caption>(
-            name: "dataset advice",
-            endpoint: endpoint,
-            schemaName: Caption.schemaName,
-            schema: Caption.jsonSchema
+        let sampled = Self.critiqueSample(project.images)
+        guard !sampled.isEmpty else { throw StudioError.message("Import photos before asking for dataset advice.") }
+        let stage = StructuredStage<DatasetAdvice>(
+            name: "dataset advice", endpoint: endpoint, schemaName: "DatasetAdvice", schema: DatasetAdvice.schema
         )
-        var content: [UserContent] = [.text("Intended concepts: " + project.job.jsonValue.pythonDumps()
-                + "\nImage warnings: " + warnings.values.flatMap(\.warnings).joined(separator: "; "))]
-        for image in project.images {
-            try content.append(Self.image(image.url))
+        let concepts = project.job.concepts.map(\.jsonValue)
+        var reviews: [DatasetAdvice] = []
+        var done = 0
+        for batch in stride(from: 0, to: sampled.count, by: Self.critiqueBatchSize).map({
+            Array(sampled[$0 ..< min($0 + Self.critiqueBatchSize, sampled.count)])
+        }) {
+            try Task.checkCancellation()
+            let notes = batch.flatMap { image in (warnings[image.id]?.warnings ?? []).map { "\(image.id): \($0)" } }
+            var content: [UserContent] = [.text(
+                "Intended concepts: " + JSONValue.array(concepts).pythonDumps()
+                    + "\nThis request shows \(batch.count) of \(sampled.count) photos reviewed from a set of "
+                    + "\(project.images.count).\nOn-device warnings: "
+                    + (notes.isEmpty ? "none" : notes.joined(separator: "; "))
+            )]
+            for image in batch {
+                try content += [.text("Photo \(image.id):"), Self.thumbnail(image.url)]
+            }
+            let reply = try await stage.run(
+                instructions: "Inspect these training photos for a diffusion LoRA. Give concise, beginner-friendly "
+                    + "advice on repeated clothing, backgrounds, framing, variety and visible quality. summary is "
+                    + "two or three sentences; suggestions are at most five specific actions, naming photos where "
+                    + "useful. Do not infer biography.",
+                messages: [.user(content)]
+            )
+            reviews.append(reply.output)
+            done += batch.count
+            await progress(done, sampled.count)
         }
-        let reply = try await stage.run(
-            instructions: "Inspect this training image set. Give concise beginner-friendly advice on repeated "
-                + "clothing, backgrounds, variety and visible quality. Put advice in caption; "
-                + "this is dataset advice, not a training caption. Do not infer biography.",
-            messages: [.user(content)]
+        var advice = reviews[0]
+        if reviews.count > 1 {
+            let combined = JSONValue.array(reviews.map { review in
+                .object([
+                    "summary": .string(review.summary),
+                    "suggestions": .array(review.suggestions.map(JSONValue.string)),
+                ])
+            })
+            advice = try await stage.run(
+                instructions: "These are reviews of consecutive batches of one training photo set. Merge them into "
+                    + "one review of the whole set: summary is two or three sentences, suggestions are at most six "
+                    + "specific actions. Keep photo names where they help. Drop repetition.",
+                messages: [.user(combined.pythonDumps())]
+            ).output
+        }
+        let note = sampled.count < project.images.count
+            ? "\n\nReviewed \(sampled.count) of \(project.images.count) photos, chosen evenly across the set."
+            : ""
+        return advice.text + note
+    }
+
+    /// Up to `critiquePhotoLimit` photos spread evenly across the set, in order.
+    static func critiqueSample(_ images: [ProjectImage]) -> [ProjectImage] {
+        guard images.count > critiquePhotoLimit else { return images }
+        return (0 ..< critiquePhotoLimit).map { images[$0 * images.count / critiquePhotoLimit] }
+    }
+
+    /// A small JPEG of the photo for dataset advice.
+    static func thumbnail(_ url: URL) throws -> UserContent {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: critiqueThumbnailPixels,
+              ] as CFDictionary) else {
+            throw StudioError.message("\(url.lastPathComponent) could not be read. Remove it or import another copy.")
+        }
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output, UTType.jpeg.identifier as CFString, 1, nil
+        ) else { throw StudioError.message("A thumbnail could not be prepared for dataset advice.") }
+        CGImageDestinationAddImage(
+            destination,
+            image,
+            [kCGImageDestinationLossyCompressionQuality: 0.7] as CFDictionary
         )
-        return reply.output.caption
+        guard CGImageDestinationFinalize(destination) else {
+            throw StudioError.message("A thumbnail could not be prepared for dataset advice.")
+        }
+        return .image(data: output as Data, mediaType: "image/jpeg")
     }
 
     func draftBoundary(_ description: String) async throws -> BoundaryDraft {

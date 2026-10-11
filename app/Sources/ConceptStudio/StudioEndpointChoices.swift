@@ -1,6 +1,60 @@
 import ConceptCore
 import Foundation
 
+/// The captioning providers the app offers, in menu order, with their display names and default
+/// models. Views list providers from here; nothing else hard-codes provider vocabulary.
+enum ProviderChoices {
+    struct Provider: Equatable, Identifiable {
+        let kind: String
+        let title: String
+        let defaultModel: String
+        var id: String {
+            kind
+        }
+    }
+
+    static let all: [Provider] = [
+        Provider(kind: "openrouter", title: "OpenRouter gateway", defaultModel: "google/gemini-3.8-flash"),
+        Provider(kind: "vercel", title: "Vercel AI Gateway", defaultModel: "google/gemini-3.8-flash"),
+        Provider(kind: "gateway/anthropic", title: "Pydantic AI Gateway", defaultModel: "claude-sonnet-4-6"),
+        Provider(kind: "google", title: "Google Gemini", defaultModel: "gemini-3.8-flash"),
+        Provider(kind: "anthropic", title: "Anthropic Claude", defaultModel: "claude-sonnet-4-6"),
+        Provider(kind: "openai", title: "OpenAI", defaultModel: "gpt-5.2"),
+        Provider(kind: "vllm", title: "My pod / custom server", defaultModel: "Qwen/Qwen3-VL-8B-Instruct"),
+    ]
+
+    /// The provider a fresh install starts with.
+    static let defaultKind = "openrouter"
+
+    static var kinds: [String] {
+        all.map(\.kind)
+    }
+
+    static func title(_ kind: String) -> String {
+        all.first { $0.kind == kind }?.title ?? kind
+    }
+
+    static func defaultModel(for kind: String) -> String {
+        all.first { $0.kind == kind }?.defaultModel ?? ""
+    }
+
+    /// The model to show after switching provider from `old` to `new`. A model the user typed is
+    /// kept; the new provider's default is offered only when the field is empty or still holds the
+    /// previous provider's default (`previousDefault`, which may differ from the table, e.g. the
+    /// model a rented computer serves).
+    static func model(
+        afterSwitchingFrom old: String,
+        to new: String,
+        current: String,
+        previousDefault: String? = nil,
+        newDefault: String? = nil
+    ) -> String {
+        let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        let untouched = trimmed.isEmpty || trimmed == (previousDefault ?? defaultModel(for: old))
+        return untouched ? (newDefault ?? defaultModel(for: new)) : current
+    }
+}
+
 @MainActor
 extension StudioSession {
     static let defaultPodImageName =
@@ -21,13 +75,12 @@ extension StudioSession {
     }
 
     func loadSavedChoices() {
-        endpointKind = preferences.string(forKey: "endpointKind") ?? "openrouter"
-        modelName = preferences.string(forKey: "modelName") ?? "google/gemini-3.8-flash"
+        endpointKind = preferences.string(forKey: "endpointKind") ?? ProviderChoices.defaultKind
+        modelName = preferences.string(forKey: "modelName") ?? ProviderChoices.defaultModel(for: endpointKind)
         openAIUsesChatGPT = preferences.bool(forKey: "openAIUsesChatGPT")
         criticKind = endpointKind
         criticModel = modelName
         customBaseURL = preferences.string(forKey: "vllmBaseURL") ?? ""
-        repoID = preferences.string(forKey: "hubRepo") ?? ""
         podImageName = preferences.string(forKey: "podImage") ?? ""
         normalizePodImageChoice()
         volumeID = preferences.string(forKey: "volumeID") ?? ""
@@ -35,6 +88,30 @@ extension StudioSession {
         criticRequestBaseURL = ""
         usingPodCaptioner = false
         useCritic = false
+    }
+
+    /// The default model for `kind` as this session sees it: a running caption server's model for vllm.
+    func defaultModel(for kind: String) -> String {
+        kind == "vllm" && usingPodCaptioner ? gpu.captionModel : ProviderChoices.defaultModel(for: kind)
+    }
+
+    /// Call when the captioning provider changes from `old` to `new` (views: `.onChange(of:)`).
+    /// A model the user typed is kept. With ChatGPT sign-in, OpenAI models come from the account.
+    func providerChanged(from old: String, to new: String) {
+        guard !(new == "openai" && openAIUsesChatGPT) else { return }
+        modelName = ProviderChoices.model(
+            afterSwitchingFrom: old, to: new, current: modelName,
+            previousDefault: defaultModel(for: old), newDefault: defaultModel(for: new)
+        )
+    }
+
+    /// Call when the reviewer's provider changes, like `providerChanged(from:to:)`.
+    func criticProviderChanged(from old: String, to new: String) {
+        guard !(new == "openai" && openAIUsesChatGPT) else { return }
+        criticModel = ProviderChoices.model(
+            afterSwitchingFrom: old, to: new, current: criticModel,
+            previousDefault: defaultModel(for: old), newDefault: defaultModel(for: new)
+        )
     }
 
     func applyJobChoices(_ job: Job) {
@@ -123,17 +200,24 @@ extension StudioSession {
         )
     }
 
+    /// The project's job with the current model choices, as job.yaml should store them. The caller
+    /// writes it only when it differs from the saved job. A rented computer's caption server is
+    /// temporary, so its URL is never stored: while it is in use the stored captioner stays as it was.
     func jobForCaptioning() throws -> Job {
         guard var job = project?.job else { throw StudioError.message("Open a project first.") }
         if !demoMode {
-            let captioner = try EndpointSpec(
-                kind: endpointKind,
-                model: modelName,
-                baseURL: endpointKind == "vllm" ? vllmTargetURL : nil,
-                outputMode: outputMode,
-                settings: job.endpoints?.captioner.settings ?? [:],
-                concurrency: concurrency
-            )
+            let captioner = try usingPodCaptioner && endpointKind == "vllm"
+                ? job.endpoints?.captioner ?? EndpointSpec(
+                    kind: endpointKind, model: modelName, outputMode: outputMode, concurrency: concurrency
+                )
+                : EndpointSpec(
+                    kind: endpointKind,
+                    model: modelName,
+                    baseURL: endpointKind == "vllm" ? vllmTargetURL : nil,
+                    outputMode: outputMode,
+                    settings: job.endpoints?.captioner.settings ?? [:],
+                    concurrency: concurrency
+                )
             let critic = useCritic ? try EndpointSpec(
                 kind: criticKind,
                 model: criticModel,

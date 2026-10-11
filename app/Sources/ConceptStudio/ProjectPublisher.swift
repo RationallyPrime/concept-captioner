@@ -19,7 +19,31 @@ enum ProjectPublisher {
             }
         }
         operations.append(.add(path: ImageFolderMetadata.fileName, data: ImageFolderMetadata.serialize(rows)))
-        return operations
+        return try operations + skillOperations(for: project)
+    }
+
+    /// The project's own skill copy, published beside job.yaml so its relative `skill:` path
+    /// (`./skill/<name>`) resolves next to the published job file. Hidden files and images are left
+    /// out: dataset readers treat any image in the repository as a training sample. Nothing from the
+    /// app-only `.conceptstudio/` folder or `references/` is ever published.
+    static func skillOperations(for project: StudioProject) throws -> [CommitOperation] {
+        guard !project.skillIsOutsideProject, let skill = project.skillURL,
+              let enumerator = FileManager.default.enumerator(
+                  at: skill,
+                  includingPropertiesForKeys: [.isRegularFileKey],
+                  options: [.skipsHiddenFiles]
+              ) else { return [] }
+        let root = project.directory.standardizedFileURL.path + "/"
+        var operations: [CommitOperation] = []
+        for case let url as URL in enumerator {
+            try Task.checkCancellation()
+            guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true,
+                  !Sources.imageSuffixes.contains("." + url.pathExtension.lowercased()) else { continue }
+            let path = url.standardizedFileURL.path
+            guard path.hasPrefix(root) else { continue }
+            operations.append(.addFile(path: "concept-captioner/" + path.dropFirst(root.count), url: url))
+        }
+        return operations.sorted { $0.path < $1.path }
     }
 }
 

@@ -1,7 +1,9 @@
 import AppKit
 import ConceptCore
+import ImageIO
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 extension StudioSession {
@@ -27,8 +29,9 @@ extension StudioSession {
         })
     }
 
-    func chooseReference(trigger: String) {
-        guard let source = ProjectAccess.chooseImages(multiple: false).first, let project else { return }
+    /// Save `source` (chosen by the view, e.g. with `ProjectAccess.chooseImages`) as the reference face.
+    func chooseReference(trigger: String, from source: URL) {
+        guard let project else { return }
         do {
             let accessed = source.startAccessingSecurityScopedResource()
             defer { if accessed { source.stopAccessingSecurityScopedResource() } }
@@ -48,18 +51,35 @@ extension StudioSession {
         } catch { errorMessage = Self.describe(error) }
     }
 
+    /// Import photos picked with the permission-free PhotosPicker. Files get readable, stable names
+    /// (see `PhotoImportName`); formats the pipeline cannot read (HEIC, TIFF, ...) become JPEG.
     func importPhotos(_ items: [PhotosPickerItem]) {
+        guard !items.isEmpty else { return }
         perform("Importing selected photos…") {
+            var added = 0
+            var already = 0
             for item in items {
                 try Task.checkCancellation()
-                guard let data = try await item.loadTransferable(type: Data.self) else { continue }
-                let suffix = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
-                _ = try self.project?.importData(data, name: "photo-\(UUID().uuidString).\(suffix)")
+                guard let picked = try await item.loadTransferable(type: PickedPhoto.self) else { continue }
+                let (data, suffix) = try PhotoImportName.readable(picked.data)
+                let name = PhotoImportName.make(
+                    suggested: picked.suggestedName,
+                    captured: PhotoImportName.captureDate(data),
+                    data: data,
+                    suffix: suffix
+                )
+                if self.project?.images.contains(where: { $0.id == name }) == true {
+                    already += 1
+                } else {
+                    _ = try self.project?.importData(data, name: name)
+                    added += 1
+                }
                 self.completed += 1
             }
             self.selectedImageID = self.project?.images.first?.id
-            try await self.analyzeImages()
-            self.message = "Selected photos imported. Originals in Photos are unchanged."
+            self.startImageAnalysis()
+            self.message = "\(added) photos imported. Originals in Photos are unchanged."
+                + (already > 0 ? " \(already) were already in this project and were skipped." : "")
         }
     }
 
@@ -73,30 +93,66 @@ extension StudioSession {
             let source = try await HubFolderSource.open(client: client, repo: RepoID(id))
             for try await sample in source.samples() {
                 try Task.checkCancellation()
-                guard var project = self.project else { return }
-                let name = try project.importData(sample.data, name: sample.sampleID)
+                guard let name = try self.project?.importData(sample.data, name: sample.sampleID),
+                      let project = self.project else { return }
                 if let row = source.rows.first(where: { $0.fileName == sample.sampleID }),
                    row.record != nil || row.caption != nil {
-                    let sink = try SidecarSink(directory: project.imagesDirectory)
-                    var localRecord = row.record ?? ResponseRecord(
+                    // A caption without its own record is kept as a model caption marked as imported;
+                    // Review offers to protect imported captions as final.
+                    var record = row.record ?? ResponseRecord(
                         sampleID: name,
                         status: .written,
-                        skill: "diffusion-training-captioner",
+                        skill: project.skillName,
                         profile: project.job.profile,
-                        captioner: ModelNames(requested: "imported"),
+                        captioner: ModelNames(requested: ProjectImage.importedCaptioner),
                         critic: nil
                     )
-                    localRecord.sampleID = name
-                    try await sink.write(name, caption: row.caption, record: localRecord)
-                    project.images[project.images.count - 1].caption = row.caption ?? ""
-                    project.images[project.images.count - 1].isFinal = localRecord.isHumanFinal
+                    record.sampleID = name
+                    try await SidecarSink(directory: project.imagesDirectory)
+                        .write(name, caption: row.caption, record: record)
+                    if let index = self.project?.images.firstIndex(where: { $0.id == name }) {
+                        self.project?.images[index].caption = row.caption ?? ""
+                        self.project?.images[index].isFinal = record.isHumanFinal
+                        self.project?.images[index].isImported = ProjectImage.isImported(record)
+                    }
                 }
-                self.project = project
                 self.completed += 1
             }
             self.selectedImageID = self.project?.images.first?.id
-            try await self.analyzeImages()
+            self.startImageAnalysis()
             self.message = "Dataset downloaded. Confirm its subject mapping before captioning."
+                + (self.unprotectedImportedCount > 0
+                    ? " Imported captions are not protected yet; protect them on Review to keep them." : "")
+        }
+    }
+
+    /// Imported captions that a re-caption with overwrite could still replace.
+    var unprotectedImportedCount: Int {
+        project?.images.count(where: { $0.isImported && !$0.isFinal && !$0.caption.isBlank }) ?? 0
+    }
+
+    /// Mark every imported caption final (`source: human`), the same flag Review's Final toggle sets.
+    func protectImportedCaptions() {
+        guard let project else { return }
+        let targets = project.images.filter { image in
+            image.isImported && !image.isFinal && !image.caption.isBlank && !runPendingIDs.contains(image.id)
+        }
+        guard !targets.isEmpty else {
+            message = runPendingIDs.isEmpty
+                ? "Every imported caption is already protected."
+                : "The remaining imported captions are part of the current run. Try again when it finishes."
+            return
+        }
+        perform("Protecting imported captions…", gate: .edit) {
+            for image in targets {
+                try Task.checkCancellation()
+                try await StudioProject.writeCaption(
+                    id: image.id, text: image.caption, final: true, imagesDirectory: project.imagesDirectory,
+                    skill: project.skillName, profile: project.job.profile
+                )
+                self.project?.applySavedCaption(id: image.id, text: image.caption, final: true)
+            }
+            self.message = "\(targets.count) imported captions are now final. Model runs will skip them."
         }
     }
 
@@ -104,7 +160,9 @@ extension StudioSession {
         perform("Reviewing your image set…") {
             guard let project = self.project else { return }
             let assistant = try StudioAssistant(endpoint: self.endpoint(), demo: self.demoMode)
-            self.datasetAdvice = try await assistant.critique(project, warnings: self.analyses)
+            self.datasetAdvice = try await assistant.critique(project, warnings: self.analyses) { done, total in
+                self.message = "Reviewing your image set… \(done) of \(total) photos"
+            }
             self.message = "Dataset advice ready. Review it before spending on training."
         }
     }
@@ -183,8 +241,7 @@ extension StudioSession {
     func caption(only: Set<String>? = nil, overwrite: Bool = false) {
         perform("Writing captions…") {
             guard var project = self.project else { return }
-            project.job = try self.jobForCaptioning()
-            try project.save()
+            try project.update(job: self.jobForCaptioning())
             self.project = project
             self.rememberChoices()
             let resolved = try self.endpoint()
@@ -206,6 +263,8 @@ extension StudioSession {
             )
             let source = try LocalFolderSource(directory: project.imagesDirectory)
             let sink = try SidecarSink(directory: project.imagesDirectory)
+            self.runPendingIDs = only ?? Set(project.images.map(\.id))
+            defer { self.runPendingIDs = [] }
             _ = try await runner.run(source: source, sink: sink, only: only) { outcome in
                 await self.receive(outcome)
             }
@@ -215,19 +274,30 @@ extension StudioSession {
 
     func receive(_ outcome: Outcome) {
         gpu.noteActivity()
+        runPendingIDs.remove(outcome.sampleID)
         project?.apply(outcome)
         completed += 1
         message = "\(completed) photos processed · \(outcome.sampleID): \(outcome.status.rawValue)"
     }
 
+    /// Save a caption edit. Uses the edit gate, so it works while a caption run is in progress,
+    /// except for a photo that run has not reached yet.
     func saveCaption(id: String, text: String, final: Bool) {
-        perform("Saving caption…") {
-            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard !runPendingIDs.contains(id) else {
+            errorMessage = "\(id) is still being captioned by the current run. Your edit is kept as a draft; "
+                + "save it after this photo's new caption arrives, or cancel the run."
+            return
+        }
+        perform("Saving caption…", gate: .edit) {
+            guard !text.isBlank else {
                 throw StudioError.message("Write a caption before saving or protecting it as final.")
             }
-            guard var project = self.project else { return }
-            try await project.saveCaption(id: id, text: text, final: final)
-            self.project = project
+            guard let project = self.project else { return }
+            try await StudioProject.writeCaption(
+                id: id, text: text, final: final, imagesDirectory: project.imagesDirectory,
+                skill: project.skillName, profile: project.job.profile
+            )
+            self.project?.applySavedCaption(id: id, text: text, final: final)
             self.clearSavedCaptionDraft(CaptionDraft(text: text, isFinal: final), for: id)
             self.message = final ? "Final caption saved. Model runs will skip it." : "Caption saved."
         }
@@ -287,6 +357,8 @@ extension StudioSession {
         }
     }
 
+    /// App-wide defaults for the next project: model choices and the pod setup. The dataset and
+    /// training destinations are per project (`projectState`), never app-wide.
     func rememberChoices() {
         guard !demoMode else { return }
         preferences.set(openAIUsesChatGPT, forKey: "openAIUsesChatGPT")
@@ -295,11 +367,104 @@ extension StudioSession {
             "endpointKind": endpointKind,
             "modelName": modelName,
             "vllmBaseURL": customBaseURL,
-            "hubRepo": repoID,
             "podImage": podImageName,
             "volumeID": volumeID,
         ] {
             preferences.set(value, forKey: key)
         }
+        preferences.removeObject(forKey: "hubRepo")
+    }
+}
+
+/// A photo handed over by PhotosPicker, with the file name Photos suggests when it shares a file.
+struct PickedPhoto: Transferable {
+    let data: Data
+    let suggestedName: String?
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(importedContentType: .image) { received in
+            try PickedPhoto(data: Data(contentsOf: received.file), suggestedName: received.file.lastPathComponent)
+        }
+        DataRepresentation(importedContentType: .image) { data in
+            PickedPhoto(data: data, suggestedName: nil)
+        }
+    }
+}
+
+/// Readable, stable names for photos imported from Apple Photos: the name Photos suggests (or the
+/// capture date) plus a short content hash, so importing the same photo again yields the same name.
+enum PhotoImportName {
+    static func make(suggested: String?, captured: Date?, data: Data, suffix: String) -> String {
+        let hash = String(VisionInspector.contentHash(data).prefix(8))
+        let stem: String = if let readable = suggested.flatMap(readableStem) {
+            readable
+        } else if let captured {
+            "photo-" + dateStem(captured)
+        } else {
+            "photo"
+        }
+        return "\(stem)-\(hash).\(suffix)"
+    }
+
+    /// The photo's bytes in a format the captioning pipeline reads, with the matching suffix.
+    /// PNG, JPEG and WebP pass through; anything else (HEIC, TIFF, ...) is converted to JPEG.
+    static func readable(_ data: Data) throws -> (Data, String) {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let type = CGImageSourceGetType(source).map({ UTType($0 as String) }) ?? nil else {
+            throw StudioError.message("This photo could not be read. Export it from Photos and import the file.")
+        }
+        if let suffix = type.preferredFilenameExtension?.lowercased(),
+           Sources.imageSuffixes.contains("." + suffix) {
+            return (data, suffix == "jpeg" ? "jpg" : suffix)
+        }
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(output, UTType.jpeg.identifier as CFString, 1, nil)
+        else { throw StudioError.message("This photo could not be converted to JPEG.") }
+        CGImageDestinationAddImageFromSource(
+            destination, source, 0, [kCGImageDestinationLossyCompressionQuality: 0.92] as CFDictionary
+        )
+        guard CGImageDestinationFinalize(destination) else {
+            throw StudioError.message("This photo could not be converted to JPEG.")
+        }
+        return (output as Data, "jpg")
+    }
+
+    static func captureDate(_ data: Data) -> Date? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        else { return nil }
+        let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any]
+        let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any]
+        guard let text = exif?[kCGImagePropertyExifDateTimeOriginal] as? String
+            ?? tiff?[kCGImagePropertyTIFFDateTime] as? String else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
+        return formatter.date(from: text)
+    }
+
+    static func dateStem(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.string(from: date)
+    }
+
+    /// A safe stem from a suggested file name, or nil when it carries no meaning (blank or a UUID).
+    static func readableStem(_ name: String) -> String? {
+        let stem = URL(fileURLWithPath: name).deletingPathExtension().lastPathComponent
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let cleaned = String(stem.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" })
+            .split(separator: "-", omittingEmptySubsequences: true).joined(separator: "-")
+        guard !cleaned.isEmpty, UUID(uuidString: cleaned) == nil else { return nil }
+        return String(cleaned.prefix(60))
+    }
+}
+
+extension String {
+    var isBlank: Bool {
+        trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }

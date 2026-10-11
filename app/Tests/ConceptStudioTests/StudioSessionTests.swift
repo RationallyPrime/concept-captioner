@@ -95,7 +95,7 @@ struct StudioSessionTests {
     }
 
     @Test func demoCompletesNineScreensWithoutCredentials() async throws {
-        let session = StudioSession()
+        let session = makeTestSession()
         session.useDemo()
         await session.task?.value
         #expect(session.errorMessage == nil)
@@ -117,7 +117,7 @@ struct StudioSessionTests {
         #expect(session.project?.images.allSatisfy { $0.status == .written } == true)
         let id = try #require(session.project?.images.first?.id)
         session.saveCaption(id: id, text: "NORA7 final user caption.", final: true)
-        await session.task?.value
+        await session.editTask?.value
         session.compare(id: id, model: "another-model", kind: "openai")
         await session.task?.value
         #expect(!session.comparison.isEmpty)
@@ -156,7 +156,7 @@ struct StudioSessionTests {
     }
 
     @Test func cancellationSettlesBeforeProjectClose() async throws {
-        let session = StudioSession()
+        let session = makeTestSession()
         session.useDemo()
         await session.task?.value
         let directory = try #require(session.project?.directory)
@@ -169,7 +169,7 @@ struct StudioSessionTests {
     }
 
     @Test func ownedPodCaptionKeyIsTrustedWithoutEnteringTheJob() async throws {
-        let session = StudioSession()
+        let session = makeTestSession()
         session.useDemo()
         await session.task?.value
         let directory = try #require(session.project?.directory)
@@ -187,7 +187,10 @@ struct StudioSessionTests {
         #expect(client.apiKey == session.gpu.agentToken)
         #expect(client.baseURL == session.gpu.captionEndpoint)
         let job = try session.jobForCaptioning()
-        #expect(job.endpoints?.captioner.baseURL == session.gpu.captionEndpoint?.absoluteString)
+        // The rented computer's caption URL is temporary, so job.yaml never stores it.
+        let podURL = try #require(session.gpu.captionEndpoint?.absoluteString)
+        #expect(job.endpoints?.captioner.baseURL == nil)
+        #expect(!job.jsonValue.pythonDumps().contains(podURL))
         #expect(!job.jsonValue.pythonDumps().contains(session.gpu.agentToken))
         await session.gpu.stopEverything()
         #expect(throws: StudioError.self) { try session.endpoint() }
@@ -195,8 +198,8 @@ struct StudioSessionTests {
     }
 
     @Test func sharedRequestSettingsAndThinkingSurvivePreparation() async throws {
-        let session = StudioSession()
-        session.project = try await DemoProject.create()
+        let session = makeTestSession()
+        session.project = try await makeDemoProject()
         let directory = try #require(session.project?.directory)
         defer { try? FileManager.default.removeItem(at: directory) }
         session.project?.job.endpoints = try Endpoints(captioner: EndpointSpec(

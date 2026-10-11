@@ -254,7 +254,7 @@ struct ChatGPTAuthTests {
     @Test func enteringDemoSettlesPendingAuthBeforeDemoStateAndStopsAllCredentialOrNetworkWork() async throws {
         let f = try ChatGPTFixture()
         defer { f.cleanup() }
-        let studio = StudioSession(preferences: f.preferences, chatGPT: f.manager)
+        let studio = makeTestSession(preferences: f.preferences, chatGPT: f.manager)
         await f.browser.configure(delivered: false)
         let login = Task { await f.manager.signIn() }
         for _ in 0 ..< 100 {

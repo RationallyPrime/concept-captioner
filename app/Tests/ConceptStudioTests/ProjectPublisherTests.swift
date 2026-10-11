@@ -28,7 +28,7 @@ private struct PublishedDatasetTransport: HTTPTransport {
 @Suite("published imagefolder contract")
 struct ProjectPublisherTests {
     @Test func publishedDatasetReplaysThroughHubAndRunner() async throws {
-        var project = try await DemoProject.create()
+        var project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
         let localSource = try LocalFolderSource(directory: project.imagesDirectory)
         let localSink = try SidecarSink(directory: project.imagesDirectory)

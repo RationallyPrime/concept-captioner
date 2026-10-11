@@ -2,7 +2,34 @@ import ConceptCore
 import Foundation
 import Security
 
-struct KeychainStore: KeyStore {
+/// Where the app keeps secrets (provider keys, Hub token, pod agent tokens). The app uses the
+/// Keychain; tests inject an in-memory store so nothing touches the user's login keychain.
+protocol SecretStore: Sendable {
+    func read(_ account: String) throws -> String?
+    /// An empty value removes the secret.
+    func save(_ value: String, account: String) throws
+}
+
+/// The session's view of its secret store as a ConceptCore `KeyStore`: provider keys come from
+/// the store, and the vLLM host is the one configured in Settings, never one from a job file.
+struct SessionKeyStore: KeyStore {
+    let secrets: any SecretStore
+    let vllmBaseURL: String?
+
+    func apiKey(for provider: Provider) throws -> String? {
+        try secrets.read(provider.rawValue)
+    }
+
+    func read(_ account: String) throws -> String? {
+        try secrets.read(account)
+    }
+
+    func save(_ value: String, account: String) throws {
+        try secrets.save(value, account: account)
+    }
+}
+
+struct KeychainStore: KeyStore, SecretStore {
     static let service = "is.conceptstudio.keys"
     let vllmBaseURL: String?
 
