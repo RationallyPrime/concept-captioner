@@ -245,3 +245,42 @@ to the job, and take a process sample on the runner to find the blocked thread.
    generation run prunes dataset folders of completed runs, keeping the current run and the last
    few resumable ones; Resume re-pulls from the pinned Hub revision when its folder is gone. The
    app shows volume usage and offers an explicit clean-up action.
+
+## Work partition, 2026-10-11
+
+Thread 1 runs first and is short. Threads 2 to 5 then run in parallel; each owns the files
+named and does not edit the others'.
+
+**Thread 1: specs and the brief (docs only).** Restore the five owner decisions and the removed
+rules in APP-BRIEF (decision 1). Bring CORE-SPEC current: the eleven stale statements, the
+missing revision rows, the per-route video table (decision 3), the neutral `usable` wording in
+the schema section (decision 4). Bring POD-SPEC current: catalog count, `comparison.json` keys,
+`only_metadata`, video suffixes, `generate_results.py`. One sentence in POD-STATUS on FLUX
+having run on r1. APP-STATUS: glossary scope, render count, and record that the owner signed
+in and captioned live with ChatGPT and OpenRouter on 2026-10-11.
+
+**Thread 2: pod results and storage** (pod/agent, pod/scripts, app GPU folder, PodAgentClient,
+their tests). The two bugs first: the app honours `comparison.json` state; Stop runs the
+checkpoint clean-up. Then: the pod checks Resume asks for more steps than the checkpoint has;
+the volume clean-up step, Resume re-pull and the app's usage readout and clean-up action
+(decision 7); video suffix scope in `pull_dataset.py`; run-ID validation in the app; the
+missing refusal tests.
+
+**Thread 3: media routes, both languages** (ConceptCore ModelClient, Sources and Prompt tests;
+`src/concept_captioner` sources, stages and tests). Swift sends the video content part on the
+OpenAI-compatible client; Python refuses vLLM video with a clear message until pydantic-ai
+carries it; one size guard on both sides (decision 3). Python reads imagefolder repos by file
+name (decision 2). Parity tests for the video instructions and the category defaults.
+
+**Thread 4: concepts, schema and mapping** (`schemas.py`, `Schemas.swift`, ConceptsView,
+MappingView, ProjectCuration, StudioMediaActions, their tests). Neutral `usable` wording on both
+sides; the mapping step only for concepts that need a locator, with style and motion mapped to
+the whole target (decision 4); the sole-style approval test; the Concepts screen's ⌘↩ action.
+
+**Thread 5: app polish** (ProjectAccess, VisionInspector, the import part of StudioActions,
+MediaEditor, user-facing strings). Recent-entry advice when `job.yaml` is missing plus a way to
+remove an entry; hashing and frame-time reading without loading whole clips; the photo-only
+wording where clips can appear.
+
+Not Ari's: CI's macOS job, the clean image build on cx53, and the Hub token as a RunPod secret
+reference are separate tickets.
