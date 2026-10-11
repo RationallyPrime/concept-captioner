@@ -665,10 +665,16 @@ omitted from the native training config. Actual checkpoints were written under
 
 ```python
 class GpuInfo(BaseModel):
-    index: int; name: str; memory_total_mib: int; memory_used_mib: int; uuid: str | None
+    index: int
+    name: str
+    memory_total_mib: int
+    memory_used_mib: int
+    uuid: str | None
+
 
 class GpuBackend(Protocol):
-    kind: str                                   # "nvidia-smi" | "fake"
+    kind: str  # "nvidia-smi" | "fake"
+
     def list_gpus(self) -> list[GpuInfo]: ...
 ```
 
