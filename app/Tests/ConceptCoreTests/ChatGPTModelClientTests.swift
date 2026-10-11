@@ -47,6 +47,8 @@ private actor StreamStarted {
     }
 }
 
+/// Serves a scripted event stream through the real URLSession loading system. The script is
+/// chosen by the request's bearer token, so parallel tests never share state.
 private final class ChatGPTStreamingProtocol: URLProtocol {
     override static func canInit(with _: URLRequest) -> Bool {
         true
@@ -68,11 +70,22 @@ private final class ChatGPTStreamingProtocol: URLProtocol {
               )
         else { return }
         client.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        let event = ChatGPTWire.event(ChatGPTWire.completed()).joined(separator: "\n") + "\n"
-        let bytes = Data(event.utf8)
-        // Splitting a JSON event across HTTP chunks must not split the SSE event.
-        client.urlProtocol(self, didLoad: bytes.prefix(23))
-        client.urlProtocol(self, didLoad: bytes.dropFirst(23))
+        let script = switch request.value(forHTTPHeaderField: "Authorization") {
+        case "Bearer offline-full-stream": ChatGPTWire.realisticStream(ending: ChatGPTWire.completed())
+        case "Bearer offline-failed-stream": ChatGPTWire.realisticStream(ending: ChatGPTWire.failed())
+        default: ChatGPTWire.event(ChatGPTWire.completed()).joined(separator: "\n") + "\n"
+        }
+        // HTTP chunk boundaries fall mid-JSON, mid-line and between the two newlines of an event
+        // boundary; none of them may split or merge an event.
+        var chunk = Data()
+        for byte in Data(script.utf8) {
+            chunk.append(byte)
+            if byte == 0x0A || chunk.count == 23 {
+                client.urlProtocol(self, didLoad: chunk)
+                chunk = Data()
+            }
+        }
+        if !chunk.isEmpty { client.urlProtocol(self, didLoad: chunk) }
         client.urlProtocolDidFinishLoading(self)
     }
 }
@@ -98,14 +111,44 @@ private enum ChatGPTWire {
         ])
     }
 
+    static func failed() -> JSONValue {
+        .object([
+            "type": .string("response.failed"),
+            "response": .object([
+                "status": .string("failed"),
+                "error": .object(["code": .string("server_error"), "message": .string("The model failed.")]),
+            ]),
+        ])
+    }
+
     static func event(_ value: JSONValue) -> [String] {
         ["event: \(value.field("type")?.stringValue ?? "message")", "data: \(value.pythonDumps())", ""]
     }
 
+    /// The shape of a real Responses stream: lifecycle events, the output item and its text
+    /// deltas, then a terminal event. Every event ends in a blank line.
+    static func realisticStream(ending terminal: JSONValue) -> String {
+        let pending: JSONValue = .object(["status": .string("in_progress"), "model": .string("gpt-6.1-sol-served")])
+        let item: JSONValue = .object(["type": .string("message"), "role": .string("assistant")])
+        var events: [JSONValue] = [
+            .object(["type": .string("response.created"), "sequence_number": .int(0), "response": pending]),
+            .object(["type": .string("response.in_progress"), "sequence_number": .int(1), "response": pending]),
+            .object(["type": .string("response.output_item.added"), "output_index": .int(0), "item": item]),
+        ]
+        let half = caption.index(caption.startIndex, offsetBy: caption.count / 2)
+        for piece in [String(caption[..<half]), String(caption[half...])] {
+            events.append(.object(["type": .string("response.output_text.delta"), "delta": .string(piece)]))
+        }
+        events.append(.object(["type": .string("response.output_text.done"), "text": .string(caption)]))
+        events.append(terminal)
+        return events.flatMap(event).joined(separator: "\n") + "\n"
+    }
+
+    /// A stream body delivering each line (plus its newline) as one chunk.
     static func response(_ lines: [String], status: Int = 200, headers: [String: String] = [:]) -> HTTPStreamResponse {
-        HTTPStreamResponse(status: status, headers: headers, lines: AsyncThrowingStream { continuation in
+        HTTPStreamResponse(status: status, headers: headers, body: AsyncThrowingStream { continuation in
             for line in lines {
-                continuation.yield(line)
+                continuation.yield(Data((line + "\n").utf8))
             }
             continuation.finish()
         })
@@ -123,18 +166,44 @@ private enum ChatGPTWire {
 
 @Suite("ChatGPT plan captioning")
 struct ChatGPTModelClientTests {
-    @Test func urlSessionTransportConsumesSSEWithoutNetwork() async throws {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ChatGPTStreamingProtocol.self]
-        let session = URLSession(configuration: configuration)
-        defer { session.invalidateAndCancel() }
-        let client = ChatGPTModelClient(
+    private static func offlineClient(token: String, session: URLSession) -> ChatGPTModelClient {
+        ChatGPTModelClient(
             model: "gpt-6.1-sol",
-            accessToken: { "offline-oauth" },
+            accessToken: { token },
             transport: URLSessionTransport(session: session)
         )
-        let reply = try await ChatGPTWire.request(client)
+    }
+
+    private static func offlineSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ChatGPTStreamingProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+
+    @Test func urlSessionTransportConsumesSSEWithoutNetwork() async throws {
+        let session = Self.offlineSession()
+        defer { session.invalidateAndCancel() }
+        let reply = try await ChatGPTWire.request(Self.offlineClient(token: "offline-oauth", session: session))
         #expect(reply.text == ChatGPTWire.caption)
+    }
+
+    @Test func urlSessionTransportSeparatesEveryEventOfARealisticStream() async throws {
+        let session = Self.offlineSession()
+        defer { session.invalidateAndCancel() }
+        let reply = try await ChatGPTWire.request(Self.offlineClient(token: "offline-full-stream", session: session))
+        #expect(reply.text == ChatGPTWire.caption)
+        #expect(reply.servedModel == "gpt-6.1-sol-served")
+        #expect(reply.usage == TokenUsage(inputTokens: 8, outputTokens: 13))
+    }
+
+    @Test func urlSessionTransportReportsAStreamThatEndsInFailure() async throws {
+        let session = Self.offlineSession()
+        defer { session.invalidateAndCancel() }
+        let client = Self.offlineClient(token: "offline-failed-stream", session: session)
+        let caught = await #expect(throws: ChatGPTInferenceError.self) { try await ChatGPTWire.request(client) }
+        #expect(caught?.code == "server_error")
+        #expect(caught?.status == 200)
+        #expect(caught?.body.contains("The model failed.") == true)
     }
 
     @Test(arguments: [OutputMode.native, .prompted])
@@ -159,9 +228,13 @@ struct ChatGPTModelClientTests {
             let body = try JSONValue(parsing: #require(request.httpBody))
             #expect(body.field("store") == .bool(false))
             #expect(body.field("stream") == .bool(true))
-            #expect(body.field("instructions")?.stringValue?.contains("Keep the concept boundary.") == true)
-            #expect(body.field("input")?.element(0)?.field("role") == .string("user"))
-            let parts = body.field("input")?.element(0)?.field("content")
+            // Prompted (json_object) mode carries the system prompt as the leading input message.
+            let system = mode == .native ? body.field("instructions") : body.field("input")?.element(0)?
+                .field("content")
+            #expect(system?.stringValue?.contains("Keep the concept boundary.") == true)
+            let user = body.field("input")?.element(mode == .native ? 0 : 1)
+            #expect(user?.field("role") == .string("user"))
+            let parts = user?.field("content")
             #expect(parts?.element(0)?.field("type") == .string("input_text"))
             #expect(parts?.element(1)?.field("image_url") == .string("data:image/png;base64,AQI="))
             let format = body.field("text")?.field("format")
@@ -170,16 +243,11 @@ struct ChatGPTModelClientTests {
                 #expect(format?.field("strict") == .bool(true))
             } else {
                 #expect(format?.field("type") == .string("json_object"))
-                #expect(body.field("instructions")?.stringValue?.contains("JSON object") == true)
+                #expect(body.field("input")?.element(0)?.field("role") == .string("system"))
+                #expect(system?.stringValue?.contains("JSON object") == true)
             }
-            #expect(try Set(#require(body.objectValue).keys) == [
-                "model",
-                "instructions",
-                "input",
-                "text",
-                "store",
-                "stream",
-            ])
+            let keys: Set = ["model", "input", "text", "store", "stream"]
+            #expect(try Set(#require(body.objectValue).keys) == keys.union(mode == .native ? ["instructions"] : []))
         }
     }
 
@@ -244,6 +312,18 @@ struct ChatGPTModelClientTests {
         let response = try #require(ChatGPTWire.completed().field("response"))
         lines += ["data: \(response.pythonDumps())}", ""]
         let script = lines
+        let wire = ChatGPTStreamWire { _ in ChatGPTWire.response(script) }
+        let reply = try await ChatGPTWire.request(ChatGPTModelClient(
+            model: "gpt-6.1-sol",
+            accessToken: { "oauth" },
+            transport: wire
+        ))
+        #expect(reply.text == ChatGPTWire.caption)
+    }
+
+    @Test func emptyDataKeepAliveDoesNotFailTheCaption() async throws {
+        // A lone `data:` line dispatches an event whose data is "" (WHATWG); it is not a reply.
+        let script = ["data:", ""] + ChatGPTWire.event(ChatGPTWire.completed())
         let wire = ChatGPTStreamWire { _ in ChatGPTWire.response(script) }
         let reply = try await ChatGPTWire.request(ChatGPTModelClient(
             model: "gpt-6.1-sol",
@@ -348,10 +428,10 @@ struct ChatGPTModelClientTests {
     @Test func cancellationStopsAnOpenStreamWithoutReturningPartialCaption() async throws {
         let started = StreamStarted()
         let cancelled = Mutex(false)
-        let (lines, continuation) = AsyncThrowingStream<String, any Error>.makeStream()
+        let (body, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
         let wire = ChatGPTStreamWire { _ in
             await started.signal()
-            return HTTPStreamResponse(status: 200, lines: lines, cancel: {
+            return HTTPStreamResponse(status: 200, body: body, cancel: {
                 cancelled.withLock { $0 = true }
                 continuation.finish()
             })
@@ -363,7 +443,7 @@ struct ChatGPTModelClientTests {
             "type": .string("response.output_text.delta"),
             "delta": .string(ChatGPTWire.caption),
         ])) {
-            continuation.yield(line)
+            continuation.yield(Data((line + "\n").utf8))
         }
         request.cancel()
         await #expect(throws: CancellationError.self) { try await request.value }

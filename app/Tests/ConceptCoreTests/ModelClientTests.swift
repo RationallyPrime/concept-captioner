@@ -82,7 +82,7 @@ struct ResolveTests {
         arguments: [
             ("google:gemini-3.8-flash", "GeminiClient", nil),
             ("anthropic:claude-opus-5-5", "AnthropicClient", nil),
-            ("openai:gpt-5.2", "OpenAICompatibleClient", "https://api.openai.com/v1"),
+            ("openai:gpt-5.2", "OpenAIResponsesClient", "https://api.openai.com/v1"),
             ("openrouter:anthropic/claude-sonnet-4-6", "OpenAICompatibleClient", "https://openrouter.ai/api/v1"),
             ("vllm:Qwen/Qwen3-VL-32B-Instruct", "OpenAICompatibleClient", "http://localhost:8000/v1"),
         ] as [(String, String, String?)]
@@ -92,7 +92,9 @@ struct ResolveTests {
         if endpoint.kind == "vllm" { endpoint.baseURL = baseURL }
         let resolved = try Endpoints.resolve(endpoint, thinking: .low, keys: Support.keys)
         #expect(String(describing: type(of: resolved.client)) == typeName)
-        #expect((resolved.client as? OpenAICompatibleClient)?.baseURL.absoluteString == baseURL)
+        let clientBase = (resolved.client as? OpenAICompatibleClient)?.baseURL
+            ?? (resolved.client as? OpenAIResponsesClient)?.baseURL
+        #expect(clientBase?.absoluteString == baseURL)
         #expect(resolved.requested == String(spec.split(separator: ":", maxSplits: 1)[1]))
         #expect(resolved.settings.thinking == .low)
         #expect(resolved.outputMode == .native)
@@ -482,26 +484,45 @@ struct URLSessionTransportTests {
     func send(_ path: String) async throws -> (HTTPResponse, [URLRequest]) {
         let transport = URLSessionTransport(session: RedirectStubProtocol.session(), timeout: 5)
         var request = URLRequest(url: URL(string: "https://origin.test\(path)")!)
-        request.setValue("Bearer secret", forHTTPHeaderField: "Authorization")
+        for name in Self.credentialHeaders {
+            request.setValue("secret", forHTTPHeaderField: name)
+        }
         let response = try await transport.send(request)
         return (response, RedirectStubProtocol.seen.withLock { $0 })
     }
 
-    @Test func dropsAuthorizationWhenRedirectLeavesTheHost() async throws {
+    static let credentialHeaders = ["Authorization", "x-api-key", "x-goog-api-key"]
+
+    @Test func dropsEveryCredentialHeaderWhenRedirectLeavesTheHost() async throws {
         let (response, seen) = try await send("/cross")
         #expect(response.status == 200)
         #expect(String(bytes: response.body, encoding: .utf8) == "ok")
         #expect(seen.count == 2)
-        #expect(seen.first?.value(forHTTPHeaderField: "Authorization") == "Bearer secret")
         #expect(seen.last?.url?.host() == "cdn.test")
-        #expect(seen.last?.value(forHTTPHeaderField: "Authorization") == nil)
+        for name in Self.credentialHeaders {
+            #expect(seen.first?.value(forHTTPHeaderField: name) == "secret")
+            #expect(seen.last?.value(forHTTPHeaderField: name) == nil, "\(name) followed the redirect")
+        }
     }
 
-    @Test func keepsAuthorizationOnTheSameHost() async throws {
+    @Test(arguments: ["/downgrade", "/port"])
+    func dropsEveryCredentialHeaderWhenRedirectLeavesTheOrigin(path: String) async throws {
+        let (response, seen) = try await send(path)
+        #expect(response.status == 200)
+        #expect(seen.count == 2)
+        #expect(seen.last?.url?.host() == "origin.test")
+        for name in Self.credentialHeaders {
+            #expect(seen.last?.value(forHTTPHeaderField: name) == nil, "\(name) followed the redirect to \(path)")
+        }
+    }
+
+    @Test func keepsCredentialsOnTheSameHost() async throws {
         let (response, seen) = try await send("/same")
         #expect(response.status == 200)
         #expect(seen.count == 2)
         #expect(seen.last?.url?.path() == "/final")
-        #expect(seen.last?.value(forHTTPHeaderField: "Authorization") == "Bearer secret")
+        for name in Self.credentialHeaders {
+            #expect(seen.last?.value(forHTTPHeaderField: name) == "secret")
+        }
     }
 }

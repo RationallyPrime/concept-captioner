@@ -14,10 +14,15 @@ struct ResolveBaseURLTests {
         ("https://trusted.example/v1", "https://trusted.example/v1", true),
         ("https://TRUSTED.example/v1", "https://trusted.example/other", true),
         ("https://evil.example/v1", "https://trusted.example/v1", false),
-        ("http://localhost:9000/v1", "http://localhost:8000/v1", true),
+        ("http://localhost:8000/v1", "http://LOCALHOST:8000/other", true),
+        ("https://trusted.example:443/v1", "https://trusted.example/v1", true),
+        // Another port or scheme on the configured host is another service: no key.
+        ("http://localhost:9000/v1", "http://localhost:8000/v1", false),
+        ("http://localhost/v1", "http://localhost:8000/v1", false),
+        ("http://trusted.example.local/v1", "https://trusted.example.local/v1", false),
         ("https://evil.example/v1", nil, false),
     ] as [(String, String?, Bool)])
-    func vllmKeyOnlyReachesConfiguredHost(target: String, configured: String?, authenticated: Bool) async throws {
+    func vllmKeyOnlyReachesConfiguredOrigin(target: String, configured: String?, authenticated: Bool) async throws {
         let reply = try StubTransport.json([
             "model": "m",
             "choices": [["message": ["content": "{}"]]],

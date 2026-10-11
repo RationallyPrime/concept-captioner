@@ -10,7 +10,7 @@ private enum ThinkingWire {
         _ model: String,
         settings: RequestSettings,
         anthropic: Bool = false,
-        bearerAuth: Bool = false
+        api: GeminiClient.API = .developer
     ) async throws -> JSONValue {
         let response = try StubTransport.json(anthropic
             ? ["content": [["type": "text", "text": caption]]]
@@ -18,7 +18,7 @@ private enum ThinkingWire {
         let transport = StubTransport { _ in response }
         let client: any ModelClient = anthropic
             ? AnthropicClient(apiKey: "test", model: model, transport: transport)
-            : GeminiClient(apiKey: "test", model: model, transport: transport, bearerAuth: bearerAuth)
+            : GeminiClient(apiKey: "test", model: model, transport: transport, api: api)
         _ = try await client.request(
             instructions: "Caption.", messages: [.user("Image.")], output: output, settings: settings
         )
@@ -96,18 +96,25 @@ struct ProviderThinkingTests {
 
     @Test func vertexKeepsItsFullImageModelThinkingScale() async throws {
         let body = try await ThinkingWire.body(
-            "gemini-3.1-flash-image-preview", settings: RequestSettings(thinking: .medium), bearerAuth: true
+            "gemini-3.1-flash-image-preview", settings: RequestSettings(thinking: .medium), api: .vertex
         )
         #expect(body.field("generationConfig")?.field("thinkingConfig")?.field("thinkingLevel")?
             .stringValue == "medium")
     }
 
-    @Test func openAIRejectionNamesModelAndEffort() async throws {
-        let providerMessage = #"{"error":{"message":"Unsupported parameter: reasoning_effort"}}"#
+    @Test(arguments: [false, true])
+    func openAIRejectionNamesModelAndEffort(responses: Bool) async throws {
+        let parameter = responses ? "reasoning.effort" : "reasoning_effort"
+        let providerMessage = #"{"error":{"message":"Unsupported parameter: "# + parameter + #""}}"#
         let transport = StubTransport { _ in HTTPResponse(status: 400, body: Data(providerMessage.utf8)) }
-        let client = OpenAICompatibleClient(
-            baseURL: OpenAICompatibleClient.openAIBaseURL, apiKey: "test", model: "gpt-4o", transport: transport
-        )
+        let client: any ModelClient = responses
+            ? OpenAIResponsesClient(
+                baseURL: OpenAIResponsesClient.openAIBaseURL, apiKey: "test", model: "gpt-4o", transport: transport
+            )
+            : try OpenAICompatibleClient(
+                baseURL: #require(URL(string: "http://pod:8000/v1")), apiKey: "test", model: "gpt-4o",
+                transport: transport
+            )
         let error = await #expect(throws: ModelError.self) {
             try await client.request(
                 instructions: "Caption.", messages: [.user("Image.")], output: ThinkingWire.output,
@@ -119,5 +126,42 @@ struct ProviderThinkingTests {
         #expect(body.contains("model 'gpt-4o' rejected thinking 'low'"))
         #expect(body.contains(providerMessage))
         #expect(await transport.requests.count == 1)
+    }
+
+    @Test func gatewayBearerAuthDoesNotChangeTheGeminiAPIFlavour() async throws {
+        let response = try StubTransport
+            .json(["candidates": [["content": ["parts": [["text": ThinkingWire.caption]]]]]])
+        let transport = StubTransport { _ in response }
+        let client = GeminiClient(
+            apiKey: "test", model: "gemini-3.1-flash-image-preview", transport: transport, bearerAuth: true
+        )
+        _ = try await client.request(
+            instructions: "Caption.", messages: [.user("Image.")], output: ThinkingWire.output,
+            settings: RequestSettings(thinking: .medium)
+        )
+        let request = try #require(await transport.requests.first)
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test")
+        let body = try JSONValue(parsing: #require(request.httpBody))
+        // Developer API scale [minimal, high]: medium rounds to high, as without bearer auth.
+        #expect(body.field("generationConfig")?.field("thinkingConfig")?.field("thinkingLevel")?
+            .stringValue == "high")
+    }
+
+    @Test func reasoningDialectComesFromTheClientNotTheHost() async throws {
+        let reply = try StubTransport.json(["choices": [["message": ["content": ThinkingWire.caption]]]])
+        for dialect in [OpenAICompatibleClient.ReasoningDialect.reasoningEffort, .openRouter] {
+            let transport = StubTransport { _ in reply }
+            let client = OpenAICompatibleClient(
+                baseURL: OpenAICompatibleClient.openRouterBaseURL, apiKey: "test", model: "m", transport: transport,
+                reasoningDialect: dialect
+            )
+            _ = try await client.request(
+                instructions: "Caption.", messages: [.user("Image.")], output: ThinkingWire.output,
+                settings: RequestSettings(thinking: .high)
+            )
+            let body = try await JSONValue(parsing: #require(transport.requests.first?.httpBody))
+            #expect((body.field("reasoning_effort") != nil) == (dialect == .reasoningEffort))
+            #expect((body.field("reasoning") != nil) == (dialect == .openRouter))
+        }
     }
 }
