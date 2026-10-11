@@ -121,8 +121,10 @@ including rejected unauthenticated and out-of-scope requests. This proves backen
 not native WebKit rendering. Both new proof pods used one 32 GB GPU and 62 GB host RAM; these
 small recipes do not establish a memory guarantee for other datasets or settings.
 
-Current trainer images are published under `v0.2.0-overnight20261011-r2` and verified by
-anonymous digest pulls. The app defaults and public template use these images. Bounded GPU
+Current trainer images are published under `v0.2.1-clean-20261011`, a clean build from `main`
+at `ce52a220` (digests in `pod/images/README.md`), and verified by anonymous digest pulls. The
+app default uses this tag. Real-pod runs so far used the earlier `v0.2.0-overnight20261011-r2`
+tag, which stays published. Bounded GPU
 checks and their limits are recorded in POD-STATUS.
 
 On 2026-10-11 the owner confirmed signing in and captioning live through both ChatGPT and

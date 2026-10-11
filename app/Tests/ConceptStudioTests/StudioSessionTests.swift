@@ -52,7 +52,7 @@ struct StudioSessionTests {
         let expected = if let saved, !saved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             saved.replacingOccurrences(of: "{trainer}", with: trainer)
         } else {
-            "ghcr.io/rationallyprime/concept-captioner-pod-\(trainer):v0.2.0-overnight20261011-r2"
+            "ghcr.io/rationallyprime/concept-captioner-pod-\(trainer):v0.2.1-clean-20261011"
         }
         #expect(await transport.createdImages == [expected])
         await session.gpu.stopEverything()
@@ -71,7 +71,7 @@ struct StudioSessionTests {
         #expect(session.podImageName == loaded.podImageName)
         #expect(preferences.string(forKey: "podImage") == session.podImageName)
         if changed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            #expect(session.podImageName.contains("concept-captioner-pod-{trainer}:v0.2.0-overnight20261011-r2"))
+            #expect(session.podImageName.contains("concept-captioner-pod-{trainer}:v0.2.1-clean-20261011"))
         } else {
             #expect(session.podImageName == changed)
         }
