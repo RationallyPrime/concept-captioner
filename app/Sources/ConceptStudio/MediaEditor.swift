@@ -4,6 +4,7 @@ import CoreGraphics
 import CoreVideo
 import Foundation
 import ImageIO
+import Synchronization
 import UniformTypeIdentifiers
 
 struct VideoInfo: Equatable {
@@ -173,6 +174,11 @@ enum MediaEditor {
         return result
     }
 
+    /// `AVAssetReader` reads synchronously and waits on CoreMedia's own workers. On the three-core CI runner,
+    /// three concurrent reads held every cooperative thread and never returned, starving every other task.
+    /// Keep the reads off Swift's cooperative executor, as `VisionInspector` does for Vision.
+    private static let readerQueue = DispatchQueue(label: "ConceptStudio.MediaReader", qos: .userInitiated)
+
     /// Read compressed sample timestamps without decoding every frame into a pixel buffer.
     /// Nominal frame rate alone cannot count variable-rate video.
     static func videoTimeline(url: URL) async throws -> VideoTimeline {
@@ -181,6 +187,33 @@ enum MediaEditor {
             throw StudioError.message("This clip has no readable video track.")
         }
         let end = try await track.load(.timeRange).end
+        let cancelled = Mutex(false)
+        let times: [CMTime] = try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                readerQueue.async {
+                    continuation.resume(with: Result {
+                        try frameTimes(asset: asset, track: track) {
+                            if cancelled.withLock({ $0 }) { throw CancellationError() }
+                        }
+                    })
+                }
+            }
+        } onCancel: {
+            cancelled.withLock { $0 = true }
+        }
+        try Task.checkCancellation()
+        guard !times.isEmpty, zip(times, times.dropFirst()).allSatisfy({ $0.0 < $0.1 }) else {
+            throw StudioError.message("This clip has ambiguous frame times. Choose another copy.")
+        }
+        return VideoTimeline(times: times, end: end)
+    }
+
+    /// Every sample's output presentation time in `track`, sorted. Blocks while reading; call it only on
+    /// `readerQueue`.
+    private static func frameTimes(
+        asset: AVURLAsset, track: AVAssetTrack, checkCancellation: () throws -> Void
+    ) throws -> [CMTime] {
         let reader = try AVAssetReader(asset: asset)
         let frames = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
         frames.alwaysCopiesSampleData = false
@@ -190,7 +223,7 @@ enum MediaEditor {
         defer { reader.cancelReading() }
         var times: [CMTime] = []
         while let sample = frames.copyNextSampleBuffer() {
-            try Task.checkCancellation()
+            try checkCancellation()
             // Compressed readers also emit zero-sample decoder commands. Output PTS applies
             // the container's edit offset; raw PTS includes the encoder's reordering delay.
             guard CMSampleBufferGetNumSamples(sample) > 0 else { continue }
@@ -203,11 +236,7 @@ enum MediaEditor {
         guard reader.status == .completed else {
             throw reader.error ?? StudioError.message("Reading this clip's frame times did not complete.")
         }
-        times.sort { $0 < $1 }
-        guard !times.isEmpty, zip(times, times.dropFirst()).allSatisfy({ $0.0 < $0.1 }) else {
-            throw StudioError.message("This clip has ambiguous frame times. Choose another copy.")
-        }
-        return VideoTimeline(times: times, end: end)
+        return times.sorted { $0 < $1 }
     }
 
     /// Fit the full oriented frame into a 32-aligned canvas without cropping its edges.
