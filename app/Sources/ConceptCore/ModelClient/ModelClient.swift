@@ -193,6 +193,9 @@ public struct RequestSettings: Sendable, Equatable {
     }
 
     /// Everything that is not a plain number; an unknown key is a ConfigurationError.
+    /// Request-body keys that control what the provider retains or attributes; never from a job file.
+    static let privacyBodyKeys: Set<String> = ["store", "metadata", "user", "safety_identifier"]
+
     private mutating func applyStructured(key: String, value: JSONValue) throws {
         switch key {
         case "stop_sequences": stopSequences = try Self.strings(value, key: key)
@@ -214,6 +217,11 @@ public struct RequestSettings: Sendable, Equatable {
         case "extra_body":
             guard let object = value.objectValue else {
                 throw ConfigurationError("setting 'extra_body' must be a mapping")
+            }
+            // extra_body is merged over the request body last, so a downloaded job could switch
+            // provider-side retention back on with it. Retention is not the job file's to set.
+            for key in object.keys where Self.privacyBodyKeys.contains(key.lowercased()) {
+                throw ConfigurationError("job setting extra_body may not set '\(key)'")
             }
             extraBody = object
         case _ where Self.acceptedButIgnored.contains(key):

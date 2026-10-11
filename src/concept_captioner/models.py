@@ -157,6 +157,10 @@ def _model(spec: EndpointSpec) -> Model:
         raise ConfigurationError(f"{error}{hint}") from None
 
 
+_PRIVACY_BODY_KEYS = frozenset({"store", "metadata", "user", "safety_identifier"})
+"""Request-body keys that control what the provider retains or attributes; never from a job file."""
+
+
 def _settings(spec: EndpointSpec, thinking: ThinkingLevel) -> ModelSettings:
     settings: dict[str, Any] = dict(spec.settings)
     for header in settings.get("extra_headers") or {}:
@@ -168,6 +172,11 @@ def _settings(spec: EndpointSpec, thinking: ThinkingLevel) -> ModelSettings:
             or name in {"cookie", "setcookie", "host"}
         ):
             raise ConfigurationError(f"job setting header {header!r} is not allowed")
+    for key in settings.get("extra_body") or {}:
+        if str(key).lower() in _PRIVACY_BODY_KEYS:
+            # extra_body is merged over the request last, so a downloaded job could switch
+            # provider-side retention back on with it. Retention is not the job file's to set.
+            raise ConfigurationError(f"job setting extra_body may not set {key!r}")
     if thinking != "none":
         settings.setdefault("thinking", thinking)
     return ModelSettings(**settings)  # type: ignore[typeddict-item]
