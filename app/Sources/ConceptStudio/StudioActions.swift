@@ -239,7 +239,9 @@ extension StudioSession {
     }
 
     func caption(only: Set<String>? = nil, overwrite: Bool = false) {
-        perform("Writing captions…") {
+        let pending = only ?? Set(project?.images.map(\.id) ?? [])
+        let started = perform("Writing captions…") {
+            defer { self.runPendingIDs = [] }
             guard var project = self.project else { return }
             try project.update(job: self.jobForCaptioning())
             self.project = project
@@ -263,13 +265,13 @@ extension StudioSession {
             )
             let source = try LocalFolderSource(directory: project.imagesDirectory)
             let sink = try SidecarSink(directory: project.imagesDirectory)
-            self.runPendingIDs = only ?? Set(project.images.map(\.id))
-            defer { self.runPendingIDs = [] }
             _ = try await runner.run(source: source, sink: sink, only: only) { outcome in
                 await self.receive(outcome)
             }
             self.message = "Captioning finished. Review each result beside its photo."
         }
+        // Set before the run starts, so an edit made right after starting already waits for its photo.
+        if started { runPendingIDs = pending }
     }
 
     func receive(_ outcome: Outcome) {

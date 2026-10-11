@@ -249,21 +249,22 @@ final class StudioSession {
 
     // MARK: Work gates
 
-    /// Start `operation` in the given gate. When that gate is occupied the action does not start
-    /// and `errorMessage` says what it is waiting for.
+    /// Start `operation` in the given gate and return true. When that gate is occupied the action
+    /// does not start, `errorMessage` says what it is waiting for, and the result is false.
+    @discardableResult
     func perform(
         _ title: String,
         gate: WorkGate = .run,
         operation: @escaping @MainActor () async throws -> Void
-    ) {
+    ) -> Bool {
         switch gate {
         case .run:
-            guard !busy else { return refuse(title, waitingFor: runTitle) }
+            guard !busy else { refuse(title, waitingFor: runTitle); return false }
             busy = true
             runTitle = title
             completed = 0
         case .edit:
-            guard !editing else { return refuse(title, waitingFor: editTitle) }
+            guard !editing else { refuse(title, waitingFor: editTitle); return false }
             editing = true
             editTitle = title
         }
@@ -289,6 +290,7 @@ final class StudioSession {
         case .run: task = work
         case .edit: editTask = work
         }
+        return true
     }
 
     private func refuse(_ title: String, waitingFor current: String) {
