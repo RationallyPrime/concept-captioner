@@ -6,18 +6,40 @@ Specs are pydantic-ai ``provider:model`` strings::
     anthropic:claude-opus-5-5
     openai:gpt-5.2
     openrouter:anthropic/claude-sonnet-4-6
+    vercel:anthropic/claude-sonnet-5-5
+    gateway/anthropic:claude-opus-5-5      (Pydantic AI Gateway; upstreams below)
     vllm:Qwen/Qwen3-VL-32B-Instruct        (base_url from the spec or VLLM_BASE_URL)
 
 Anything else is passed to ``pydantic_ai.models.infer_model`` unchanged. Hosted providers read
-their own keys; the vLLM key is sent only to the user-configured ``VLLM_BASE_URL`` host.
+their own keys, except ``kind: openai``, whose ``OPENAI_API_KEY`` this module reads itself to pin
+the origin (below); the vLLM key is sent only to the user-configured ``VLLM_BASE_URL`` host.
+
+Pydantic AI Gateway upstreams are a finite set, ``GATEWAY_UPSTREAMS`` below, and this is the one
+place it is written down. ``openai``, ``openai-responses`` and the alias ``responses`` use the
+Responses API; ``openai-chat`` and the alias ``chat`` use Chat Completions; ``google`` and
+``google-cloud`` both reach Vertex. Any other ``gateway/<upstream>`` (``groq``, ``bedrock``,
+``converse``) is a configuration error: those need SDKs this package does not install, and the
+macOS app accepts the same finite set, so a job file means the same thing in both.
+
+Origins. ``kind: openai`` and ``kind: anthropic`` are pinned to https://api.openai.com/v1 and
+https://api.anthropic.com in code (owner decision). ``OPENAI_BASE_URL`` and
+``ANTHROPIC_BASE_URL`` are ignored on purpose: the provider SDKs would otherwise send the user's
+real key and every training image to whatever host an inherited shell variable names, and the
+app, which has no environment, would send the same job somewhere else. Any other
+OpenAI-compatible server (a proxy, a mock, a pod) is ``kind: vllm`` with an explicit
+``base_url``, where the key boundary below is spelled out.
 
 A job file is data that may have been downloaded (``hf fetch-job``), so a ``base_url`` in it is
 untrusted. Two rules keep a stored key from being sent to a host the file chose:
 
 - ``kind: openai`` always talks to api.openai.com; a ``base_url`` on it is an error. Any other
   OpenAI-compatible server is ``kind: vllm``, whose key (``VLLM_API_KEY``) the user set for
-  custom endpoints and nothing else.
+  custom endpoints and nothing else. To any other vLLM host the request carries no
+  ``Authorization`` header at all.
 - A custom ``base_url`` must be https, or http to a loopback / private-network host.
+
+Every OpenAI Responses route (``kind: openai`` and the gateway's Responses upstreams) is sent
+with ``store`` false, so OpenAI does not retain captions or images, matching the app.
 """
 
 from __future__ import annotations
@@ -38,6 +60,23 @@ from pydantic_ai.settings import ModelSettings
 
 from .job import EndpointSpec, OutputMode, ThinkingLevel
 from .types import ConfigurationError
+
+GATEWAY_UPSTREAMS = frozenset(
+    {
+        "openai",
+        "openai-responses",
+        "responses",
+        "openai-chat",
+        "chat",
+        "anthropic",
+        "google",
+        "google-cloud",
+    }
+)
+"""The Pydantic AI Gateway upstreams a ``gateway/<upstream>:<model>`` spec may name."""
+
+OPENAI_ORIGIN = "https://api.openai.com/v1"
+ANTHROPIC_ORIGIN = "https://api.anthropic.com"
 
 
 @dataclass(frozen=True)
@@ -105,14 +144,19 @@ def check_base_url(url: str) -> str:
     )
 
 
-def _model(spec: EndpointSpec) -> Model:
+async def _drop_authorization(request: httpx2.Request) -> None:
+    # A request hook runs for every send, redirects included, after the SDK has set its headers.
+    request.headers.pop("Authorization", None)
+
+
+def _model(spec: EndpointSpec, http_client: httpx2.AsyncClient | None) -> Model:
     if spec.kind == "openai" and spec.base_url:
         raise ConfigurationError(
             "kind: openai always talks to api.openai.com and takes no base_url; for another "
             "OpenAI-compatible server use kind: vllm with base_url (its key is VLLM_API_KEY)"
         )
     if spec.kind == "vllm":
-        from openai import AsyncOpenAI
+        from pydantic_ai.models import create_async_httpx2_client
         from pydantic_ai.models.openai import OpenAIChatModel
         from pydantic_ai.providers.vllm import VLLMProvider
 
@@ -124,19 +168,29 @@ def _model(spec: EndpointSpec) -> Model:
         host = urlsplit(base_url).hostname
         configured_host = urlsplit(check_base_url(configured)).hostname if configured else None
         key = os.getenv("VLLM_API_KEY", "") if host == configured_host else ""
-
-        # The SDK's public async key callback supports a genuinely unauthenticated request.
-        # Passing None / an empty string through VLLMProvider would reread ambient credentials.
-        async def no_key() -> str:
-            return ""
-
-        client = AsyncOpenAI(base_url=base_url, api_key=key or no_key)
-        return OpenAIChatModel(spec.model, provider=VLLMProvider(openai_client=client))
+        client = http_client or create_async_httpx2_client()
+        if not key:
+            # The SDK insists on some key and would otherwise read OPENAI_API_KEY / VLLM_API_KEY
+            # itself, so it gets a placeholder that never leaves the process: the hook removes the
+            # header before every send.
+            hooks = client.event_hooks
+            if _drop_authorization not in hooks["request"]:
+                client.event_hooks = {**hooks, "request": [*hooks["request"], _drop_authorization]}
+        provider = VLLMProvider(base_url=base_url, api_key=key or "unused", http_client=client)
+        return OpenAIChatModel(spec.model, provider=provider)
     if spec.base_url:
         raise ConfigurationError(f"base_url is only meaningful for kind vllm, not {spec.kind!r}")
+    if spec.kind.startswith("gateway/") and spec.kind[len("gateway/") :] not in GATEWAY_UPSTREAMS:
+        raise ConfigurationError(
+            f"{spec.kind!r} is not a supported gateway upstream; use one of "
+            + ", ".join(f"gateway/{name}" for name in sorted(GATEWAY_UPSTREAMS))
+        )
+    if http_client is not None and spec.kind not in {"openai", "anthropic"}:
+        raise ConfigurationError(
+            f"http_client applies to kinds openai, anthropic and vllm, not {spec.kind!r}"
+        )
     try:
         if spec.kind == "openai":
-            from pydantic_ai.models.openai import OpenAIResponsesModel
             from pydantic_ai.providers.openai import OpenAIProvider
 
             key = os.getenv("OPENAI_API_KEY")
@@ -144,14 +198,17 @@ def _model(spec: EndpointSpec) -> Model:
                 raise UserError("Set OPENAI_API_KEY to use the OpenAI provider")
             return OpenAIResponsesModel(
                 spec.model,
-                provider=OpenAIProvider(base_url="https://api.openai.com/v1", api_key=key),
+                provider=OpenAIProvider(
+                    base_url=OPENAI_ORIGIN, api_key=key, http_client=http_client
+                ),
             )
         if spec.kind == "anthropic":
             from pydantic_ai.models.anthropic import AnthropicModel
             from pydantic_ai.providers.anthropic import AnthropicProvider
 
             return AnthropicModel(
-                spec.model, provider=AnthropicProvider(base_url="https://api.anthropic.com")
+                spec.model,
+                provider=AnthropicProvider(base_url=ANTHROPIC_ORIGIN, http_client=http_client),
             )
         return infer_model(spec.spec)
     except UserError as error:
@@ -200,20 +257,26 @@ def _settings(spec: EndpointSpec, thinking: ThinkingLevel) -> ModelSettings:
     return ModelSettings(**settings)  # type: ignore[typeddict-item]
 
 
-def resolve(spec: str | EndpointSpec, *, thinking: ThinkingLevel = "none") -> Resolved:
+def resolve(
+    spec: str | EndpointSpec,
+    *,
+    thinking: ThinkingLevel = "none",
+    http_client: httpx2.AsyncClient | None = None,
+) -> Resolved:
+    """Build the model for ``spec``.
+
+    ``http_client`` replaces pydantic-ai's default HTTP client for the providers this module builds
+    itself (``openai``, ``anthropic``, ``vllm``); tests pass one with a mock transport. Pass a fresh
+    client per call: on a vLLM route that gets no key, the client gains a request hook that strips
+    ``Authorization`` from every request it sends afterwards, for any endpoint.
+    """
     endpoint = parse_spec(spec) if isinstance(spec, str) else spec
     settings = _settings(endpoint, thinking)
-    model = _model(endpoint)
+    model = _model(endpoint, http_client)
     if isinstance(model, OpenAIResponsesModel):
         # Retention is not the job file's to set: off on every Responses route, after the job's
         # own keys have been validated above.
         settings["openai_store"] = False
-    if endpoint.kind == "vllm" and not model.client.api_key:
-        from openai import omit
-
-        # Explicit omission is the SDK's supported unauthenticated-request path. This is
-        # runtime-derived, after rejecting auth headers from the job, and never saved to it.
-        settings["extra_headers"] = {**(settings.get("extra_headers") or {}), "Authorization": omit}
     return Resolved(
         model=model,
         settings=settings,

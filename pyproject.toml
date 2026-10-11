@@ -27,6 +27,9 @@ dependencies = [
   "PyYAML>=6.0,<7",
   "Pillow>=10.4,<13",
   "httpx2>=2.12,<3",
+  # models.py passes an httpx2 client to the OpenAI SDK and strips the vLLM placeholder key in an
+  # httpx2 request hook; openai 3 is the line that sends through httpx2.
+  "openai>=3.26,<4",
 ]
 
 [project.optional-dependencies]
@@ -51,6 +54,11 @@ asyncio_mode = "auto"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.format]
+# Code blocks in the Markdown specs are illustrative, with aligned comments; ruff >= 0.17 would
+# reformat them. Only a local `ruff format --check .` sees this: CI runs `ruff check` and pytest.
+exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
