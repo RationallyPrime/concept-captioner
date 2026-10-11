@@ -110,7 +110,7 @@ struct MediaEditorView: View {
 
     @ViewBuilder private var cropControls: some View {
         if let image {
-            Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fit)
+            Image(decorative: image, scale: 1).resizable().scaledToFit()
                 .overlay {
                     GeometryReader { geometry in
                         Rectangle().stroke(.orange, lineWidth: 3)
@@ -268,7 +268,7 @@ struct MediaEditorView: View {
                 HStack(spacing: 12) {
                     ForEach(frames) { frame in
                         VStack {
-                            Image(decorative: frame.image, scale: 1).resizable().aspectRatio(contentMode: .fit)
+                            Image(decorative: frame.image, scale: 1).resizable().scaledToFit()
                                 .frame(width: 96, height: 66)
                             Button("\(frame.seconds.formatted(.number.precision(.fractionLength(2)))) s") {
                                 player?.pause()
