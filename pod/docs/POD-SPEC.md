@@ -1,12 +1,17 @@
 # POD-SPEC — everything that runs on the rented GPU pod
 
-Status: architecture, 2026-10-10. This is the contract the macOS app, `podctl` and the on-pod
-code are written against. The app never shells into a pod: everything goes through the
+Status: source-aligned contract, 2026-10-11, inspected at `ce52a22`. This is the contract the
+macOS app, `podctl` and the on-pod code are written against. The app never shells into a pod: everything goes through the
 control agent described here. Read `docs/v0.2-plan.md` ("Beyond v0.2") in the repo root for
 the product context; `POD-STATUS.md` next to this file tracks what is implemented.
 
 Placeholders throughout use the fixture triggers `NORA7` / `IVAN9`. Nothing here names a real
 concept.
+
+Sections explicitly marked **approved, pending implementation** record the owner's next fix
+round in `docs/process/overnight-review-2026-10-11.md`. They are normative requirements for
+Threads 2 and 6, not claims about the current agent or published images. POD-STATUS records
+implementation and live verification separately.
 
 ## 0. Layout of `pod/`
 
@@ -49,7 +54,8 @@ that volume's location, and `ports` is `["8800/http", "8000/http"]`. The `env` o
 a generated `PODAGENT_TOKEN` and the user's `HF_TOKEN`.
 
 Stopping a pod is the app's job; the pod side has no self-stop and no terminate-after guard.
-The app keeps the Mac awake while a pod runs, and on launch reconciles the pods it created.
+The app keeps the Mac awake while a pod runs; its launch-discovery limits are recorded in
+APP-STATUS and ADR-0003.
 Its budget and idle watchdog send `POST /v2/pods/<id>/action` with `{"action":"stop"}` and
 confirm a stopped status. Removal is a separate, confirmed DELETE operation.
 The temporary disk is cleared on stop/restart; the network volume persists and remains billed.
@@ -184,8 +190,10 @@ enforces no-double-booking, so a user who wants all N GPUs for a train-only run 
 
 ### 2.6 Services
 
-The catalog (section 3) has six names: `vllm`, `tensorboard`, `trainer-aitoolkit`,
-`trainer-ltx`, `pull-dataset`, `push-lora`. One instance per name at a time; the name is the
+The current catalog (section 3) has eight names: `vllm`, `tensorboard`, `trainer-aitoolkit`,
+`trainer-ltx`, `pull-dataset`, `push-lora`, `generate-aitoolkit`, `generate-ltx`.
+The approved `cleanup-datasets` addition in 3.7 will make nine; the upload route is not
+a GPU service. One instance per name at a time; the name is the
 instance key.
 
 Service state object (returned by every service endpoint):
@@ -280,8 +288,9 @@ persisted. The logs on the volume survive: `GET /services/{name}/logs` (fixed lo
 Agent shutdown (SIGTERM from the runtime, forwarded by `tini`): every running group is sent
 SIGTERM at once, trainers first (a checkpoint in progress is the only state worth flushing),
 then all are waited on against one shared 8 s deadline, then whatever remains gets SIGKILL and
-the 3 s wait. The total stays under the runtime's stop grace (Docker default 10 s), so no
-service is ever killed by pid-namespace teardown while the agent is still waiting on another.
+the bounded 3 s wait. These are agent-side waits, not a guarantee against an earlier runtime
+stop deadline or pid-namespace teardown. Forced termination can prevent child cleanup even
+when the agent sent SIGTERM first.
 
 ### 2.7 `GET /runs/{id}/events`
 
@@ -411,6 +420,46 @@ manifest. A missing manifest gives an empty dataset object; this is not an inven
 The native app stores this snapshot, curves, checkpoint listing, result destination and
 available cost estimates in the project's private `.conceptstudio/training.json`.
 
+### 2.13 `GET /storage` — approved, pending implementation (Thread 2)
+
+Bearer-authenticated, read-only usage of the filesystem mounted at `PODAGENT_WORKSPACE`:
+
+```json
+{"total_bytes": 214748364800, "used_bytes": 68719476736, "free_bytes": 146028888064,
+ "datasets_bytes": 10737418240, "reclaimable_dataset_bytes": 2147483648}
+```
+
+All values are integer bytes. Filesystem totals include other data on this volume;
+`datasets_bytes` counts confined dataset files, not model caches or checkpoints.
+`reclaimable_dataset_bytes` uses exactly the cleanup eligibility/retention policy in 3.7.
+The app labels usage as storage, separately from its estimated GPU spend, and offers the
+explicit `cleanup-datasets` service action. This read never removes anything.
+
+### 2.14 `PUT /uploads/{name}/{file_name}` — approved, pending implementation (Thread 6)
+
+For training without a Hub account, the app streams each approved media file, caption/response
+sidecar, `metadata.jsonl` and `job.yaml` as a binary body. The agent checks the bearer before
+reading the body, just as for existing routes. `name` uses the dataset-name pattern in 3.4;
+`file_name` is a single basename, never an absolute path or a path with separators, NUL or dot
+segments. Allowed names are supported media suffixes from 7.1, their `.txt`/`.json` sidecars,
+and the two named dataset files. The destination is only `/workspace/uploads/<name>/`;
+symlinks and resolved paths outside that staging directory are refused. It cannot overwrite
+run files, models, logs or another arbitrary workspace path.
+
+Require an accurate `Content-Length`, enforce the count while streaming, and limit each file
+to **2 GiB (2,147,483,648 bytes)** and the staged dataset to **20 GiB (21,474,836,480 bytes)**.
+This authenticated route is the explicit exception to the ordinary 1 MiB body limit in 2.1;
+no JSON/base64 wrapper or whole-file buffering is used. Missing length, a body over either
+limit, or a declared/received size mismatch is refused; an incomplete temporary file is
+removed. Successful replacement of one staged file is atomic and counted by its final size.
+The response is `{"name":"…","file_name":"…","size":123}`. A failed upload leaves other
+successfully staged files available for retry.
+
+Uploading does not make the dataset ready. The existing `pull-dataset` service's local mode
+(3.4, 7.1) validates the complete metadata-listed set and atomically installs the usual
+`datasets/<name>/` layout. Only after that service exits 0 may training start. The finalized
+upload staging directory is removed; local inputs carry no invented Hub commit or credentials.
+
 ## 3. Service catalog
 
 `podagent.catalog.CATALOG: dict[str, ServiceSpec]`. A `ServiceSpec` has:
@@ -480,8 +529,8 @@ validated config, secrets stripped). argv:
 `[/opt/venvs/<trainer>/bin/python, /opt/pod/scripts/launch_<trainer>.py, --config, /workspace/runs/<id>/run.json]`.
 cwd `/workspace/runs/<id>`. log `/workspace/runs/<id>/trainer.log`. Env: `HF_TOKEN` (when
 `hub` is set), `PYTHONUNBUFFERED=1`. The launch wrapper (section 4.3) turns `run.json` into the
-trainer's native config and `exec`s the trainer. A trainer sees only its assigned GPUs, so
-inside the process they are `cuda:0..k-1`.
+trainer's native config and starts the pinned trainer as a child process. A trainer sees only
+its assigned GPUs, so inside the process they are `cuda:0..k-1`.
 
 Starting a trainer whose `run_id` directory already contains `output/` is allowed (the wrappers
 resume when the trainer supports it; otherwise they overwrite — see 4.3). The client decides.
@@ -494,13 +543,27 @@ name, `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`; default: repo name), `split` (`train`
 `hf_token` (null), `only_metadata` (false). argv:
 `[/opt/venvs/agent/bin/python, /opt/pod/scripts/pull_dataset.py, --repo, <repo_id>, --to, /workspace/datasets/<name>,
 --split, …, --image-column, …, --caption-column, …, (--revision, …), (--id-column, …)]`.
+`only_metadata: true` adds `--only-metadata`.
 log `/workspace/logs/pull-dataset.log`. Exit 0 = dataset ready at `/workspace/datasets/<name>`.
 
-The native app sends `only_metadata: true` and its last published commit revision. This
-requires `metadata.jsonl` and copies exactly its listed media and matching `.txt`/`.json`
+The native app sends `only_metadata: true` and its last published commit revision for its
+imagefolder publication. This requires metadata (`metadata.jsonl`, or the accepted CSV form)
+and copies exactly its listed media and matching `.txt`/`.json`
 sidecars, including approved MP4 clips. Unlisted repository media is not a training target.
 The generic CLI default remains false. The dataset manifest records the resolved Hub commit;
 the trainer copies that manifest into its run folder for later run-history reads.
+
+**Local mode — approved, pending implementation (Thread 6).** Extend this same typed catalog
+entry with `local_name` (dataset-name pattern). Exactly one of `repo_id` and `local_name` is
+required; `name` defaults to the repo basename or `local_name`. Local mode derives its source
+from `/workspace/uploads/<local_name>/`, not a client-supplied filesystem path, and requires
+`only_metadata: true`. It neither accepts a Hub `revision`/token nor makes a Hub call. The
+script receives `--local-dir <derived source>` instead of `--repo`; other layout/caption
+validation is shared with the Hub imagefolder path. After a successful atomic install it
+removes that upload stage. The local manifest has `source: "local"`, `repo_id: null`,
+`revision: null`, `requested_revision: null`; counts and `only_metadata: true` remain meaningful.
+Hub manifests identify `source: "hub"` when this addition lands. A pruned local dataset must
+be reuploaded from the original project before Resume; it cannot be re-pulled from the Hub.
 
 ### 3.5 `push-lora` — GPUs 0
 
@@ -513,21 +576,59 @@ log `/workspace/logs/push-lora.log`. Exit 0 = the model repo has the LoRA.
 ### 3.6 `generate-aitoolkit` and `generate-ltx` — GPUs 1
 
 These fixed services run `generate_results.py` in the corresponding trainer interpreter;
-they expose no port and use the same supervisor/GPU reservation as training. Parameters:
-new `run_id`, existing `source_run_id`, `checkpoint` relative to that source run's `output/`,
-`prompts` (1–6), `seeds` (1–4 unsigned 32-bit integers), `width`/`height` (64–2048,
-multiples of 32), `inference_steps` (1–100), `guidance_scale` (0–20), `num_frames` (8n+1,
-up to 257), and `frame_rate` (positive, at most 60). Defaults are 512×512, 20 steps,
-guidance 4, one frame and 24 fps. FLUX requires one frame. Prompt `--` overrides are
-rejected so both outputs receive identical settings.
+they expose no port and use the same supervisor/GPU reservation as training. The typed
+`GenerationParams` model forbids extra fields:
+
+| field | type / bounds | default |
+| --- | --- | --- |
+| `run_id` | new run ID, `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`; distinct from `source_run_id` | required |
+| `source_run_id` | existing run ID, same pattern | required |
+| `checkpoint` | nonempty relative path under the source run's `output/`; regular `.safetensors`, no symlink in any component | required |
+| `prompts` | list of 1–6 nonblank strings, each at most 4000 characters; no NUL or `--` overrides | required |
+| `seeds` | list of 1–4 integers, each 0–4,294,967,295 | required |
+| `width`, `height` | integers 64–2048, each a multiple of 32 | 512, 512 |
+| `inference_steps` | integer 1–100 | 20 |
+| `guidance_scale` | number 0–20 | 4 |
+| `num_frames` | integer 1–257 with `num_frames % 8 == 1`; FLUX requires 1 | 1 |
+| `frame_rate` | number greater than 0 and at most 60 | 24 |
+
+Validation refuses an existing generation directory and an unavailable source config or
+checkpoint before `prepare()` creates anything. Prompt override refusal preserves identical
+requested settings for both arms; prompts are argv values, never shell input.
 
 Only `black-forest-labs/FLUX.1-dev` on AI Toolkit and `Lightricks/LTX-2` on LTX are
 implemented. Other families return `422 invalid_params` before creating a generation run.
 The checkpoint must be a regular, non-symlink `.safetensors` output of the source run.
-The generation keeps its own `generation.json`, `trainer.log` and `output/comparison.json`.
-Each prompt/seed row names a base output and a LoRA output; real inference must produce both
-files before the manifest says `complete`. Failed runs retain their available files and
-manifest state. Existing authenticated run-file list/download endpoints serve all outputs.
+Preparation captures `source-run.json` and `selected-checkpoint.safetensors` privately in the
+new run directory. `generation.json` contains the validated/defaulted request fields above
+plus `checkpoint_sha256`, computed from that copy. The script checks that SHA before use.
+argv is `[/opt/venvs/<trainer>/bin/python, /opt/pod/scripts/generate_results.py, --trainer,
+<trainer>, --config, /workspace/runs/<id>/generation.json]`; cwd is the generation run,
+log is `trainer.log`, and the existing authenticated file APIs serve only `output/`.
+
+`output/comparison.json` has these exact fields:
+
+| fields | meaning |
+| --- | --- |
+| every `GenerationParams` field above | the requested comparison batch, including selected source checkpoint path |
+| `checkpoint_sha256` | SHA-256 of the captured selected checkpoint |
+| `trainer` | `aitoolkit` or `ltx` |
+| `base_model` | supported source run base model ID |
+| `upstream_revision` | pinned inference implementation revision |
+| `source_config` | captured source `run.json`, with top-level credential fields removed |
+| `state` | `generating`, `complete`, or `failed` |
+| `pairs` | list of `{prompt, seed, base_path, lora_path}` |
+
+Pairs enumerate prompts in request order, with seeds in request order inside each prompt.
+Paths are relative to this run's `output/`: `pair-000-base.png` / `pair-000-lora.png` for
+FLUX, or the same names with `.mp4` for LTX, then index 001 onward. `complete` is written
+only after every expected file exists. Exceptions inside the inference block write `failed`
+and retain available outputs. Current pre-inference validation failures can precede manifest
+creation; this is not a successful empty comparison.
+
+**Consumer requirement — approved, pending implementation (Thread 2):** the app reads this
+manifest's state, requires `complete` and every listed pair for a saved successful comparison,
+and displays `failed`/incomplete output as such. A PNG or MP4 existing alone is not success.
 
 FLUX uses the pinned AI Toolkit `StableDiffusion`, `ModelConfig`, `GenerateImageConfig`
 and explicit flowmatch scheduler. It loads the base and then the selected LoRA fused before
@@ -536,6 +637,29 @@ FP8 casting and CPU offload; only the trained side receives `--lora <checkpoint>
 The app defaults to 49 frames for LTX, offering 17/49/97/129 at 24 fps. Those settings are
 request choices, not evidence of capacity on every GPU. Offline source verification and
 actual GPU execution are recorded separately in POD-STATUS.
+
+### 3.7 `cleanup-datasets` and pre-start cleanup — approved, pending implementation (Thread 2)
+
+No timer and no arbitrary delete path. Every trainer/generator start performs the same
+validated dataset-cleanup step before preparation/spawn, after request and reservation
+validation. An explicit CPU catalog service `cleanup-datasets` accepts `params: {}` and
+`gpus: []`, uses fixed argv in the agent interpreter, and reports its removed dataset names
+and reclaimed bytes in its log. It uses the same policy as automatic cleanup and `GET /storage`.
+
+Only dataset folders referenced by **terminal completed training runs** are eligible. Unknown,
+active, failed or interrupted runs are preserved; lack of terminal-completion evidence after
+an agent restart is not permission to delete. Resolve every candidate beneath `paths.datasets`
+and reject symlinks. Always keep the requested current run's dataset, a generator's source
+dataset, every active run's dataset, and datasets for the **last three resumable completed
+runs**, ordered newest first by checkpoint modification time with run ID as the tie-breaker.
+A dataset shared with any protected run remains protected. Cleanup never removes checkpoints,
+training-state files, run configs/manifests/logs, generated comparisons or model caches.
+Unattributed datasets and in-progress upload stages are not cleanup candidates.
+
+Resume of a pruned Hub dataset uses the source run's saved `dataset-manifest.json`: the exact
+`repo_id`, resolved commit `revision`, split, columns, ID column and `only_metadata` setting,
+re-pulled into the saved dataset path before the trainer starts. Missing pinned source facts
+cause a clear refusal, never a pull of current `main`. Local mode recovery is defined in 3.4.
 
 ## 4. Run config and the launch wrappers
 
@@ -731,9 +855,19 @@ change the approved clip's aspect ratio. No temporal subsampling flag is exposed
 checkpoint and sanitized source run configuration before either inference variant starts.
 A resume on another GPU cannot change those inputs between base and LoRA sampling. The
 comparison manifest records the captured checkpoint SHA-256 and source settings. The large
-private checkpoint copy is removed when generation returns normally or through its error
-handler; forced process termination can leave it in the private run directory. It is outside
-the run output directory and is not offered by the files/download API.
+private checkpoint copy is outside the run output directory and is not offered by the
+files/download API. At this source snapshot, `generate_results.py` removes it in the inference
+block's `finally`; earlier validation failures and an ordinary SIGTERM can bypass that block.
+The supervisor sends SIGTERM on Stop, so this is a current cleanup gap, not only a forced-kill
+case.
+
+**Cleanup requirement — approved, pending implementation (Thread 2):** establish the cleanup
+scope before source/config validation and install a SIGTERM handler that raises into it.
+Normal completion, handled errors, and normal Stop/SIGTERM must finalize any existing manifest
+(`failed` on interruption) and remove the private checkpoint copy. SIGKILL, abrupt runtime
+teardown, host failure or a failure during preparation can still leave a private copy; no
+`finally` block guarantees cleanup after forced termination. Preserve source-run checkpoint
+bytes and completed output files in every case.
 
 **Repeat and Resume.** Repeat prefills editable native settings and the saved dataset
 revision, then creates a new run and dataset folder. Resume sends `resume: true` with the
@@ -747,6 +881,16 @@ path promises bit-identical continuation. The established start/restart API rema
 available without the stricter Resume opt-in. Historical records are project-owned; the
 global pod record retains billing/pending-output custody and cannot import a comparison
 into another project's history or results folder.
+
+**Resume step requirement — approved, pending implementation (Thread 2):** `resume: true`
+must request a total `steps` strictly greater than the checkpoint's saved training step.
+Use AI Toolkit's checkpoint `training_info.step`, or LTX's `step_<digits>` checkpoint with
+its matching training-state file; unknown/unreadable step information is a refusal, not zero.
+Reject a no-op or regressing request as `422 invalid_params` before dataset cleanup, re-pull
+or spawning. The current catalog checks checkpoint/state existence and immutable settings
+but does not yet enforce this step comparison or re-pull a missing dataset. The missing-folder
+recovery requirement is in 3.7; it does not authorize changing model, dataset revision or
+hyperparameters under Resume.
 
 ## 5. GPU inventory backend
 
@@ -842,8 +986,10 @@ PODAGENT_TOKEN}`, `PODAGENT_WORKSPACE=/workspace`, bind mount `./workspace:/work
 
 ```
 /workspace/
-  datasets/<name>/        images, <stem>.txt captions, metadata.jsonl, manifest.json, job.yaml (if the repo had one)
-  runs/<id>/              run.json, config.yaml, trainer.log, tensorboard/, output/, samples/, preprocessed/ (ltx)
+  datasets/<name>/        approved media, <stem>.txt/.json, metadata.jsonl, manifest.json, optional job.yaml
+  runs/<training-id>/     run.json, dataset-manifest.json, config.yaml, trainer.log, tensorboard/, output/, preprocessed/ (ltx)
+  runs/<generation-id>/   generation.json, source-run.json, private selected-checkpoint.safetensors, trainer.log
+    output/              comparison.json, pair-NNN-base.png/mp4, pair-NNN-lora.png/mp4
   models/hf-cache/        HF_HOME for every child (vLLM weights, base models)
   models/<dir>/           user-placed local models
   logs/                   vllm.log, tensorboard.log, pull-dataset.log, push-lora.log, podagent.log
@@ -853,28 +999,59 @@ PODAGENT_TOKEN}`, `PODAGENT_WORKSPACE=/workspace`, bind mount `./workspace:/work
 (`dataset.path`, `logdir`) must resolve under the workspace; the catalog rejects anything else
 (`invalid_params`).
 
+Trainer samples/checkpoints sit in their native layout under `output/`; generated comparison
+files use the separate generation run. File list/download paths are relative to `output/`,
+so private captured weights/config outside it are not served. The pending Thread 6 upload
+stage adds `uploads/<name>/` and installs into the existing dataset layout; it is not a new
+training format. Dataset cleanup/retention is defined once in 3.7.
+
 ## 7. Scripts
 
 ### 7.1 `pull_dataset.py`
 
 `--repo ID --to DIR [--split train] [--revision R] [--image-column image] [--caption-column caption]
-[--id-column C] [--job-path concept-captioner/job.yaml]`. Token from `HF_TOKEN`.
+[--id-column C] [--job-path concept-captioner/job.yaml] [--only-metadata] [--require-captions]`.
+Token from `HF_TOKEN`. The authenticated catalog does not expose `--require-captions`; its
+client can read the reported caption counts.
 
 Two conventions, detected from the repo's file list (`HfApi.list_repo_files`):
 
-1. **imagefolder**: image files plus `metadata.jsonl` (`file_name`, `caption` or `text`).
-   `snapshot_download`, then copy images into `DIR` flat (subfolders flattened with `__`
-   separators; collisions are an error) and write `<stem>.txt` from the caption field.
+1. **imagefolder**: media files plus `metadata.jsonl` (`file_name`, `caption` or `text`), or
+   `metadata.csv` (JSONL wins in a folder containing both). `snapshot_download`, then copy
+   media into `DIR` flat (subfolders flattened with `__`; name/stem collisions are errors),
+   copy matching response `.json` sidecars and write `<stem>.txt` from the caption field or
+   source sidecar. Multiple metadata folders are filtered by `split` when a matching folder
+   exists. Without `--only-metadata`, unlisted nonhidden media is also copied, using its
+   sidecar captions. With it, metadata is mandatory and only its listed files are copied;
+   missing listed files or paths escaping the snapshot are errors.
 2. **parquet / arrow**: `datasets.load_dataset(repo, split=…, revision=…)`; sample id per
    `concept_captioner.sources.hf._sample_id` rules (`--id-column`, else `file_name`/`filename`/
    `image_id`/`id`/`name`, else the row index); image bytes written with their original suffix
-   (PNG when unknown); caption from `--caption-column` when present and non-empty.
+   (PNG when unknown); caption from `--caption-column` when present and non-empty; an existing
+   `<caption-column>_response` column becomes the response `.json` sidecar. At this snapshot,
+   `--only-metadata` filters the imagefolder collector only; the tabular/loading-script branch
+   still follows its rows. The app's publication is imagefolder, so its exact included set
+   uses the metadata path above.
+
+Supported file suffixes, case-insensitively, are **`.png`, `.jpg`, `.jpeg`, `.webp`, `.mp4`,
+`.mov`, `.m4v`**. This applies to generic CLI/`podctl` pulls as well as metadata-only app
+pulls; clips are not restricted to `only_metadata`. Bytes are copied unchanged, with no
+cropping, trimming, retiming or training-compatibility claim. LTX validates approved clip
+dimensions/frame timing in 4.3; image-only trainer use of clips is refused by the native app.
 
 Always written: `metadata.jsonl` (`file_name`, `caption`) regenerated from what landed, and
-`manifest.json` (`repo_id`, `revision`, `convention`, `count`, `with_caption`, `without_caption`,
-`job_yaml`). `job.yaml` is fetched from `--job-path` when the repo has it (so the trainer wrapper
-and the model card can read triggers and profile). Exit 1 and a message on any image without a
+`manifest.json` (`repo_id`, resolved `revision`, `requested_revision`, `only_metadata`, `split`,
+`convention`, `image_column`, `caption_column`, `id_column`, `count`, `with_caption`,
+`without_caption`, `job_yaml`, UTC `pulled_at`). `job.yaml` is fetched from `--job-path` when
+the repo has it (so the trainer wrapper and the model card can read triggers and profile). Exit 1 and a message on any image without a
 caption when `--require-captions` is passed; otherwise the counts tell the client.
+
+The destination is replaced through a sibling `DIR.partial` stage and `DIR.old` rename.
+Failure while collecting/writing removes the stage and preserves the prior dataset; a
+successful re-pull removes stale old media. `--require-captions` is checked after the new
+folder is installed, so that particular exit 1 leaves the new incomplete dataset inspectable.
+The approved local-mode addition uses the same collector, write and atomic-install behavior
+under the confined agent upload source, without Hub calls; its contract is in 3.4.
 
 ### 7.2 `push_lora.py`
 
@@ -888,6 +1065,21 @@ generated `README.md` model card (base model, triggers, steps, rank, profile, da
 ### 7.3 Launch wrappers
 
 Section 4.3.
+
+### 7.4 `generate_results.py`
+
+`--trainer aitoolkit|ltx --config /workspace/runs/<generation-id>/generation.json`.
+The catalog prepares and confines this file; no listener or arbitrary command API is added.
+The script reads the captured `source-run.json`, verifies the private checkpoint SHA-256,
+and calls the pinned inference implementation for the two arms with the same requested
+prompts, seeds, dimensions, steps and guidance. Generation output/manifest details are in
+3.6; the current cleanup gap and approved SIGTERM repair are in 4.3.
+
+Exit 0 requires every expected output file and `state: "complete"`. An inference exception
+writes `failed`, retains any output files, and returns a nonzero service exit. The current
+CLI reports filesystem/value/subprocess failures as one stderr line with exit 1. A captured
+checkpoint or config failure before the inference scope can leave no comparison manifest;
+consumers must never reinterpret that as success.
 
 ## 8. `podctl`
 

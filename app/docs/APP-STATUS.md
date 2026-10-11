@@ -1,17 +1,19 @@
 # ConceptStudio app status
 
 Updated 2026-10-11 after the overnight implementation, based on all seven hardening lanes and
-follow-up `cd5f746`. Source checks, native offline demo checks and bounded current-image
-FLUX/LTX generation, resume and video training checks have completed. Owner acceptance remains
-separate. See [RUNNING.md](RUNNING.md),
+follow-up `cd5f746`, with the review corrections and owner acceptance below. Source checks,
+native offline demo checks and bounded FLUX/LTX generation, resume and video training checks
+have completed. FLUX GPU proofs used r1; LTX GPU proofs used r2. See [RUNNING.md](RUNNING.md),
 [CORE-STATUS.md](CORE-STATUS.md) and [POD-STATUS.md](../../pod/docs/POD-STATUS.md).
 
 ## Implemented
 
-- **Onboarding and the entire nine-screen flow:** the owner's full explanation of diffusion
-  training, concepts, training data, captions and concept boundaries; italic glossary terms;
-  hover, click and keyboard definitions. Welcome uses ordinary project/account actions and
-  photographic demo examples. Labels describe operations, inputs and consequences.
+- **Onboarding:** Welcome and Images contain the owner's full explanation of diffusion
+  training, concepts, training data, captions and concept boundaries, with italic glossary
+  terms and hover, click and keyboard definitions. Later journey screens have tooltips at most;
+  the interactive glossary does not yet cover the entire flow. Welcome uses ordinary
+  project/account actions and photographic demo examples. Labels describe operations,
+  inputs and consequences.
 - **One concept by default:** category-specific questions and caption/mapping/reviewer
   instructions for person, object/character, style and motion. Multiple concepts and detailed
   overrides are under Advanced. A sole style applies to the entire training target without
@@ -66,9 +68,10 @@ check passed, including preserving custom style details through reopening and un
   cost/output custody. Independent source review has driven repairs at the integration seams.
 - Actual local video fixtures exercise frame counts, variable timing and visible-edge
   preservation, plus HEIC/TIFF normalization and file/sidecar restoration.
-- 114 offscreen render frames cover Welcome, nine journey screens, Settings, Advanced,
+- 116 offscreen render frames cover Welcome, nine journey screens, Settings,
   concept/crop editors, empty/error states and generated/saved-result surfaces in light and
-  dark at minimum/default sizes. Native vibrancy and interactions are verified separately.
+  dark at minimum/default sizes. None captures an expanded Advanced section. Native vibrancy
+  and interactions are verified separately.
 - The full implementation gate passed **402 Swift tests** (160 app, 242 Core) and **94 Python tests**.
   The final dataset-switch repair then passed **23 focused session/history tests**, including
   the offline demo and current-versus-saved dataset requests, with independent source acceptance.
@@ -122,10 +125,14 @@ Current trainer images are published under `v0.2.0-overnight20261011-r2` and ver
 anonymous digest pulls. The app defaults and public template use these images. Bounded GPU
 checks and their limits are recorded in POD-STATUS.
 
+On 2026-10-11 the owner confirmed signing in and captioning live through both ChatGPT and
+OpenRouter. These are owner-reported native acceptance checks for account access and captioning;
+they supersede the earlier pending account/captioning notes. The OpenRouter credential method
+was not separately recorded, so this does not prove a particular OAuth callback URL. These
+checks do not establish a quality comparison or every model's video support.
+
 Owner acceptance and distribution still pending:
 
-- OpenRouter browser consent and authenticated captioning remain unverified. The owner has
-  completed ChatGPT sign-in and saved a manual OpenRouter key; both loaded in the current app.
 - Native TensorBoard rendering during an actual run. Offline state and the live backend
   handshake are verified separately; no GPU was restarted solely for this UI check.
 - The owner's full morning walkthrough and first real dataset training run.
@@ -153,7 +160,8 @@ required connection instruction. The retained LTX comparison reopened as two nat
 players and playback was exercised. These checks reuse the earlier actual downloads; they are
 not another live training or download claim. Command-number navigation and Go Back worked.
 OpenRouter opened its real browser authorization entry and native Cancel returned to an
-unconnected state. ChatGPT reached the owner's two-factor challenge; cancellation also passed. Live consent remains pending.
+unconnected state. ChatGPT reached the owner's two-factor challenge; cancellation also passed.
+The owner subsequently completed sign-in and live captioning with both providers, as recorded above.
 
 Recent-project restoration passed after quitting and reopening the same preview build. A
 rebuild exposed an access-restoration failure that was incorrectly reported as a deleted
@@ -195,8 +203,9 @@ The post-fix live check used the actual rebuilt `ChatGPTModelClient` with the ow
 unexpired ChatGPT registration and one synthetic demo PNG. It received HTTP 200 and decoded a
 usable Caption from `gpt-6.1-sol` (2,067 input / 49 output tokens). This proves the production
 client's image/structured-output path; it is not a caption-quality evaluation or a native Runner
-sidecar-save check. The final Settings click remains an owner check after relaunch because
-computer-control access timed out. Focused gates passed 19 Core stream test methods and 23 app
+sidecar-save check. Computer-control access timed out on the final Settings click; the owner
+subsequently confirmed that test succeeded and that live captioning worked. Focused gates
+passed 19 Core stream test methods and 23 app
 account test methods; both changes received independent source acceptance. The usual primary
 checkout preview is updated along with the worktree build. Development signing remains deferred
 at the owner's request.

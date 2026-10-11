@@ -2,9 +2,12 @@
 
 State of the pod side during the 2026-10-11 overnight feature round. The new generation,
 run-history and approved-video code is published in public images at the accepted source
-`98708207` (tag `v0.2.0-overnight20261011-r2`). Actual FLUX generation and Resume have
-passed. LTX approved-video training, Resume and matched video generation also passed on the
-final r2 image. Both new proof pods are stopped; outputs are secured locally and on the network volume.
+`98708207` (tag `v0.2.0-overnight20261011-r2`). Actual FLUX generation and Resume passed on
+the r1 AI Toolkit image; r2 AI Toolkit has a CPU witness only, and its checkpoint-snapshot
+path has not run on a FLUX GPU. LTX approved-video training, Resume and matched video
+generation passed on the final r2 image. Both proof pods were stopped after verification
+and terminated in the owner-authorized afternoon cleanup; outputs were secured locally and
+on the network volume.
 Historical live checks date from lab commit `e620882` (2026-10-10, last live read 21:26 UTC). The
 contract is [POD-SPEC.md](POD-SPEC.md). The day-by-day record, with every timestamp, digest,
 hash and billing bucket, is in
