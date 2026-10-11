@@ -75,9 +75,12 @@ connection, demo mode).
   that stops the pod, an idle watchdog, a warning on quit while a pod runs, and an always-visible
   stop-everything action. Keep the Mac awake while a pod runs; on launch, find pods this app
   created that are still running and show them. *(Owner decision, 2026-10-11.)*
-- **The trained LoRA reaches the user**: when a Hub write token is configured, push it to a
-  private model repo when training finishes; otherwise download it into the project. No stop
-  discards a result that has been neither pushed nor saved. *(Owner decision, 2026-10-11.)*
+- **The trained LoRA reaches the user**: by default, if the user is signed in somewhere the
+  LoRA can be pushed to, push it to a private repo there when training finishes; otherwise
+  save the `.safetensors` file into the project. Many users have no GitHub or Hugging Face
+  account, so saving to disk is a first-class outcome, not an error. Today the push target is a
+  Hugging Face model repo, used when a Hub write token is configured. No stop discards a result
+  that has been neither pushed nor saved. *(Owner decision, 2026-10-11.)*
 - **GPU provider abstraction** with RunPod first; the app creates pods from the project's own
   images and talks to the pod only through the control agent's HTTP API.
 - **Sandbox-compatible from day one** so the Mac App Store stays an option: user-selected
