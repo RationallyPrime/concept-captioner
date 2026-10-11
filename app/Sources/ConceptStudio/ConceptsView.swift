@@ -18,6 +18,8 @@ struct ConceptsView: View {
                     Divider()
                 }
                 Button("Add another concept", systemImage: "plus") { editing = nil; showEditor = true }
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .help("Add a concept (⌘↩)")
                     .disabled(session.busy)
                 Text(
                     "Use one clear reference face per person for mapping suggestions. "
@@ -63,7 +65,11 @@ struct ConceptsView: View {
                         Button("Edit boundary", systemImage: "slider.horizontal.3") {
                             editing = concept; showEditor = true
                         }
-                        Button("Choose reference face…") { session.chooseReference(trigger: concept.trigger) }
+                        Button("Choose reference face…") {
+                            if let url = ProjectAccess.chooseImages(multiple: false).first {
+                                session.chooseReference(trigger: concept.trigger, from: url)
+                            }
+                        }
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -135,7 +141,6 @@ struct ConceptEditor: View {
                 Button("Cancel") { close() }.keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Save concept") { save() }.buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
-                    .disabled(session.busy)
                     .keyboardShortcut(.defaultAction)
             }
         }.padding(28).frame(width: 660, height: 650).tint(StudioStyle.accent)

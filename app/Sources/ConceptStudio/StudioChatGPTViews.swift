@@ -8,10 +8,11 @@ struct ChatGPTSettingsSection: View {
         .flatMap { NSImage(contentsOf: $0) }
 
     var body: some View {
-        Section("Log in with ChatGPT") {
-            Text("Use an eligible ChatGPT plan to write captions with OpenAI models. No API key is needed. "
-                + "Requests count toward your plan or credits balance; ConceptStudio sells no credits.")
-                .fixedSize(horizontal: false, vertical: true)
+        StudioSection(
+            title: "Log in with ChatGPT",
+            subtitle: "Use an eligible ChatGPT plan to write captions with OpenAI models. No API key is needed. "
+                + "Requests count toward your plan or credits balance; ConceptStudio sells no credits."
+        ) {
             if session.demoMode {
                 Text("Demo stays offline. Open or create a real project to connect ChatGPT.")
                     .foregroundStyle(StudioStyle.supportingText)

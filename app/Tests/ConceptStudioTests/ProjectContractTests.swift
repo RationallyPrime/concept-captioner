@@ -223,23 +223,32 @@ struct ProjectContractTests {
         await session.task?.value
         let image = try #require(session.project?.images.first)
         session.setCaptionDraft(CaptionDraft(text: "NORA7 unsaved.", isFinal: false), for: image.id)
+        let expected = StudioConfirmation.discardCaptionDrafts(count: 1).message
         session.useDemo()
-        #expect(session.pendingConfirmation?.confirmation == .discardCaptionDrafts(count: 1))
+        #expect(await eventually { session.pendingPrompt != nil })
+        let declined = try #require(session.pendingPrompt)
+        guard case let .discardCaptionDrafts(warning) = declined.kind else {
+            Issue.record("expected the discard prompt"); return
+        }
+        #expect(warning == expected)
         #expect(session.task == nil)
-        session.resolveConfirmation(false)
-        #expect(session.pendingConfirmation == nil)
+        session.answer(declined, .cancel)
+        #expect(session.pendingPrompt == nil)
         #expect(session.unsavedCaptionCount == 1)
         session.useDemo()
-        session.resolveConfirmation(true)
+        #expect(await eventually { session.pendingPrompt.map { $0.id != declined.id } ?? false })
+        let accepted = try #require(session.pendingPrompt)
+        session.answer(accepted, .confirm)
+        #expect(await eventually { session.unsavedCaptionCount == 0 && !session.busy })
         await session.task?.value
-        #expect(session.unsavedCaptionCount == 0)
 
         session.setCaptionDraft(CaptionDraft(text: "NORA7 another.", isFinal: false), for: image.id)
-        async let answer = session.confirmCloseIfNeeded()
-        await Task.yield()
-        #expect(session.pendingConfirmation?.confirmation == .discardCaptionDrafts(count: 1))
-        session.resolveConfirmation(true)
-        #expect(await answer)
+        async let decision = session.decideClose(.closeProject)
+        #expect(await eventually { session.pendingPrompt != nil })
+        let close = try #require(session.pendingPrompt)
+        guard case .discardCaptionDrafts = close.kind else { Issue.record("expected the discard prompt"); return }
+        session.answer(close, .confirm)
+        #expect(await decision == .stop(discardingPendingResult: false))
         await session.closeProject()
     }
 

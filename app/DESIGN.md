@@ -44,6 +44,35 @@ an image paired with its editable caption. Every visual detail should help the c
   and expand naturally. Allow scrolling and wrapping; long filenames, notes and user text
   must not force the window wider. Avoid decorative animation.
 
+## Interface rules (fix round 2026-10-11)
+
+These apply the direction above. The two marked owner decisions are not open to a session.
+
+- **One layout grammar** (owner decision, keep-unify-flat). Every screen, including GPU pods,
+  Training, Monitor and Settings, uses the custom header and footer with flat `StudioSection`
+  headings and dividers. Field groups use a columns form inside a section, never grouped cards.
+- **One failure path.** A blocking failure raises the window alert. Progress, success and
+  recoverable states stay inline beside the action they describe.
+- **Confirmations are window alerts.** Discarding caption edits, closing, quitting, stopping with
+  an uncollected trained model and raising a spending limit are SwiftUI alerts driven by the
+  session's pending prompt; nothing blocks the whole app modally. The default button is the safe
+  choice: Return keeps the edits ("Keep editing") and keeps the current limit ("Cancel"); it
+  stops a billing computer and retrieves an uncollected model.
+- **Quitting with a running computer** (owner decision, offer-keep-running). Stop stays the
+  default. "Keep the computer running" is offered as a secondary choice with the hourly price,
+  the spend so far and a plain warning that the app must be reopened to stop it.
+- **Keyboard.** ⌘[ and ⌘] move Back and Next; ⌘1 to ⌘9 open each screen; ⌘↩ runs each screen's
+  primary action (Import folder, Add concept, Confirm and next, Start captioning, Re-caption,
+  Publish, Start training, Retrieve now). Renting a computer starts billing and has no shortcut.
+  File › Open Recent lists recent projects.
+- **Selection.** Lists use native selection. Review selects several photos with ⌘- or ⇧-click.
+- **Suggestions prefill, people confirm.** A mapping suggestion fills the editor and says so;
+  nothing is saved until Confirm.
+- **Photos** are decoded as downsampled thumbnails off the main thread and cached in memory.
+- **Money** has one format, US dollars in the reader's locale.
+- **Settings** has one entry per context: the toolbar in a project, the link on Welcome, and the
+  app menu (⌘,).
+
 ## Method and evidence
 
 Apply a bounded pass: inspect the existing task flow, critique independently, make one coherent

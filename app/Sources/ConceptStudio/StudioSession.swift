@@ -8,8 +8,8 @@ struct CaptionDraft: Equatable {
 }
 
 /// A question the session needs the user to answer before it continues. The session never
-/// presents UI itself: it publishes `pendingConfirmation`, a view presents it (an alert or a
-/// confirmation dialog built from these strings) and answers with `resolveConfirmation(_:)`.
+/// presents UI itself: `confirm(_:)` asks through `ask(_:)` (AppLifetime.swift), which publishes
+/// `pendingPrompt` for the window's `StudioPromptPresenter`.
 enum StudioConfirmation: Equatable {
     /// Switching project, opening the demo or closing would discard unsaved caption edits.
     case discardCaptionDrafts(count: Int)
@@ -57,13 +57,6 @@ enum StudioConfirmation: Equatable {
     }
 }
 
-/// The confirmation a view should present now, with the continuation that resumes the waiting action.
-struct PendingConfirmation: Identifiable {
-    let id = UUID()
-    let confirmation: StudioConfirmation
-    fileprivate let resume: (Bool) -> Void
-}
-
 /// Two independent work slots. `run` holds long work (caption runs, imports, publishing, opening a
 /// project, model requests); `edit` holds short saves the user makes while reviewing, so Review and
 /// Concepts stay usable while a run is in progress.
@@ -90,7 +83,6 @@ final class StudioSession {
     @ObservationIgnored var editTitle = ""
     /// Photos the current caption run has not reported yet; saving one of them waits for its result.
     var runPendingIDs: Set<String> = []
-    var pendingConfirmation: PendingConfirmation?
     var scenario: DemoScenario = .success
     var analyses: [String: ImageAnalysis] = [:]
     var analyzing = false
@@ -313,39 +305,25 @@ final class StudioSession {
 
     // MARK: Confirmations
 
-    /// Ask the user and wait for the answer. A newer question replaces (and declines) an older one.
+    /// Ask the user and wait for the answer, through the window's one prompt (`ask(_:)`). A newer
+    /// question replaces (and declines) an older one.
     func confirm(_ confirmation: StudioConfirmation) async -> Bool {
-        await withCheckedContinuation { continuation in
-            present(confirmation) { continuation.resume(returning: $0) }
+        switch confirmation {
+        case .discardCaptionDrafts:
+            await ask(.discardCaptionDrafts(warning: confirmation.message)) == .confirm
+        case .stopAndClose:
+            await ask(.stopWork(runningWork(for: .closeProject))) == .confirm
         }
     }
 
     /// Run `action` now when nothing needs confirming, otherwise after the user confirms.
     func whenConfirmed(_ confirmation: StudioConfirmation?, _ action: @escaping @MainActor () -> Void) {
         guard let confirmation else { return action() }
-        present(confirmation) { if $0 { action() } }
-    }
-
-    func resolveConfirmation(_ confirmed: Bool) {
-        guard let pending = pendingConfirmation else { return }
-        pendingConfirmation = nil
-        pending.resume(confirmed)
-    }
-
-    private func present(_ confirmation: StudioConfirmation, resume: @escaping (Bool) -> Void) {
-        resolveConfirmation(false)
-        pendingConfirmation = PendingConfirmation(confirmation: confirmation, resume: resume)
+        Task { if await confirm(confirmation) { action() } }
     }
 
     var discardDraftsConfirmation: StudioConfirmation? {
         unsavedCaptionCount > 0 ? .discardCaptionDrafts(count: unsavedCaptionCount) : nil
-    }
-
-    /// Everything closing needs the user to agree to, in order: discarding drafts, then stopping work.
-    func confirmCloseIfNeeded() async -> Bool {
-        if let drafts = discardDraftsConfirmation, await !confirm(drafts) { return false }
-        guard gpu.hasRunningPod || busy || editing || chatGPT.isBusy || gpu.isBusy else { return true }
-        return await confirm(.stopAndClose(podRunning: gpu.hasRunningPod))
     }
 
     // MARK: Startup and projects
@@ -448,7 +426,7 @@ final class StudioSession {
         stopImageAnalysis()
         editTask?.cancel()
         await editTask?.value
-        resolveConfirmation(false)
+        if let prompt = pendingPrompt { answer(prompt, .cancel) }
         if demoMode, let directory = project?.directory,
            directory.standardizedFileURL == demoDirectory.standardizedFileURL {
             DemoProject.remove(at: directory)
@@ -544,4 +522,19 @@ final class StudioSession {
             )
         } catch { errorMessage = Self.describe(error) }
     }
+
+    // MARK: - Lane ui stored state (added 2026-10-11; owned by the view layer, see AppLifetime.swift)
+
+    /// The confirmation the window is presenting, if any. Views present it; `ask(_:)` awaits the answer.
+    var pendingPrompt: StudioPrompt?
+    /// Set once the user has answered the quit confirmation, so the second terminate pass does not ask again.
+    var quitDecision: StudioCloseDecision?
+    /// The GPU workspace whose RunPod and Hub keys were last read from the Keychain.
+    @ObservationIgnored weak var gpuKeysLoadedFor: GPUWorkspace?
+    /// Review's list selection; kept here so it survives moving between screens.
+    var reviewSelection: Set<String> = []
+    /// The Monitor tab last shown.
+    var monitorTab = MonitorTab.progress
+
+    // MARK: - End lane ui stored state
 }

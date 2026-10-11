@@ -23,7 +23,7 @@ struct GPUOffer: Identifiable, Decodable {
     }
 
     var summary: String {
-        "\(name) · \(memory) GB · \(price.secure.formatted(.currency(code: "USD")))/GPU/hour"
+        "\(name) · \(memory) GB · \(StudioMoney.format(price.secure))/GPU/hour"
     }
 }
 

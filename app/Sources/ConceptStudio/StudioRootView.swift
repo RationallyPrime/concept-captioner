@@ -2,8 +2,6 @@ import SwiftUI
 
 struct StudioRootView: View {
     @Bindable var session: StudioSession
-    @Environment(\.openURL) private var openURL
-
     var body: some View {
         Group {
             if session.project == nil {
@@ -15,21 +13,9 @@ struct StudioRootView: View {
         .tint(StudioStyle.accent)
         .frame(minWidth: 980, minHeight: 680)
         .background(WindowCloseGuard(session: session))
-        .alert(
-            session.chatGPTUsageLimitReached ? "ChatGPT usage limit reached" : "Something needs your attention",
-            isPresented: Binding(
-                get: { session.errorMessage != nil },
-                set: { if !$0 { session.errorMessage = nil; session.chatGPTUsageLimitReached = false } }
-            )
-        ) {
-            if session.chatGPTUsageLimitReached {
-                Button("Manage usage") { openURL(StudioSession.chatGPTUsageURL) }
-                    .keyboardShortcut(.defaultAction)
-                Button("Close", role: .cancel) { session.errorMessage = nil }
-            } else {
-                Button("OK") { session.errorMessage = nil }
-            }
-        } message: { Text(session.errorMessage ?? "") }
+        .modifier(StudioSessionHooks(session: session))
+        .modifier(StudioFailureAlert(session: session))
+        .modifier(StudioPromptPresenter(session: session))
     }
 
     private var journey: some View {
@@ -50,14 +36,10 @@ struct StudioRootView: View {
                 }
                 .listStyle(.sidebar)
                 Divider()
-                HStack {
-                    Button("Close project", systemImage: "rectangle.portrait.and.arrow.right") {
-                        session.requestClose()
-                    }.buttonStyle(.plain)
-                    Spacer()
-                    SettingsLink { Image(systemName: "gearshape") }
-                        .buttonStyle(.plain).help("Settings").accessibilityLabel("Settings")
-                }.foregroundStyle(StudioStyle.supportingText).padding(20)
+                Button("Close project", systemImage: "rectangle.portrait.and.arrow.right") {
+                    session.requestClose()
+                }
+                .buttonStyle(.plain).foregroundStyle(StudioStyle.supportingText).padding(20)
             }
             .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 270)
         } detail: {
@@ -74,8 +56,8 @@ struct StudioRootView: View {
             .toolbar {
                 ToolbarItem { SettingsLink { Label("Settings", systemImage: "gearshape") } }
             }
-            .onChange(of: session.step) { _, step in
-                if let step, step.rawValue >= StudioStep.pods.rawValue { session.configureGPU() }
+            .onChange(of: session.step, initial: true) { _, step in
+                if let step, step.usesRentedComputer { session.prepareGPUStep() }
             }
         }
     }
@@ -122,24 +104,21 @@ struct StudioRootView: View {
             }
             HStack(spacing: 12) {
                 Button(session.gpu.isStopping ? "Stopping…" : "Stop everything", systemImage: "stop.circle") {
-                    Task { await session.stopEverything() }
+                    session.requestStopEverything()
                 }
                 .disabled(session.gpu.isStopping)
                 .help("Cancel work and stop the rented computer.")
                 if session.gpu.hasRunningPod {
-                    Text("GPU spend · $\(session.gpu.elapsedCost, specifier: "%.2f")")
+                    Text("GPU spend · \(StudioMoney.format(session.gpu.elapsedCost))")
                         .font(.callout.weight(.medium)).monospacedDigit()
                 }
                 Spacer(minLength: 8)
-                if let step = session.step, step.rawValue > 0 {
-                    Button("Back") { session.step = StudioStep(rawValue: step.rawValue - 1) }
+                let current = session.step ?? .images
+                if let previous = current.stepBefore {
+                    Button("Back") { session.step = previous }.help("Back to \(previous.title) (⌘[)")
                 }
-                if session.step != .monitor {
-                    Button(
-                        "Next: \(StudioStep(rawValue: (session.step ?? .images).rawValue + 1)?.title ?? "Monitor")"
-                    ) {
-                        session.next()
-                    }
+                if let following = current.stepAfter {
+                    Button("Next: \(following.title)") { session.step = following }.help("⌘]")
                 }
             }
         }.padding(.horizontal, 24).padding(.vertical, 16)
@@ -154,7 +133,98 @@ struct StudioRootView: View {
         case .review: ReviewView(session: session)
         case .publish: PublishView(session: session)
         case .pods, .training, .monitor:
-            GPUJourneyView(workspace: session.gpu, step: session.step ?? .pods, datasetRepo: session.repoID)
+            GPUJourneyView(session: session, step: session.step ?? .pods, showsSpendControls: false)
         }
+    }
+}
+
+extension StudioStep {
+    /// Journey order comes from `allCases`, so no view hard-codes the number of screens.
+    var stepBefore: StudioStep? {
+        let steps = Self.allCases
+        guard let index = steps.firstIndex(of: self), index > steps.startIndex else { return nil }
+        return steps[steps.index(before: index)]
+    }
+
+    var stepAfter: StudioStep? {
+        let steps = Self.allCases
+        guard let index = steps.firstIndex(of: self), steps.index(after: index) < steps.endIndex else { return nil }
+        return steps[steps.index(after: index)]
+    }
+
+    var usesRentedComputer: Bool {
+        [.pods, .training, .monitor].contains(self)
+    }
+}
+
+extension StudioSession {
+    /// Reads the RunPod and Hub keys from the Keychain once per GPU workspace (Settings re-reads after a key
+    /// changes); later visits only refresh the project-derived training defaults.
+    func prepareGPUStep() {
+        guard gpuKeysLoadedFor !== gpu else {
+            gpu.triggerWords = project?.job.triggers.joined(separator: ",") ?? ""
+            gpu.profile = project?.job.profile ?? "flux-image"
+            if !gpu.hasRunningPod { gpu.trainer = gpu.profile == "ltx-image" ? "ltx" : "aitoolkit" }
+            return
+        }
+        configureGPU()
+        gpuKeysLoadedFor = gpu
+    }
+}
+
+/// The open project folder paired with the GPU workspace it belongs to (the workspace is replaced per project).
+private struct TrainingDestination: Equatable {
+    let workspace: ObjectIdentifier
+    let folder: URL?
+
+    @MainActor init(_ session: StudioSession) {
+        workspace = ObjectIdentifier(session.gpu)
+        folder = session.demoMode ? nil : session.project?.directory
+    }
+}
+
+/// The one presentation path for blocking failures: a window-attached alert. Progress and recoverable
+/// states stay inline beside the work they describe.
+struct StudioFailureAlert: ViewModifier {
+    @Bindable var session: StudioSession
+    @Environment(\.openURL) private var openURL
+
+    func body(content: Content) -> some View {
+        content.alert(
+            session.chatGPTUsageLimitReached ? "ChatGPT usage limit reached" : "Something needs your attention",
+            isPresented: Binding(
+                get: { session.errorMessage != nil },
+                set: { if !$0 { session.errorMessage = nil; session.chatGPTUsageLimitReached = false } }
+            )
+        ) {
+            if session.chatGPTUsageLimitReached {
+                Button("Manage usage") { openURL(StudioSession.chatGPTUsageURL) }
+                    .keyboardShortcut(.defaultAction)
+                Button("Close", role: .cancel) { session.errorMessage = nil }
+            } else {
+                Button("OK") { session.errorMessage = nil }
+            }
+        } message: { Text(session.errorMessage ?? "") }
+    }
+}
+
+/// Keeps window-lifetime session state in step with what is open: where training results are saved, GPU
+/// failures routed to the one failure alert, and photo thumbnails dropped when the project changes.
+struct StudioSessionHooks: ViewModifier {
+    @Bindable var session: StudioSession
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: TrainingDestination(session), initial: true) { old, destination in
+                // Results without a Hub token are saved inside the open project.
+                session.gpu.projectFolder = destination.folder
+                // A reopened project may hold photos edited outside the app under the same names.
+                if old.folder != destination.folder { PhotoThumbnails.removeAll() }
+            }
+            .onChange(of: session.gpu.failure) { _, failure in
+                guard let failure else { return }
+                session.gpu.failure = nil
+                if session.errorMessage == nil { session.errorMessage = failure }
+            }
     }
 }

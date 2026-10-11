@@ -452,7 +452,7 @@ extension GPUWorkspace {
         self.saved = saved
         budget = newBudget
         persist()
-        message = "Spending limit raised to \(newBudget.formatted(.currency(code: "USD")))."
+        message = "Spending limit raised to \(StudioMoney.format(newBudget))."
         return true
     }
 

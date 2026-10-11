@@ -11,7 +11,12 @@ struct TensorBoardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                if loading { ProgressView("Connecting to TensorBoard…").controlSize(.small) }
+                if loading {
+                    ProgressView("Connecting to TensorBoard…").controlSize(.small)
+                } else {
+                    Text("Detailed measurements from your training computer.")
+                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                }
                 Spacer()
                 Button("Reload TensorBoard", systemImage: "arrow.clockwise") {
                     errorMessage = nil
@@ -27,7 +32,7 @@ struct TensorBoardView: View {
             }
             TensorBoardWebView(url: url, token: token, loading: $loading, errorMessage: $errorMessage)
                 .id(reloadID)
-                .frame(minHeight: 300)
+                .frame(maxWidth: .infinity, minHeight: 240, maxHeight: .infinity)
                 .accessibilityLabel("TensorBoard training charts")
         }
     }
