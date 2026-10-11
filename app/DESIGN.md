@@ -56,7 +56,8 @@ These apply the direction above. The two marked owner decisions are not open to 
 - **Confirmations are window alerts.** Discarding caption edits, closing, quitting, stopping with
   an uncollected trained model and raising a spending limit are SwiftUI alerts driven by the
   session's pending prompt; nothing blocks the whole app modally. The default button is the safe
-  choice.
+  choice: Return keeps the edits ("Keep editing") and keeps the current limit ("Cancel"); it
+  stops a billing computer and retrieves an uncollected model.
 - **Quitting with a running computer** (owner decision, offer-keep-running). Stop stays the
   default. "Keep the computer running" is offered as a secondary choice with the hourly price,
   the spend so far and a plain warning that the app must be reopened to stop it.

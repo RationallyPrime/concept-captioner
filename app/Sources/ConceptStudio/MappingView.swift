@@ -10,6 +10,9 @@ struct MappingView: View {
     @State private var fromSuggestion = false
     /// The person changed the editor since it was filled; a late suggestion must not overwrite that.
     @State private var edited = false
+    /// Height of the photo detail's scroll area; below `shortDetail` the photo moves beside the subjects.
+    @State private var detailHeight: CGFloat = 600
+    private let shortDetail: CGFloat = 440
 
     private var images: [ProjectImage] {
         (session.project?.images ?? []).filter { !onlyUnmapped || session.project?.job.mapping(for: $0.id) == nil }
@@ -76,13 +79,17 @@ struct MappingView: View {
                                     symbol: "person.crop.rectangle.badge.checkmark"
                                 )
                             }
-                            // The photo gives way in a short window, so what a suggestion filled in stays in
-                            // view above the pinned Confirm bar.
-                            PhotoView(url: image.url, faces: session.analyses[image.id]?.faces ?? [])
-                                .containerRelativeFrame(.vertical) { height, _ in min(300, max(140, height * 0.38)) }
-                                .frame(maxWidth: .infinity)
-                                .background(StudioStyle.surface)
-                            presentSubjects
+                            // In a short window the photo sits beside the subjects, so what a suggestion filled
+                            // in is in view above the pinned Confirm bar next to the photo it describes.
+                            if detailHeight < shortDetail {
+                                HStack(alignment: .top, spacing: 16) {
+                                    photo(image).frame(width: 150, height: 150)
+                                    presentSubjects
+                                }
+                            } else {
+                                photo(image).frame(height: min(300, detailHeight * 0.4)).frame(maxWidth: .infinity)
+                                presentSubjects
+                            }
                         }.padding(.leading, 20).padding(.bottom, 12)
                     } else {
                         ContentUnavailableView(
@@ -97,6 +104,7 @@ struct MappingView: View {
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     if let image = selectedImage { confirmBar(for: image) }
                 }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { detailHeight = $0 }
             }
         }
         .onAppear { selectVisiblePhoto(); load() }
@@ -116,6 +124,11 @@ struct MappingView: View {
             return Label("Suggested · check it", systemImage: "sparkles")
         }
         return Label("Unconfirmed", systemImage: "circle")
+    }
+
+    private func photo(_ image: ProjectImage) -> some View {
+        PhotoView(url: image.url, faces: session.analyses[image.id]?.faces ?? [])
+            .background(StudioStyle.surface)
     }
 
     private var presentSubjects: some View {

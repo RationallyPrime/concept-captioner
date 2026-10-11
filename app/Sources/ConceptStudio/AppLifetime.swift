@@ -71,6 +71,16 @@ struct StudioPrompt: Identifiable {
         return false
     }
 
+    /// Return answers with the confirm button only where confirming is the safe choice: stopping a billing
+    /// computer (the owner's decision) and retrieving a trained model. Discarding edits and spending more
+    /// leave Return on the cancel button.
+    var confirmIsDefault: Bool {
+        switch kind {
+        case .stopWork, .stopWithPendingResult: true
+        case .discardCaptionDrafts, .raiseBudget: false
+        }
+    }
+
     var alternateTitle: String? {
         switch kind {
         case let .stopWork(work) where work.offerKeepRunning: "Keep the computer running"
@@ -141,8 +151,11 @@ enum StudioCloseDecision: Equatable {
 @MainActor
 final class StudioPromptReply {
     fileprivate var continuation: CheckedContinuation<StudioPromptChoice, Never>?
+    /// Set by the first answer; later answers are ignored.
+    private(set) var isAnswered = false
 
     func resolve(_ choice: StudioPromptChoice) {
+        isAnswered = true
         continuation?.resume(returning: choice)
         continuation = nil
     }
@@ -150,13 +163,19 @@ final class StudioPromptReply {
 
 @MainActor
 extension StudioSession {
-    /// Presents a confirmation in the window and waits for the answer. A newer prompt cancels an older one.
+    /// Presents a confirmation in the window and waits for the answer. A newer prompt cancels an older one,
+    /// and cancelling the waiting task answers `.cancel` and withdraws the prompt.
     func ask(_ kind: StudioPrompt.Kind) async -> StudioPromptChoice {
         pendingPrompt?.reply.resolve(.cancel)
-        let reply = StudioPromptReply()
-        return await withCheckedContinuation { continuation in
-            reply.continuation = continuation
-            pendingPrompt = StudioPrompt(kind: kind, reply: reply)
+        let prompt = StudioPrompt(kind: kind, reply: StudioPromptReply())
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled else { return continuation.resume(returning: .cancel) }
+                prompt.reply.continuation = continuation
+                pendingPrompt = prompt
+            }
+        } onCancel: {
+            Task { @MainActor in self.answer(prompt, .cancel) }
         }
     }
 
@@ -170,6 +189,15 @@ extension StudioSession {
             discardCaptionDraft(for: image)
         }
     }
+
+    // INTEGRATION (lane app-contract): that lane gates `useDemo()`, `createProject(at:)` and
+    // `openProject(url:)` on its own `pendingConfirmation` / `confirm(_:)` / `whenConfirmed(_:_:)`, which no
+    // view presents. Keep one mechanism, this one: implement its `confirm(c)` as `await ask(kind) == .confirm`
+    // and `whenConfirmed(c, action)` as a Task doing the same before `action()`, mapping
+    // `.discardCaptionDrafts(count:)` to `.discardCaptionDrafts(warning: captionDiscardWarning)`; delete
+    // `pendingConfirmation`, `PendingConfirmation` and `resolveConfirmation`. Then the session gates itself, so
+    // delete `afterConfirmingDraftDiscard`, `runWithDraftDiscardConfirmed`, `confirmDiscardCaptionDrafts` and
+    // `draftDiscardConfirmed`, and call the session methods directly from the menus and Settings.
 
     /// Runs `action` after the person agrees to discard unsaved caption edits, or at once if there are none.
     /// Every view-level New, Open, Open Recent and demo entry point goes through this.
@@ -258,6 +286,7 @@ extension StudioSession {
     }
 
     /// Cancels local work but leaves the rented computer billing. Its saved record brings it back on next launch.
+    /// INTEGRATION (lane app-contract): also cancel and await `editTask` and `analysisTask` once they exist.
     func leaveComputerRunning() async {
         chatGPTWorkGeneration += 1
         await chatGPT.cancelAndWait()
@@ -273,7 +302,12 @@ extension StudioSession {
     }
 }
 
-/// Presents `session.pendingPrompt` as a window-attached alert. The default button is always the safe choice.
+/// Presents `session.pendingPrompt` as a window-attached alert. The default button is always the safe choice
+/// (see `StudioPrompt.confirmIsDefault`).
+///
+/// Only the buttons answer a prompt; Escape runs the cancel button. The dismissal setter never answers and
+/// never touches an unanswered prompt, so it cannot cancel the next prompt in a chain (discard, then stop,
+/// then pending result) whatever order SwiftUI calls it in relative to the button action.
 struct StudioPromptPresenter: ViewModifier {
     @Bindable var session: StudioSession
 
@@ -282,18 +316,23 @@ struct StudioPromptPresenter: ViewModifier {
             session.pendingPrompt?.title ?? "",
             isPresented: Binding(
                 get: { session.pendingPrompt != nil },
-                set: { if !$0, let prompt = session.pendingPrompt { session.answer(prompt, .cancel) } }
+                set: { presented in
+                    if !presented, let prompt = session.pendingPrompt, prompt.reply.isAnswered {
+                        session.pendingPrompt = nil
+                    }
+                }
             ),
             presenting: session.pendingPrompt
         ) { prompt in
             Button(prompt.confirmTitle, role: prompt.confirmIsDestructive ? .destructive : nil) {
                 session.answer(prompt, .confirm)
             }
-            .keyboardShortcut(.defaultAction)
+            .keyboardShortcut(prompt.confirmIsDefault ? .defaultAction : nil)
             if let alternate = prompt.alternateTitle {
                 Button(alternate) { session.answer(prompt, .alternate) }
             }
             Button(prompt.cancelTitle, role: .cancel) { session.answer(prompt, .cancel) }
+                .keyboardShortcut(prompt.confirmIsDefault ? nil : .defaultAction)
         } message: { prompt in
             Text(prompt.message)
         }

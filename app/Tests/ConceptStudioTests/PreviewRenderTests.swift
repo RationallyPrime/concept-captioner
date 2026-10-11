@@ -366,9 +366,40 @@ struct ViewLogicTests {
     }
 
     private func waitForPrompt(_ session: StudioSession, other: UUID? = nil) async {
-        for _ in 0 ..< 100 where session.pendingPrompt == nil || session.pendingPrompt?.id == other {
-            await Task.yield()
+        _ = await eventually { session.pendingPrompt != nil && session.pendingPrompt?.id != other }
+    }
+
+    @Test func cancellingTheWaitAnswersCancelAndWithdrawsThePrompt() async {
+        let suite = "ConceptStudio.viewlogic." + UUID().uuidString
+        let preferences = UserDefaults(suiteName: suite) ?? .standard
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let session = StudioSession(preferences: preferences)
+        let waiting = Task { await session.ask(.stopWithPendingResult) }
+        await waitForPrompt(session)
+        #expect(session.pendingPrompt != nil)
+        waiting.cancel()
+        #expect(await waiting.value == .cancel)
+        #expect(await eventually { session.pendingPrompt == nil })
+        // Already cancelled before asking: answers at once and shows nothing.
+        let early = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await session.ask(.stopWithPendingResult)
         }
+        #expect(await early.value == .cancel)
+        #expect(session.pendingPrompt == nil)
+    }
+
+    @Test func returnNeverDiscardsEditsOrSpendsMore() {
+        func prompt(_ kind: StudioPrompt.Kind) -> StudioPrompt {
+            StudioPrompt(kind: kind, reply: StudioPromptReply())
+        }
+        #expect(!prompt(.discardCaptionDrafts(warning: "1 edit")).confirmIsDefault)
+        #expect(!prompt(.raiseBudget(from: 5, to: 10, hourlyRate: 1)).confirmIsDefault)
+        #expect(prompt(.stopWithPendingResult).confirmIsDefault)
+        let work = StudioPrompt.RunningWork(
+            hasRunningPod: true, hourlyRate: 1, spent: 0, offerKeepRunning: true, purpose: .quit
+        )
+        #expect(prompt(.stopWork(work)).confirmIsDefault)
     }
 
     @Test func keepRunningIsOfferedOnlyWhenQuittingWithARunningComputer() {
@@ -406,8 +437,23 @@ struct ViewLogicTests {
     }
 }
 
+/// Polls `condition` until it holds or `seconds` of real time pass. A fixed number of yields is not enough
+/// when the parallel run keeps the main actor busy.
+@MainActor
+func eventually(within seconds: Double = 30, _ condition: () -> Bool) async -> Bool {
+    let deadline = ContinuousClock.now + .seconds(seconds)
+    while !condition() {
+        guard ContinuousClock.now < deadline else { return false }
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    return true
+}
+
 /// The draft-discard and close decisions, driven through the window prompts with the offline demo.
-@Suite("close and switch decisions")
+/// Serialized: every test opens the demo, and opening it runs `VisionInspector.analyze`, which blocks a
+/// cooperative thread on synchronous Vision text recognition. Five of these in parallel with the other
+/// suites exhausted the cooperative pool and the whole run hung inside Vision (sampled 2026-10-11).
+@Suite("close and switch decisions", .serialized)
 @MainActor
 struct CloseDecisionTests {
     /// An open demo project with one unsaved caption edit; `rent` also starts the demo computer.
@@ -436,11 +482,8 @@ struct CloseDecisionTests {
 
     /// Waits for a prompt other than `previous` and returns it.
     private func nextPrompt(_ session: StudioSession, after previous: UUID? = nil) async -> StudioPrompt? {
-        for _ in 0 ..< 500 {
-            if let prompt = session.pendingPrompt, prompt.id != previous { return prompt }
-            await Task.yield()
-        }
-        return nil
+        guard await eventually({ session.pendingPrompt.map { $0.id != previous } ?? false }) else { return nil }
+        return session.pendingPrompt
     }
 
     @Test func aRefusedProjectSwitchKeepsTheDrafts() async throws {
@@ -449,16 +492,15 @@ struct CloseDecisionTests {
         let prompt = try #require(await nextPrompt(session))
         guard case .discardCaptionDrafts = prompt.kind else { Issue.record("expected the discard prompt"); return }
         session.answer(prompt, .confirm)
-        for _ in 0 ..< 500 where session.errorMessage == nil {
-            await Task.yield()
-        }
+        _ = await eventually { session.errorMessage != nil }
         // The switch refused because the computer is running; the edits it would have discarded remain.
         #expect(session.errorMessage?.contains("Stop the rented computer") == true)
         #expect(session.unsavedCaptionCount == 1)
         #expect(!session.draftDiscardConfirmed)
         // The confirmation does not leak to a later action that skipped the prompt.
         #expect(!session.confirmDiscardCaptionDrafts())
-        if let stray = await nextPrompt(session) { session.answer(stray, .cancel) }
+        let stray = try #require(await nextPrompt(session))
+        session.answer(stray, .cancel)
         #expect(session.unsavedCaptionCount == 1)
         await cleanUp(session)
     }
@@ -469,9 +511,7 @@ struct CloseDecisionTests {
         session.afterConfirmingDraftDiscard { session.useDemo() }
         let prompt = try #require(await nextPrompt(session))
         session.answer(prompt, .confirm)
-        for _ in 0 ..< 500 where session.project?.directory == before || session.busy {
-            await Task.yield()
-        }
+        _ = await eventually { session.project?.directory != before && !session.busy }
         await session.task?.value
         #expect(session.project?.directory != before)
         #expect(session.unsavedCaptionCount == 0)

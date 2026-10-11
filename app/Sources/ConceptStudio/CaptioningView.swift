@@ -253,7 +253,8 @@ struct CaptioningView: View {
     }
 
     /// A typed model is kept; a provider default is offered only for an empty or untouched field. OpenAI on a
-    /// ChatGPT plan takes its models from the plan. (Lane app-contract's `providerChanged(from:to:)`.)
+    /// ChatGPT plan takes its models from the plan. INTEGRATION (lane app-contract): replace both `onChange`
+    /// handlers' use of this with `session.providerChanged(from:to:)` / `session.criticProviderChanged(from:to:)`.
     private func model(afterSwitchingFrom old: String, to new: String, current: String) -> String {
         guard !(new == "openai" && session.openAIUsesChatGPT) else { return current }
         let podModel = { (kind: String) in

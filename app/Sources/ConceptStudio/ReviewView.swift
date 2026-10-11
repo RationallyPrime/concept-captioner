@@ -263,8 +263,11 @@ struct ReviewView: View {
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Only while the single-photo editor is on screen; the batch panel has nothing for ⌘S to save.
     private var saveAction: CaptionSaveAction? {
-        guard let image = session.selectedImage else { return nil }
+        guard selection.count == 1, let image = session.selectedImage, selection.contains(image.id) else {
+            return nil
+        }
         return CaptionSaveAction(
             save: { save(image) },
             disabled: session.busy || !session.hasUnsavedCaption(for: image)

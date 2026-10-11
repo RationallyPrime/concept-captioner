@@ -433,7 +433,9 @@ extension StudioSession {
 /// resolution, budget raise, stray-pod reconciliation and keep-awake. The members below mirror the names lane gpu
 /// was using when this view was written (GPUWorkspace.swift / GPUWorkspace+Results.swift on fix/gpu), so that after
 /// both lanes merge they collide with the real declarations: delete this whole block, then fix any call site
-/// whose name lane gpu changed. Only `failure` has no lane gpu counterpart yet; see the lane ui notes.
+/// whose name lane gpu changed. Checked against fix/gpu 0d176e1: every name matches, `failure` included.
+/// Until then these are inert: `result` is always nil, `resultNeedsSaving` always false, and `raiseBudget`
+/// only edits `budget`.
 struct TrainingResult: Equatable {
     enum State: Equatable {
         case training
@@ -503,7 +505,7 @@ extension GPUWorkspace {
         set { _ = newValue }
     }
 
-    /// A blocking failure for the window alert (no lane gpu counterpart yet; GPU failures reach `message`).
+    /// A blocking failure for the window alert (lane gpu's `var failure: String?`).
     var failure: String? {
         get { nil }
         set { _ = newValue }
