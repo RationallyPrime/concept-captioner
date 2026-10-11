@@ -127,33 +127,3 @@ struct ImagesView: View {
         }
     }
 }
-
-struct PhotoView: View {
-    let url: URL
-    var faces: [CGRect] = []
-
-    var body: some View {
-        if let image = NSImage(contentsOf: url) {
-            Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
-                .overlay {
-                    GeometryReader { geometry in
-                        ForEach(Array(faces.enumerated()), id: \.offset) { index, face in
-                            RoundedRectangle(cornerRadius: 5).stroke(StudioStyle.accent, lineWidth: 2)
-                                .overlay(alignment: .topLeading) {
-                                    Text("\(index + 1)").font(.caption.bold()).padding(3)
-                                        .foregroundStyle(.primary).background(StudioStyle.surface)
-                                }
-                                .frame(
-                                    width: face.width * geometry.size.width,
-                                    height: face.height * geometry.size.height
-                                )
-                                .position(x: face.midX * geometry.size.width, y: (1 - face.midY) * geometry.size.height)
-                        }
-                    }
-                }
-                .accessibilityLabel(url.lastPathComponent)
-        } else {
-            ContentUnavailableView("Cannot read this photo", systemImage: "photo")
-        }
-    }
-}
