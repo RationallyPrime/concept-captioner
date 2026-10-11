@@ -55,12 +55,30 @@ struct ConceptStudioApp: App {
 
 @MainActor
 extension StudioSession {
+    func next() {
+        goForward()
+    }
+
+    var journeySteps: [StudioStep] {
+        StudioStep.allCases.filter { $0 != .mapping || project?.job.requiresLocatorMapping != false }
+    }
+
+    var previousStep: StudioStep? {
+        let current = step ?? .images
+        return journeySteps.last { $0.rawValue < current.rawValue }
+    }
+
+    var nextStep: StudioStep? {
+        let current = step ?? .images
+        return journeySteps.first { $0.rawValue > current.rawValue }
+    }
+
     func goBack() {
-        if let earlier = (step ?? .images).stepBefore { step = earlier }
+        if let earlier = previousStep { step = earlier }
     }
 
     func goForward() {
-        if let later = (step ?? .images).stepAfter { step = later }
+        if let later = nextStep { step = later }
     }
 }
 
@@ -70,22 +88,17 @@ struct JourneyCommands: Commands {
 
     var body: some Commands {
         CommandMenu("Go") {
-            let current = session.step ?? .images
             // The actions read the step when pressed, not when the menu body was last evaluated.
             Button("Back") { session.goBack() }
                 .keyboardShortcut("[", modifiers: .command)
-                .disabled(session.project == nil || current.stepBefore == nil)
+                .disabled(session.project == nil || session.previousStep == nil)
             Button("Next") { session.goForward() }
                 .keyboardShortcut("]", modifiers: .command)
-                .disabled(session.project == nil || current.stepAfter == nil)
+                .disabled(session.project == nil || session.nextStep == nil)
             Divider()
-            ForEach(Array(StudioStep.allCases.enumerated()), id: \.element) { index, step in
+            ForEach(session.journeySteps) { step in
                 let button = Button(step.title) { session.step = step }.disabled(session.project == nil)
-                if index < 9 {
-                    button.keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
-                } else {
-                    button
-                }
+                button.keyboardShortcut(KeyEquivalent(Character("\(step.rawValue + 1)")), modifiers: .command)
             }
         }
     }

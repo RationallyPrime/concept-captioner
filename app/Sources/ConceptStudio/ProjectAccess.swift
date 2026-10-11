@@ -85,6 +85,7 @@ struct RecentProjects {
             throw StudioError.message("Choose Open project and select this folder again.")
         }
         var target = URL(fileURLWithPath: path)
+        var checkedJob = false
         do {
             var stale = false
             let url = try URL(
@@ -96,6 +97,7 @@ struct RecentProjects {
             target = url
             let accessed = url.startAccessingSecurityScopedResource()
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            checkedJob = true
             _ = try FileManager.default.attributesOfItem(atPath: url.appendingPathComponent("job.yaml").path)
             if stale || url.path != path {
                 // The folder moved or was renamed: keep its place in the list under the new path.
@@ -116,6 +118,14 @@ struct RecentProjects {
                 throw StudioError.message(
                     "\(target.lastPathComponent) could not be found any more, so it was removed "
                         + "from recent projects. If you moved it, choose Open project and select its new location."
+                )
+            }
+            let cause = error as? CocoaError
+            if checkedJob, cause?.code == .fileNoSuchFile || cause?.code == .fileReadNoSuchFile {
+                throw StudioError.message(
+                    "\(target.lastPathComponent) has no job.yaml project file. "
+                        + "Restore that file from your backup, open a different project, "
+                        + "or remove this entry from Recent projects."
                 )
             }
             throw StudioError.message(
@@ -146,6 +156,11 @@ struct RecentProjects {
 /// Recent projects and the project's skill folder.
 @MainActor
 extension StudioSession {
+    func forgetRecent(_ path: String) {
+        recents.forget(path)
+        recentPaths = recents.paths
+    }
+
     func openRecent(_ path: String) {
         do {
             try openProject(url: recents.restore(path))

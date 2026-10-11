@@ -41,8 +41,10 @@ import csv
 import io
 import json
 import os
+import runpy
 import shutil
 import sys
+import tempfile
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -410,6 +412,7 @@ def build_manifest(
 ) -> dict[str, Any]:
     with_caption = sum(1 for entry in entries if entry.caption is not None)
     return {
+        "source": "local" if getattr(args, "local_dir", None) else "hub",
         "repo_id": args.repo,
         "revision": sha or args.revision,
         "requested_revision": args.revision,
@@ -502,7 +505,9 @@ class Hub:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--repo", required=True, help="dataset repo id (owner/name)")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--repo", help="dataset repo id (owner/name)")
+    source.add_argument("--local-dir", help="approved upload stage under workspace/uploads")
     parser.add_argument("--to", required=True, help="destination folder; replaced atomically")
     parser.add_argument("--split", default="train")
     parser.add_argument("--revision", default=None, help="branch, tag or commit; default main")
@@ -525,23 +530,51 @@ def build_parser() -> argparse.ArgumentParser:
 
 def run(args: argparse.Namespace, hub: Hub | None) -> int:
     out = Path(args.to).expanduser().resolve()
-    if hub is None:
-        hub = Hub(token_from_env())
-    try:
-        files = hub.list_files(args.repo, args.revision)
-        sha = hub.resolve_sha(args.repo, args.revision)
-    except Exception as exc:  # not found, no access, offline: one line instead of a traceback
-        raise PullError(f"cannot read {args.repo}: {exc}") from None
+    local = getattr(args, "local_dir", None)
+    rules = runpy.run_path(str(Path(__file__).with_name("dataset_stage.py"))) if local else None
+    snapshot = None
+    digest = None
+    if local:
+        if not args.only_metadata or args.revision is not None:
+            raise PullError("Local mode requires --only-metadata and accepts no Hub revision")
+        workspace = Path(os.environ.get("PODAGENT_WORKSPACE", "/workspace"))
+        try:
+            snapshot = rules["confined_stage"](Path(local).expanduser(), workspace)
+            originals = rules["staged_files"](snapshot)
+        except ValueError as error:
+            raise PullError(str(error)) from error
+        if out.parent != (workspace / "datasets").resolve() or out.name in {"", ".", ".."}:
+            raise PullError("Local dataset destination must be under workspace/datasets")
+        if (
+            any(file.stat().st_size > rules["MAX_UPLOAD_BYTES"] for file in originals)
+            or sum(file.stat().st_size for file in originals) > rules["MAX_STAGED_BYTES"]
+        ):
+            raise PullError("Local upload stage exceeds its file or dataset size limit")
+        digest = rules["input_digest"](originals)
+        files = [file.name for file in originals]
+        sha = None
+        convention = IMAGEFOLDER
+    else:
+        if hub is None:
+            hub = Hub(token_from_env())
+        try:
+            files = hub.list_files(args.repo, args.revision)
+            sha = hub.resolve_sha(args.repo, args.revision)
+        except Exception as exc:  # not found, no access, offline: one line instead of a traceback
+            raise PullError(f"cannot read {args.repo}: {exc}") from None
+        convention = detect_convention(files)
     revision = sha or args.revision
-    convention = detect_convention(files)
-    print(f"pull_dataset: {args.repo} @ {revision or 'main'} -> {out} ({convention})", flush=True)
+    origin = f"local {snapshot.name}" if local else f"{args.repo} @ {revision or 'main'}"
+    print(f"pull_dataset: {origin} -> {out} ({convention})", flush=True)
 
     stage = out.with_name(out.name + PARTIAL_SUFFIX)
+    retired = None
     _remove(stage)
     stage.mkdir(parents=True)
     try:
         if convention == IMAGEFOLDER:
-            snapshot = hub.snapshot(args.repo, revision, list(SNAPSHOT_PATTERNS))
+            if not local:
+                snapshot = hub.snapshot(args.repo, revision, list(SNAPSHOT_PATTERNS))
             entries: Iterable[Entry] = collect_imagefolder(
                 snapshot,
                 split=args.split,
@@ -560,7 +593,10 @@ def run(args: argparse.Namespace, hub: Hub | None) -> int:
             )
         written = write_entries(entries, stage)
         job_yaml = None
-        if args.job_path and args.job_path in files:
+        if local and "job.yaml" in files:
+            shutil.copyfile(snapshot / "job.yaml", stage / "job.yaml")
+            job_yaml = "job.yaml"
+        elif not local and args.job_path and args.job_path in files:
             shutil.copyfile(
                 hub.download_file(args.repo, args.job_path, revision), stage / "job.yaml"
             )
@@ -568,13 +604,35 @@ def run(args: argparse.Namespace, hub: Hub | None) -> int:
         manifest = build_manifest(
             args, sha=sha, convention=convention, entries=written, job_yaml=job_yaml
         )
+        if local:
+            if manifest["count"] == 0 or manifest["without_caption"]:
+                raise PullError(
+                    "Local training needs a nonempty metadata-listed set with a caption for every target"
+                )
+            manifest["input_digest"] = digest
         (stage / "manifest.json").write_text(
             json.dumps(manifest, indent=1, ensure_ascii=False) + "\n", encoding="utf-8"
         )
         swap_in(stage, out)
+        if local:
+            # Retire the claimed directory atomically before permitting another upload under
+            # this public name. Removing the private old stage cannot delete new incoming bytes.
+            private_stage = Path(tempfile.mkdtemp(prefix=".installed-", dir=snapshot.parent))
+            try:
+                os.replace(snapshot, private_stage)
+            except OSError:
+                private_stage.rmdir()
+                raise
+            retired = private_stage
     except BaseException:
         _remove(stage)
         raise
+    finally:
+        if local and snapshot is not None:
+            ((retired or snapshot) / rules["INSTALLING"]).unlink(missing_ok=True)
+
+    if local:
+        shutil.rmtree(retired)
 
     print(
         f"pull_dataset: {manifest['count']} images, {manifest['with_caption']} with captions, "

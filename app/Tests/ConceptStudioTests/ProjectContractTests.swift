@@ -24,7 +24,8 @@ private struct AdviceClient: ModelClient {
         instructions: String,
         messages: [ChatMessage],
         output: OutputRequest,
-        settings: RequestSettings
+        settings: RequestSettings,
+        onPartialText: (@Sendable (String) async -> Void)? = nil
     ) async throws -> ModelReply {
         await recorder.record(output.name, messages)
         return ModelReply(
@@ -225,7 +226,13 @@ struct ProjectContractTests {
         try recents.remember(folder)
         let original = recents.entries
         try FileManager.default.removeItem(at: project.jobURL)
-        #expect(throws: StudioError.self) { try recents.restore(folder.path) }
+        do {
+            _ = try recents.restore(folder.path)
+            Issue.record("A project without job.yaml unexpectedly opened")
+        } catch {
+            #expect(error.localizedDescription.contains("has no job.yaml project file"))
+            #expect(!error.localizedDescription.contains("grant access"))
+        }
         #expect(recents.entries == original)
     }
 
@@ -392,13 +399,13 @@ struct StudioVocabularyTests {
     @Test func photoNamesAreReadableAndStable() {
         let data = Data("pixels".utf8)
         let hash = String(VisionInspector.contentHash(data).prefix(8))
-        #expect(PhotoImportName.make(suggested: "IMG_1234.HEIC", captured: nil, data: data, suffix: "jpg")
+        #expect(PhotoImportName.make(suggested: "IMG_1234.HEIC", captured: nil, hash: hash, suffix: "jpg")
             == "IMG_1234-\(hash).jpg")
         let captured = Date(timeIntervalSince1970: 1_760_000_000)
         #expect(PhotoImportName.make(
-            suggested: UUID().uuidString + ".jpeg", captured: captured, data: data, suffix: "jpg"
+            suggested: UUID().uuidString + ".jpeg", captured: captured, hash: hash, suffix: "jpg"
         ) == "photo-\(PhotoImportName.dateStem(captured))-\(hash).jpg")
-        #expect(PhotoImportName.make(suggested: nil, captured: nil, data: data, suffix: "png") == "photo-\(hash).png")
+        #expect(PhotoImportName.make(suggested: nil, captured: nil, hash: hash, suffix: "png") == "photo-\(hash).png")
         #expect(PhotoImportName.readableStem("../My holiday (1).png") == "My-holiday-1")
     }
 

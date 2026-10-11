@@ -13,6 +13,7 @@ struct TrainingRun: Codable, Equatable, Identifiable {
     let datasetRepo: String
     var datasetRevision: String?
     var datasetContainsVideo: Bool
+    var localInputDigest: String?
     var paramsJSON: Data
     var params: JSONObject {
         get { (try? JSONValue(parsing: paramsJSON).objectValue) ?? [:] }
@@ -32,6 +33,10 @@ struct TrainingRun: Codable, Equatable, Identifiable {
     var previousGPUCostUSD = 0.0
     /// The running pod's accumulated estimate at the start of this run/continuation.
     var podSpendAtStart: Double
+
+    var datasetDescription: String {
+        localInputDigest == nil ? datasetRepo : "Direct project upload"
+    }
 
     var baseModel: String {
         params["base_model"]?.stringValue ?? ""
@@ -122,7 +127,22 @@ struct ComparisonManifest: Decodable {
 }
 
 extension GPUWorkspace {
-    func recordStartedRun(datasetRepo: String, params: JSONObject, resumed: Bool) {
+    func recordNewTrainingRun(
+        _ agent: any PodAgent, datasetRepo: String, params: JSONObject, localInputDigest: String?
+    ) async {
+        recordStartedRun(datasetRepo: datasetRepo, params: params, resumed: false, localInputDigest: localInputDigest)
+        if let info = try? await agent.runConfiguration(runID: runID),
+           let index = runHistory.firstIndex(where: { $0.runID == runID }) {
+            if !info.config.isEmpty { runHistory[index].params = info.config }
+            if localInputDigest == nil {
+                runHistory[index].datasetRevision = info.dataset["revision"]?.stringValue
+                    ?? runHistory[index].datasetRevision
+            }
+        }
+        saveProjectRecord()
+    }
+
+    func recordStartedRun(datasetRepo: String, params: JSONObject, resumed: Bool, localInputDigest: String? = nil) {
         let now = Date()
         if resumed, let index = runHistory.firstIndex(where: { $0.runID == runID }) {
             runHistory[index].params = params
@@ -135,7 +155,7 @@ extension GPUWorkspace {
             runHistory.append(TrainingRun(
                 runID: runID, trainer: trainer, datasetRepo: datasetRepo,
                 datasetRevision: datasetRevision.isEmpty ? nil : datasetRevision,
-                datasetContainsVideo: datasetContainsVideo,
+                datasetContainsVideo: datasetContainsVideo, localInputDigest: localInputDigest,
                 paramsJSON: JSONValue.object(params).pythonDumpsData(),
                 volumeID: currentVolumeID, startedAt: now, updatedAt: now, result: result,
                 hourlyRateUSD: saved?.hourlyRate, estimatedGPUCostUSD: nil, podSpendAtStart: estimatedPodCost
@@ -202,10 +222,13 @@ extension GPUWorkspace {
         datasetRevision = run.datasetRevision ?? ""
         repeatSourceRunID = run.runID
         selectedHistoryRunID = run.runID
-        message = "Saved settings loaded. Change them in Training, then start a new run. Dataset: \(run.datasetRepo)."
+        message = "Saved settings loaded. Change them in Training, then start a new run. "
+            + "Dataset: \(run.datasetDescription)."
     }
 
-    func resumeRun(_ run: TrainingRun, totalSteps: Int) async {
+    func resumeRun(
+        _ run: TrainingRun, totalSteps: Int, captureLocal: (@MainActor () async throws -> LocalTrainingDataset)? = nil
+    ) async {
         await perform {
             guard let agent = self.agent, self.hasRunningPod, self.trainer == run.trainer,
                   self.currentVolumeID == run.volumeID else {
@@ -214,12 +237,30 @@ extension GPUWorkspace {
             guard totalSteps > run.latestStep, !self.resultNeedsSaving else {
                 throw StudioError.message("Retrieve pending outputs first, then choose a total above the latest step.")
             }
+            let local: LocalTrainingDataset?
+            if let expected = run.localInputDigest {
+                guard let folder = self.projectFolder
+                else { throw StudioError.message("Open this run's project first.") }
+                let prepared: LocalTrainingDataset = if let captureLocal { try await captureLocal() } else {
+                    try await LocalTrainingDataset.prepare(projectFolder: folder)
+                }
+                guard prepared.digest == expected else {
+                    prepared.remove()
+                    throw StudioError.message("The included media, saved captions or job have changed since this run. "
+                        + "Resume needs the original inputs. Load settings for repeat to start a new run instead.")
+                }
+                local = prepared
+            } else { local = nil }
+            defer { local?.remove() }
             let services = try await agent.services()
             guard !services.contains(where: { $0.active && ($0.name.hasPrefix("trainer-")
                     || $0.name.hasPrefix("generate-")) }) else {
                 throw StudioError.message("Finish the current GPU action before resuming training.")
             }
             let plan = try await agent.plan()
+            if let local {
+                try await self.installTrainingDataset(local, repo: "", revision: nil, name: run.runID, agent: agent)
+            }
             try await self.prepareCaptionServerForTraining(agent, plan: plan)
             var params = run.params
             params["steps"] = .int(totalSteps)

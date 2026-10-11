@@ -32,7 +32,8 @@ public struct AnthropicClient: ModelClient {
         instructions: String,
         messages: [ChatMessage],
         output: OutputRequest,
-        settings: RequestSettings
+        settings: RequestSettings,
+        onPartialText: (@Sendable (String) async -> Void)? = nil
     ) async throws -> ModelReply {
         var headers = ["anthropic-version": Self.apiVersion]
         headers[bearerAuth ? "Authorization" : "x-api-key"] = bearerAuth ? "Bearer \(apiKey)" : apiKey

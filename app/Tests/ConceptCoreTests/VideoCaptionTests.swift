@@ -124,3 +124,56 @@ struct VideoCaptionTests {
         #expect(throws: ConfigurationError.self) { try LocalFolderSource(directory: directory) }
     }
 }
+
+extension VideoCaptionTests {
+    @Test(arguments: ["openrouter", "vllm"])
+    func compatibleVideoRoutesSendExactClipWithSchema(kind: String) async throws {
+        let bytes = Data("exact-approved-clip".utf8)
+        let transport = StubTransport { request in
+            let body = try JSONValue(parsing: #require(request.httpBody))
+            let part = try #require(body.field("messages")?.element(1)?.field("content")?.element(1))
+            #expect(part.field("type") == .string("video_url"))
+            #expect(part.field("video_url")?.field("url") == .string(
+                "data:video/mp4;base64,\(bytes.base64EncodedString())"
+            ))
+            #expect(body.field("response_format")?.field("json_schema")?.field("schema") == Caption.jsonSchema)
+            return try StubTransport.json([
+                "choices": [["message": ["content": "{\"caption\":\"NORA7 moves.\"}"]]],
+            ])
+        }
+        let spec = try EndpointSpec(
+            kind: kind, model: "fixture", baseURL: kind == "vllm" ? "http://localhost:8000/v1" : nil
+        )
+        let resolved = try Endpoints.resolve(spec, keys: StaticKeyStore([.openrouter: "fixture"]), transport: transport)
+        let reply = try await resolved.client.request(
+            instructions: "Describe observed motion.",
+            messages: [.user([.text("Caption."), .video(data: bytes, mediaType: "video/mp4")])],
+            output: OutputRequest(name: Caption.schemaName, schema: Caption.jsonSchema, mode: .native),
+            settings: resolved.settings
+        )
+        #expect(reply.text.contains("NORA7"))
+        #expect(await transport.requests.count == 1)
+    }
+
+    @Test(arguments: ["google", "openrouter", "vllm"])
+    func everyVideoRouteCountsInstructionsAndSchemaBeforeSending(kind: String) async throws {
+        let transport = StubTransport { _ in
+            Issue.record("Oversized encoded body was sent"); return HTTPResponse(status: 500)
+        }
+        let spec = try EndpointSpec(
+            kind: kind, model: "fixture", baseURL: kind == "vllm" ? "http://localhost:8000/v1" : nil
+        )
+        let endpoint = try Endpoints.resolve(
+            spec, keys: StaticKeyStore([.google: "fixture", .openrouter: "fixture"]), transport: transport
+        )
+        await #expect(throws: ConfigurationError.self) {
+            try await endpoint.client.request(
+                instructions: String(repeating: "x", count: MediaInput.maximumVideoRequestBytes),
+                messages: [.user([.video(data: Data([1, 2]), mediaType: "video/mp4")])],
+                output: OutputRequest(name: Caption.schemaName, schema: Caption.jsonSchema, mode: .native),
+                settings: endpoint.settings
+            )
+        }
+        #expect(await transport.requests.isEmpty)
+    }
+}

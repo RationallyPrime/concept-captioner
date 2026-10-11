@@ -51,30 +51,20 @@ extension StudioSession {
         } catch { errorMessage = Self.describe(error) }
     }
 
-    /// Import photos picked with the permission-free PhotosPicker. Files get readable, stable names
+    /// Import media picked with the permission-free PhotosPicker. Files get readable, stable names
     /// (see `PhotoImportName`); formats the pipeline cannot read (HEIC, TIFF, ...) become JPEG.
     func importPhotos(_ items: [PhotosPickerItem]) {
         guard !items.isEmpty else { return }
-        perform("Importing selected photos…") {
+        perform("Importing selected images and clips…") {
             var added = 0
             var already = 0
             for item in items {
                 try Task.checkCancellation()
                 guard let picked = try await item.loadTransferable(type: PickedPhoto.self) else { continue }
-                let pickedSuffix = picked.suggestedName.map(Sources.suffix(of:)) ?? ""
-                let (data, suffix) = try Sources.isVideo(pickedSuffix)
-                    ? (picked.data, String(pickedSuffix.dropFirst())) : PhotoImportName.readable(picked.data)
-                let name = PhotoImportName.make(
-                    suggested: picked.suggestedName,
-                    captured: PhotoImportName.captureDate(data),
-                    data: data,
-                    suffix: suffix
-                )
-                if self.project?.images.contains(where: { $0.id == name }) == true {
-                    already += 1
-                } else {
-                    _ = try self.project?.importData(data, name: name)
+                if try await self.importPickedPhoto(picked) {
                     added += 1
+                } else {
+                    already += 1
                 }
                 self.completed += 1
             }
@@ -85,8 +75,32 @@ extension StudioSession {
         }
     }
 
+    /// Keep video transfer files on disk through hashing and project import.
+    func importPickedPhoto(_ picked: PickedPhoto) async throws -> Bool {
+        switch picked.content {
+        case let .image(bytes):
+            let (data, suffix) = try PhotoImportName.readable(bytes)
+            let name = PhotoImportName.make(
+                suggested: picked.suggestedName, captured: PhotoImportName.captureDate(data),
+                hash: VisionInspector.contentHash(data), suffix: suffix
+            )
+            guard project?.images.contains(where: { $0.id == name }) != true else { return false }
+            try Task.checkCancellation()
+            return try project?.importData(data, name: name) != nil
+        case let .video(file):
+            let hash = try await VisionInspector.contentHash(fileURL: file)
+            try Task.checkCancellation()
+            let name = PhotoImportName.make(
+                suggested: picked.suggestedName, captured: nil, hash: hash,
+                suffix: file.pathExtension.lowercased()
+            )
+            guard project?.images.contains(where: { $0.id == name }) != true else { return false }
+            return try project?.importVideo(file, name: name) != nil
+        }
+    }
+
     func importHub(_ id: String) {
-        perform("Downloading dataset photos…") {
+        perform("Downloading dataset images and clips…") {
             guard !self.demoMode else {
                 self.message = "Demo dataset imported locally. No Hub connection was used."
                 return
@@ -163,7 +177,7 @@ extension StudioSession {
             guard let project = self.project else { return }
             let assistant = try StudioAssistant(endpoint: self.endpoint(), demo: self.demoMode)
             self.datasetAdvice = try await assistant.critique(project, warnings: self.analyses) { done, total in
-                self.message = "Reviewing the training data… \(done) of \(total) photos"
+                self.message = "Reviewing the training data… \(done) of \(total) samples"
             }
             self.message = "Dataset advice ready. Review it before spending on training."
         }
@@ -196,32 +210,50 @@ extension StudioSession {
                 }
             }
         } else { project.job.concepts.append(concept) }
-        if let mapping = project.job.wholeImageStyleMapping {
-            for image in project.images {
-                try project.job.setMapping(mapping, for: image.id)
-            }
-        } else if let oldConcept, oldConcept.targetConcept != concept.targetConcept {
+        if let oldConcept, oldConcept.targetConcept != concept.targetConcept {
             for image in project.allMedia {
                 guard var mapping = project.job.mapping(for: image.id) else { continue }
+                let changedAssignment = mapping[concept.trigger] != nil && concept.targetConcept.requiresLocator
                 mapping[concept.trigger] = nil
-                try project.job.setMapping(mapping.isEmpty ? nil : mapping, for: image.id)
+                try project.job.setMapping(changedAssignment || mapping.isEmpty ? nil : mapping, for: image.id)
             }
+        } else if oldConcept == nil, concept.targetConcept.requiresLocator {
+            for image in project.allMedia {
+                try project.job.setMapping(nil, for: image.id)
+            }
+        }
+        for image in project.images {
+            try project.job.setMapping(
+                project.job.mappingIncludingWholeTargets(project.job.mapping(for: image.id)), for: image.id
+            )
         }
         project.job = try Job(json: project.job.jsonValue)
         try project.save()
         self.project = project
         if oldConcept != concept { mappingProposals = [:] }
-        message = project.job.wholeImageStyleMapping == nil
+        message = project.job.requiresLocatorMapping
             ? "Concept saved. Review its assignments on Mapping before captioning."
-            : "Style saved and assigned to every included image or clip."
+            : "Concept saved and assigned to every included image or clip."
         if oldConcept != nil, oldConcept != concept, project.images.contains(where: { !$0.caption.isEmpty }) {
             message += " Existing captions retain their text; review or re-caption them for the changed concept."
         }
     }
 
+    func confirmConcepts() {
+        guard !busy, !editing, let project else { return }
+        do {
+            try project.save()
+            message = project.job.requiresLocatorMapping
+                ? "Concepts saved. Confirm their locations in the training samples."
+                : "Concepts saved. Whole-target assignments are ready for captioning."
+            next()
+        } catch { errorMessage = Self.describe(error) }
+    }
+
     func confirmMapping(id: String, mapping: Job.Mapping) {
         do {
-            try project?.job.setMapping(mapping, for: id)
+            guard let job = project?.job else { return }
+            try project?.job.setMapping(job.mappingIncludingWholeTargets(mapping), for: id)
             try project?.save()
             mappingProposals[id] = nil
             message = "Mapping confirmed and saved."
@@ -231,19 +263,20 @@ extension StudioSession {
     func proposeMappings(useModel: Bool) {
         perform(useModel ? "Requesting concept assignments…" : "Comparing reference faces on this Mac…") {
             guard let project = self.project else { return }
-            if let mapping = project.job.wholeImageStyleMapping {
+            if !project.job.requiresLocatorMapping {
                 for image in project.images {
-                    self.confirmMapping(id: image.id, mapping: mapping)
+                    self.confirmMapping(id: image.id, mapping: project.job.wholeTargetMapping)
                 }
-                self.message = "The style is assigned to every included image and clip."
+                self.message = "Whole-target concepts are assigned to every included image and clip."
                 return
             }
-            let references = self.references
-            let personConcepts = project.job.concepts.filter(\.targetConcept.isPersonIdentity)
+            let locatorConcepts = project.job.concepts.filter(\.targetConcept.requiresLocator)
+            let references = self.references.filter { key, _ in locatorConcepts.contains { $0.trigger == key } }
+            let personConcepts = locatorConcepts.filter(\.targetConcept.isPersonIdentity)
             if !useModel {
-                guard personConcepts.count == project.job.concepts.count else {
+                guard personConcepts.count == locatorConcepts.count else {
                     throw StudioError.message("On-device face comparison supports person concepts. "
-                        + "Use the selected model or enter a location for objects, characters and motion.")
+                        + "Use the selected model or enter a location for objects, characters and custom concepts.")
                 }
                 guard personConcepts.allSatisfy({ references[$0.trigger] != nil }) else {
                     throw StudioError.message("Choose a reference photo for each person in Concepts first.")
@@ -260,7 +293,7 @@ extension StudioSession {
                 for image in project.images {
                     try Task.checkCancellation()
                     self.mappingProposals[image.id] = try await assistant.proposeMapping(
-                        image: image.url, references: references, concepts: project.job.concepts
+                        image: image.url, references: references, concepts: locatorConcepts
                     )
                     self.completed += 1
                 }
@@ -272,7 +305,7 @@ extension StudioSession {
     func caption(only: Set<String>? = nil, overwrite: Bool = false) {
         let pending = only ?? Set(project?.images.map(\.id) ?? [])
         let started = perform("Writing captions…") {
-            defer { self.runPendingIDs = [] }
+            defer { self.runPendingIDs = []; self.partialCaptions = [:] }
             guard var project = self.project else { return }
             try project.update(job: self.jobForCaptioning())
             self.project = project
@@ -296,18 +329,26 @@ extension StudioSession {
             )
             let source = try LocalFolderSource(directory: project.imagesDirectory)
             let sink = try SidecarSink(directory: project.imagesDirectory)
-            _ = try await runner.run(source: source, sink: sink, only: only) { outcome in
-                await self.receive(outcome)
-            }
+            _ = try await runner.run(
+                source: source, sink: sink, only: only,
+                onPartialCaption: { id, text in await self.receivePartialCaption(id: id, text: text) },
+                onOutcome: { outcome in await self.receive(outcome) }
+            )
             self.message = "Captioning finished. Review each caption against its image or clip."
         }
         // Set before the run starts, so an edit made right after starting already waits for its photo.
-        if started { runPendingIDs = pending }
+        if started { runPendingIDs = pending; partialCaptions = [:] }
+    }
+
+    func receivePartialCaption(id: String, text: String) {
+        guard runPendingIDs.contains(id) else { return }
+        if text.isEmpty { partialCaptions.removeValue(forKey: id) } else { partialCaptions[id] = text }
     }
 
     func receive(_ outcome: Outcome) {
         gpu.noteActivity()
         runPendingIDs.remove(outcome.sampleID)
+        partialCaptions.removeValue(forKey: outcome.sampleID)
         project?.apply(outcome)
         completed += 1
         message = "\(completed) samples processed · \(outcome.sampleID): \(outcome.status.rawValue)"
@@ -318,7 +359,7 @@ extension StudioSession {
     func saveCaption(id: String, text: String, final: Bool) {
         guard !runPendingIDs.contains(id) else {
             errorMessage = "\(id) is still being captioned by the current run. Your edit is kept as a draft; "
-                + "save it after this photo's new caption arrives, or cancel the run."
+                + "save it after its new caption arrives, or cancel the run."
             return
         }
         perform("Saving caption…", gate: .edit) {
@@ -356,48 +397,6 @@ extension StudioSession {
         }
     }
 
-    func publish() {
-        perform("Preparing your Hub dataset…") {
-            guard let project = self.project, !project.images.isEmpty else {
-                throw StudioError.message("Import photos before publishing your dataset.")
-            }
-            try project.save()
-            if self.demoMode {
-                let operations = try await ProjectPublisher.operations(for: project)
-                for index in operations.indices {
-                    try await Task.sleep(for: .milliseconds(50))
-                    self.completed = index + 1
-                }
-                self.message = "Demo dataset prepared: photos, captions, response records and job file. "
-                    + "No upload or money spent."
-            } else {
-                let client = try HubClient(token: self.keyStore.read("huggingface"))
-                guard client.token?.isEmpty == false else {
-                    throw StudioError.message("Save your Hugging Face write token in Settings before publishing.")
-                }
-                let repo = try RepoID(self.repoID)
-                try await client.createRepo(repo, private: self.privateDataset)
-                let remotePaths = try await Set(client.listFiles(repo: repo).map(\.path))
-                let previousRows = try await remotePaths.contains(ImageFolderMetadata.fileName)
-                    ? ImageFolderMetadata.parse(client.download(repo: repo, path: ImageFolderMetadata.fileName)) : []
-                let operations = try await ProjectPublisher.operations(
-                    for: project, previousRows: previousRows, remotePaths: remotePaths
-                )
-                let commit = try await client.commit(
-                    repo: repo,
-                    operations: operations,
-                    message: "Publish ConceptStudio project"
-                ) { progress in
-                    Task { @MainActor in self.message = "\(progress.phase.rawValue): \(progress.path ?? "dataset")" }
-                }
-                self.message = "Dataset published. " + commit.commitURL
-                self.gpu.datasetRevision = commit.commitOID
-                self.updateProjectState { $0.datasetRevision = commit.commitOID }
-            }
-            self.rememberChoices()
-        }
-    }
-
     /// App-wide defaults for the next project: model choices and the pod setup. The dataset and
     /// training destinations are per project (`projectState`), never app-wide.
     func rememberChoices() {
@@ -417,37 +416,72 @@ extension StudioSession {
     }
 }
 
-/// A photo handed over by PhotosPicker, with the file name Photos suggests when it shares a file.
-struct PickedPhoto: Transferable {
-    let data: Data
+/// PhotosPicker's temporary video is copied while its transfer is valid; its owner removes
+/// that copy after import or cancellation. Still images keep their existing normalization path.
+final class PickedPhoto: Transferable, Sendable {
+    enum Content {
+        case image(Data)
+        case video(URL)
+    }
+
+    let content: Content
     let suggestedName: String?
+
+    private init(content: Content, suggestedName: String?) {
+        self.content = content
+        self.suggestedName = suggestedName
+    }
+
+    deinit {
+        if case let .video(file) = content {
+            try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
+        }
+    }
+
+    static func copyVideo(from source: URL) throws -> PickedPhoto {
+        guard Sources.isVideo(Sources.suffix(of: source.lastPathComponent)) else {
+            throw StudioError.message("This clip format is not supported. Export an MP4 or MOV file from Photos.")
+        }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ConceptStudio-Photos-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        do {
+            let target = directory.appendingPathComponent(source.lastPathComponent)
+            try FileManager.default.copyItem(at: source, to: target)
+            return PickedPhoto(content: .video(target), suggestedName: source.lastPathComponent)
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            throw error
+        }
+    }
 
     static var transferRepresentation: some TransferRepresentation {
         FileRepresentation(importedContentType: .movie) { received in
-            try PickedPhoto(data: Data(contentsOf: received.file), suggestedName: received.file.lastPathComponent)
+            try PickedPhoto.copyVideo(from: received.file)
         }
         FileRepresentation(importedContentType: .image) { received in
-            try PickedPhoto(data: Data(contentsOf: received.file), suggestedName: received.file.lastPathComponent)
+            try PickedPhoto(
+                content: .image(Data(contentsOf: received.file)), suggestedName: received.file.lastPathComponent
+            )
         }
         DataRepresentation(importedContentType: .image) { data in
-            PickedPhoto(data: data, suggestedName: nil)
+            PickedPhoto(content: .image(data), suggestedName: nil)
         }
     }
 }
 
-/// Readable, stable names for photos imported from Apple Photos: the name Photos suggests (or the
-/// capture date) plus a short content hash, so importing the same photo again yields the same name.
+/// Readable, stable names for media imported from Apple Photos: the suggested name (or image
+/// capture date) plus a short content hash, so importing the same sample yields the same name.
 enum PhotoImportName {
-    static func make(suggested: String?, captured: Date?, data: Data, suffix: String) -> String {
-        let hash = String(VisionInspector.contentHash(data).prefix(8))
+    static func make(suggested: String?, captured: Date?, hash: String, suffix: String) -> String {
         let stem: String = if let readable = suggested.flatMap(readableStem) {
             readable
         } else if let captured {
             "photo-" + dateStem(captured)
         } else {
-            "photo"
+            Sources.isVideo("." + suffix) ? "clip" : "photo"
         }
-        return "\(stem)-\(hash).\(suffix)"
+        return "\(stem)-\(hash.prefix(8)).\(suffix)"
     }
 
     /// The photo's bytes in a format the captioning pipeline reads, with the matching suffix.

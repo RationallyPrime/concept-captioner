@@ -119,15 +119,25 @@ struct WelcomeView: View {
         StudioSection(title: "Recent projects") {
             VStack(spacing: 0) {
                 ForEach(session.recentPaths, id: \.self) { path in
-                    Button { session.openRecent(path) } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "folder").foregroundStyle(StudioStyle.accent)
-                            Text(URL(fileURLWithPath: path).lastPathComponent).fontWeight(.medium)
-                            Spacer()
-                            Image(systemName: "chevron.right").font(.caption)
-                                .foregroundStyle(StudioStyle.supportingText)
-                        }.padding(.vertical, 10).contentShape(Rectangle())
-                    }.buttonStyle(.plain).help(path).disabled(session.busy)
+                    HStack(spacing: 12) {
+                        Button { session.openRecent(path) } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "folder").foregroundStyle(StudioStyle.accent)
+                                Text(URL(fileURLWithPath: path).lastPathComponent).fontWeight(.medium)
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.caption)
+                                    .foregroundStyle(StudioStyle.supportingText)
+                            }.padding(.vertical, 10).contentShape(Rectangle())
+                        }.buttonStyle(.plain).help(path).disabled(session.busy)
+                        Button("Remove from recent projects", systemImage: "xmark") {
+                            session.forgetRecent(path)
+                        }
+                        .labelStyle(.iconOnly)
+                        .help("Remove from recent projects")
+                        .accessibilityLabel(
+                            "Remove \(URL(fileURLWithPath: path).lastPathComponent) from recent projects"
+                        )
+                    }
                 }
             }
         }

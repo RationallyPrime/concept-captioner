@@ -131,7 +131,7 @@ struct ChatGPTCaptioningControls: View {
                             + "Your thinking-effort choices are kept.")
                             .font(.callout).foregroundStyle(StudioStyle.supportingText)
                     }
-                    Text("Applies to every OpenAI request, including caption checks, comparisons and photo advice. "
+                    Text("Applies to every OpenAI request, including caption checks, comparisons and dataset advice. "
                         + "ChatGPT’s preview does not accept an output-token cap. Manage your usage limit in ChatGPT.")
                         .font(.callout).foregroundStyle(StudioStyle.supportingText)
                         .fixedSize(horizontal: false, vertical: true)

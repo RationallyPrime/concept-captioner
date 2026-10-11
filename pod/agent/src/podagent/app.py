@@ -64,15 +64,16 @@ from .events import RUN_ID_RE, summarize_run
 from .gpus import FakeBackend, GpuBackend, InventoryUnavailable, NvidiaSmiBackend
 from .plan import PlanRequest, PlanResponse, plan
 from .settings import Settings, load_settings
+from .storage import storage_usage
 from .supervisor import Supervisor
+from .uploads import MAX_UPLOAD_BYTES, UploadWriter
 
 # pydantic's error type for a request body that does not parse as JSON (POD-SPEC §2.2: 400).
 JSON_INVALID = "json_invalid"
 # Envelope codes for what the router answers on its own (an unmatched path is 404, a wrong
 # method 405); a status the §2.2 table does not name maps by its class.
 _ROUTER_CODES = {400: "bad_request", 401: "unauthorized", 404: "not_found", 422: "validation"}
-# The largest body any route accepts. A trainer start carries a RunConfig (§4.1) with an
-# ``extra`` tree: kilobytes. Anything beyond this is not a client of ours.
+# Ordinary control bodies are small JSON. Binary PUT uploads have a separate streaming cap.
 MAX_BODY_BYTES = 1 << 20
 # Ceiling of ``timeout_s`` on a stop. The RunPod proxy cuts every request at 100 s (§1), so a
 # longer SIGTERM wait would finish unobserved: the client gets a 524, the agent carries on.
@@ -145,7 +146,10 @@ class EdgeGuard:
             await self.app(scope, receive, send)
             return
         error = self.reject(
-            Headers(scope=scope), path=scope["path"], cookies=Request(scope).cookies
+            Headers(scope=scope),
+            path=scope["path"],
+            method=scope["method"],
+            cookies=Request(scope).cookies,
         )
         if error is not None:
             await _envelope(error)(scope, receive, send)
@@ -153,20 +157,28 @@ class EdgeGuard:
         await self.app(scope, self._counted(scope, receive), send)
 
     def reject(
-        self, headers: Headers, *, path: str = "", cookies: dict[str, str] | None = None
+        self,
+        headers: Headers,
+        *,
+        path: str = "",
+        method: str = "GET",
+        cookies: dict[str, str] | None = None,
     ) -> AgentError | None:
         """The error this request earns from its headers, or ``None`` to let it through."""
         try:
             self.auth.check(path, headers.get("authorization"), cookies or {})
         except Unauthorized as error:
             return error
+        maximum = self._limit(path, method)
         if "chunked" in headers.get("transfer-encoding", "").lower():
             return PayloadTooLarge(
                 "chunked request bodies are not accepted; send a Content-Length",
-                detail={"max_bytes": self.max_body_bytes},
+                detail={"max_bytes": maximum},
             )
         declared = headers.get("content-length")
         if declared is None:
+            if maximum == MAX_UPLOAD_BYTES:
+                return PayloadTooLarge("Uploads require an accurate Content-Length")
             return None
         try:
             length = int(declared)
@@ -174,25 +186,34 @@ class EdgeGuard:
             length = -1
         if length < 0:
             return BadRequest("invalid Content-Length header")
-        if length > self.max_body_bytes:
+        if length > maximum:
             return PayloadTooLarge(
-                f"request body of {length} bytes exceeds the {self.max_body_bytes}-byte limit",
-                detail={"content_length": length, "max_bytes": self.max_body_bytes},
+                f"request body of {length} bytes exceeds the {maximum}-byte limit",
+                detail={"content_length": length, "max_bytes": maximum},
             )
         return None
 
+    def _limit(self, path: str, method: str) -> int:
+        parts = path.split("/")
+        return (
+            MAX_UPLOAD_BYTES
+            if method == "PUT" and len(parts) == 4 and parts[1] == "uploads"
+            else self.max_body_bytes
+        )
+
     def _counted(self, scope: Scope, receive: Receive) -> Receive:
         received = 0
+        maximum = self._limit(scope["path"], scope["method"])
 
         async def counted() -> Message:
             nonlocal received
             message = await receive()
             if message["type"] == "http.request":
                 received += len(message.get("body", b""))
-                if received > self.max_body_bytes:
+                if received > maximum:
                     error = PayloadTooLarge(
-                        f"request body exceeds the {self.max_body_bytes}-byte limit",
-                        detail={"max_bytes": self.max_body_bytes},
+                        f"request body exceeds the {maximum}-byte limit",
+                        detail={"max_bytes": maximum},
                     )
                     scope[_OVERFLOW_KEY] = error
                     raise error
@@ -264,6 +285,7 @@ def create_app(settings: Settings | None = None, backend: GpuBackend | None = No
     app.state.settings = settings
     app.state.backend = backend
     app.state.supervisor = Supervisor(settings, backend)
+    uploads = UploadWriter(settings.paths)
     auth = app.state.auth = Authenticator(settings.token)
     install_handlers(app)
     _install_edge_handlers(app, auth)
@@ -276,6 +298,15 @@ def create_app(settings: Settings | None = None, backend: GpuBackend | None = No
         # RunPod terminates TLS before the agent, so a real pod is always https to the browser;
         # only fake mode over plain http may drop the Secure flag.
         return settings.fake_gpus is None or request.url.scheme == "https"
+
+    @app.put("/uploads/{name}/{file_name}")
+    async def upload(request: Request, name: str, file_name: str) -> dict[str, str | int]:
+        try:
+            return await uploads.write(request, name, file_name)
+        except OSError as error:
+            raise AgentError(
+                "Could not write the local upload. Check storage usage and retry."
+            ) from error
 
     @app.post(TENSORBOARD_SESSION_PATH)
     def tensorboard_session(request: Request, response: Response) -> dict[str, Any]:
@@ -361,6 +392,11 @@ def create_app(settings: Settings | None = None, backend: GpuBackend | None = No
             },
             "time": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
+
+    @app.get("/storage")
+    def storage() -> dict[str, int]:
+        supervisor().states()  # persist newly observed terminal state before planning retention
+        return storage_usage(settings.paths)
 
     @app.get("/gpus")
     def gpus() -> dict[str, Any]:

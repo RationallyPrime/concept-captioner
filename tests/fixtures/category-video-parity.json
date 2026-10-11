@@ -1,0 +1,402 @@
+{
+  "user_turn": "Inspect this exact training target and return the configured JSON object.",
+  "critic_user_turn": "Review this proposed caption against the attached training target:\n\nsample caption",
+  "cases": [
+    {
+      "category": "facial_identity",
+      "video": false,
+      "concept": {
+        "trigger": "NORA7",
+        "class_noun": "person",
+        "target_concept": "facial_identity",
+        "traits_to_learn": [
+          "distinctive facial identity"
+        ],
+        "attributes_to_describe": [
+          "clothing and removable accessories",
+          "hair presentation",
+          "expression and gaze",
+          "pose",
+          "setting",
+          "lighting",
+          "framing and visible image treatment"
+        ],
+        "explicit_boundary_decisions": {}
+      },
+      "captioner": {
+        "sha256": "b8688c7dcb285b3610c4f02a931f56dad5d693a6112224f22699f30c99cb0753",
+        "scalars": 18944
+      },
+      "critic": {
+        "sha256": "065187cd5acae6944905bae3e988e623ff3c5c0027742e72258b31e64015bde5",
+        "scalars": 18677
+      }
+    },
+    {
+      "category": "facial_identity",
+      "video": true,
+      "concept": {
+        "trigger": "NORA7",
+        "class_noun": "person",
+        "target_concept": "facial_identity",
+        "traits_to_learn": [
+          "distinctive facial identity"
+        ],
+        "attributes_to_describe": [
+          "clothing and removable accessories",
+          "hair presentation",
+          "expression and gaze",
+          "pose",
+          "setting",
+          "lighting",
+          "framing and visible image treatment"
+        ],
+        "explicit_boundary_decisions": {}
+      },
+      "captioner": {
+        "sha256": "b564b1052618254013c6cafde2f0ff8eceb905e4b9dd5cc6865333e1a7d76e43",
+        "scalars": 18941
+      },
+      "critic": {
+        "sha256": "4268abf4d86fdb35e6310281917e29ca39c16d73ee9290792d5a593b54c190de",
+        "scalars": 18674
+      }
+    },
+    {
+      "category": "full_identity",
+      "video": false,
+      "concept": {
+        "trigger": "NORA7",
+        "class_noun": "person",
+        "target_concept": "full_identity",
+        "traits_to_learn": [
+          "the person's enduring face and physique"
+        ],
+        "attributes_to_describe": [
+          "expression and gaze",
+          "pose and action",
+          "permitted clothing changes",
+          "setting",
+          "lighting",
+          "framing"
+        ],
+        "explicit_boundary_decisions": {}
+      },
+      "captioner": {
+        "sha256": "0b93305f77f15550ab5a57104dcb97aadf583cdbc213fcb01a36de988d4a4229",
+        "scalars": 18908
+      },
+      "critic": {
+        "sha256": "d62ebfa05c128f3b6d47a4042cfe255a80db9a5530f45217949862a76ac66ebf",
+        "scalars": 18641
+      }
+    },
+    {
+      "category": "full_identity",
+      "video": true,
+      "concept": {
+        "trigger": "NORA7",
+        "class_noun": "person",
+        "target_concept": "full_identity",
+        "traits_to_learn": [
+          "the person's enduring face and physique"
+        ],
+        "attributes_to_describe": [
+          "expression and gaze",
+          "pose and action",
+          "permitted clothing changes",
+          "setting",
+          "lighting",
+          "framing"
+        ],
+        "explicit_boundary_decisions": {}
+      },
+      "captioner": {
+        "sha256": "241dd5ba436973bbec295057da9009902efa47ef605177130fcb2f54c6cce428",
+        "scalars": 18905
+      },
+      "critic": {
+        "sha256": "db2da466ff81a9cf7af1c4a391804a379ef196a2bd180a78607e8638e070c11f",
+        "scalars": 18638
+      }
+    },
+    {
+      "category": "style",
+      "video": false,
+      "concept": {
+        "trigger": "NORA7",
+        "class_noun": "style",
+        "target_concept": "style",
+        "traits_to_learn": [
+          "the visual style, including its rendering, texture and palette"
+        ],
+        "attributes_to_describe": [
+          "subject matter",
+          "objects",
+          "actions",
+          "spatial arrangement",
+          "visible scene content"
+        ],
+        "explicit_boundary_decisions": {}
+      },
+      "captioner": {
+        "sha256": "9daa0840679fb306695279ce5318987af94edd611ff5c4709dddbaab73589475",
+        "scalars": 18904
+      },
+      "critic": {
+        "sha256": "2e957dd551b9ec275e79b65231f9e6a2e36ae4f96a9c6803b14c286a4ef9cb54",
+        "scalars": 18637
+      }
+    },
+    {
+      "category": "style",
+      "video": true,
+      "concept": {
+        "trigger": "NORA7",
+        "class_noun": "style",
+        "target_concept": "style",
+        "traits_to_learn": [
+          "the visual style, including its rendering, texture and palette"
+        ],
+        "attributes_to_describe": [
+          "subject matter",
+          "objects",
+          "actions",
+          "spatial arrangement",
+          "visible scene content"
+        ],
+        "explicit_boundary_decisions": {}
+      },
+      "captioner": {
+        "sha256": "33c3a2bb8b4c92d40b06374e814a1bc4d6bafc24c010a320266200b285fbc350",
+        "scalars": 18901
+      },
+      "critic": {
+        "sha256": "975526ab742dc5a5d9d5e9c56c2684ce1397be15ff861758734fd4dc93c30de6",
+        "scalars": 18634
+      }
+    },
+    {
+      "category": "object",
+      "video": false,
+      "concept": {
+        "trigger": "NORA7",
+        "class_noun": "object",
+        "target_concept": "object",
+        "traits_to_learn": [
+          "the object's distinctive design"
+        ],
+        "attributes_to_describe": [
+          "placement",
+          "orientation",
+          "use",
+          "surroundings",
+          "lighting",
+          "occlusion"
+        ],
+        "explicit_boundary_decisions": {}
+      },
+      "captioner": {
+        "sha256": "764682f2183631ce1a1f7e70b0fe16bf238dcd640ecc1b35f5084ef6d24bcdcc",
+        "scalars": 18863
+      },
+      "critic": {
+        "sha256": "9676c3de809fe4c371502afe58d1eb5cfd83bba4f78d2a493e10946e7a4ce0c8",
+        "scalars": 18596
+      }
+    },
+    {
+      "category": "object",
+      "video": true,
+      "concept": {
+        "trigger": "NORA7",
+        "class_noun": "object",
+        "target_concept": "object",
+        "traits_to_learn": [
+          "the object's distinctive design"
+        ],
+        "attributes_to_describe": [
+          "placement",
+          "orientation",
+          "use",
+          "surroundings",
+          "lighting",
+          "occlusion"
+        ],
+        "explicit_boundary_decisions": {}
+      },
+      "captioner": {
+        "sha256": "84c321a7d35b5ad5aebdc254d9b87c308f690749c43bca27cbb2ff32285b9e8b",
+        "scalars": 18860
+      },
+      "critic": {
+        "sha256": "7dafeca38a70f70c0617b08779d084ac83f4963fe283a53dfdaf7f9f47e50903",
+        "scalars": 18593
+      }
+    },
+    {
+      "category": "motion",
+      "video": false,
+      "concept": {
+        "trigger": "NORA7",
+        "class_noun": "motion",
+        "target_concept": "motion",
+        "traits_to_learn": [
+          "the defining movement pattern"
+        ],
+        "attributes_to_describe": [
+          "performer",
+          "clothing",
+          "scene",
+          "framing",
+          "lighting",
+          "independent start and end state"
+        ],
+        "explicit_boundary_decisions": {}
+      },
+      "captioner": {
+        "sha256": "020f3c5ed30fe1d58f727f6a63cbf87ea7cff23ababac014a2b92d351b4524ba",
+        "scalars": 18877
+      },
+      "critic": {
+        "sha256": "e9019ec13aede509ac7d44e8958cd813466b373bca02c492d500e481ca00541c",
+        "scalars": 18610
+      }
+    },
+    {
+      "category": "motion",
+      "video": true,
+      "concept": {
+        "trigger": "NORA7",
+        "class_noun": "motion",
+        "target_concept": "motion",
+        "traits_to_learn": [
+          "the defining movement pattern"
+        ],
+        "attributes_to_describe": [
+          "performer",
+          "clothing",
+          "scene",
+          "framing",
+          "lighting",
+          "independent start and end state"
+        ],
+        "explicit_boundary_decisions": {}
+      },
+      "captioner": {
+        "sha256": "67acfc00d84c23a51573984d52b6ad20f021e3b6de6ea5f3e5a526c2b8f0b6d1",
+        "scalars": 18874
+      },
+      "critic": {
+        "sha256": "744240ea8898af78d712c46d9afae1288191035e789f6ed29e8e32ab653dbb47",
+        "scalars": 18607
+      }
+    },
+    {
+      "category": "character_design",
+      "video": false,
+      "concept": {
+        "trigger": "NORA7",
+        "class_noun": "character",
+        "target_concept": "character_design",
+        "traits_to_learn": [
+          "the character's distinctive appearance and design"
+        ],
+        "attributes_to_describe": [
+          "expression and gaze",
+          "pose and action",
+          "permitted clothing changes",
+          "setting",
+          "lighting",
+          "framing"
+        ],
+        "explicit_boundary_decisions": {}
+      },
+      "captioner": {
+        "sha256": "ccf92b6981beae39b436f966458fec0e7d4870643738e39015db7f0e4db69aef",
+        "scalars": 18924
+      },
+      "critic": {
+        "sha256": "1a52be40563151af932cf860ee8134d1c75aa04c304a5dcc08a07e2c5b4e470f",
+        "scalars": 18657
+      }
+    },
+    {
+      "category": "character_design",
+      "video": true,
+      "concept": {
+        "trigger": "NORA7",
+        "class_noun": "character",
+        "target_concept": "character_design",
+        "traits_to_learn": [
+          "the character's distinctive appearance and design"
+        ],
+        "attributes_to_describe": [
+          "expression and gaze",
+          "pose and action",
+          "permitted clothing changes",
+          "setting",
+          "lighting",
+          "framing"
+        ],
+        "explicit_boundary_decisions": {}
+      },
+      "captioner": {
+        "sha256": "24b28245f8cec4873e062f8646c9a8d69135896acc82641143881addc1ff2978",
+        "scalars": 18921
+      },
+      "critic": {
+        "sha256": "6ad054518adcc61207bc5f4442fe96a14c2fcb42a87f56f54a26761c29858175",
+        "scalars": 18654
+      }
+    },
+    {
+      "category": "custom",
+      "video": false,
+      "concept": {
+        "trigger": "NORA7",
+        "class_noun": "concept",
+        "target_concept": "custom",
+        "traits_to_learn": [
+          "the concept described by the user"
+        ],
+        "attributes_to_describe": [
+          "observable details outside the stated concept"
+        ],
+        "explicit_boundary_decisions": {}
+      },
+      "captioner": {
+        "sha256": "63149d1059e82dff3761c48491fb4b31ef58402ae9a412469f68870933ab493c",
+        "scalars": 18839
+      },
+      "critic": {
+        "sha256": "714b81af2df44bd06fb96af53aea9e803ac99fbaa6e1cb29c5c645a26a2adc9a",
+        "scalars": 18572
+      }
+    },
+    {
+      "category": "custom",
+      "video": true,
+      "concept": {
+        "trigger": "NORA7",
+        "class_noun": "concept",
+        "target_concept": "custom",
+        "traits_to_learn": [
+          "the concept described by the user"
+        ],
+        "attributes_to_describe": [
+          "observable details outside the stated concept"
+        ],
+        "explicit_boundary_decisions": {}
+      },
+      "captioner": {
+        "sha256": "317fbafd1d4130ecd0edd6076d3a434c8393dd254f33050c5175f1529e12f1ec",
+        "scalars": 18836
+      },
+      "critic": {
+        "sha256": "c9fe9a41dfdac629058ba8682c58cc0afa56604bf415ee457ced4086703551ed",
+        "scalars": 18569
+      }
+    }
+  ]
+}

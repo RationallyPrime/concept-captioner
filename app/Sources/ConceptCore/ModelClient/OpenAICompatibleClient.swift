@@ -21,6 +21,7 @@ public struct OpenAICompatibleClient: ModelClient {
     public let requestedModel: String
     public let transport: any HTTPTransport
     public let extraHeaders: [String: String]
+    public let acceptsVideo: Bool
     public let reasoningDialect: ReasoningDialect
 
     public init(
@@ -29,7 +30,8 @@ public struct OpenAICompatibleClient: ModelClient {
         model: String,
         transport: any HTTPTransport = URLSessionTransport(),
         extraHeaders: [String: String] = [:],
-        reasoningDialect: ReasoningDialect = .reasoningEffort
+        reasoningDialect: ReasoningDialect = .reasoningEffort,
+        acceptsVideo: Bool = false
     ) {
         self.baseURL = baseURL
         self.apiKey = apiKey
@@ -37,13 +39,15 @@ public struct OpenAICompatibleClient: ModelClient {
         self.transport = transport
         self.extraHeaders = extraHeaders
         self.reasoningDialect = reasoningDialect
+        self.acceptsVideo = acceptsVideo
     }
 
     public func request(
         instructions: String,
         messages: [ChatMessage],
         output: OutputRequest,
-        settings: RequestSettings
+        settings: RequestSettings,
+        onPartialText: (@Sendable (String) async -> Void)? = nil
     ) async throws -> ModelReply {
         var headers = extraHeaders
         if let apiKey {
@@ -75,7 +79,7 @@ public struct OpenAICompatibleClient: ModelClient {
         var chat: [JSONValue] = [
             .object(["role": .string("system"), "content": .string(output.instructions(instructions))]),
         ]
-        try chat.append(contentsOf: messages.map(Self.encode))
+        try chat.append(contentsOf: messages.map(encode))
         var body: JSONObject = ["model": .string(requestedModel), "messages": .array(chat)]
         switch output.mode {
         case .native:
@@ -125,6 +129,7 @@ public struct OpenAICompatibleClient: ModelClient {
             body["parallel_tool_calls"] = .bool(parallel)
         }
         settings.mergeExtraBody(into: &body)
+        try MediaInput.checkVideoRequest(body, messages: messages)
         return body
     }
 
@@ -141,7 +146,7 @@ public struct OpenAICompatibleClient: ModelClient {
         return ["reasoning": .object(["effort": .string(effort), "enabled": .bool(true)])]
     }
 
-    private static func encode(_ message: ChatMessage) throws -> JSONValue {
+    private func encode(_ message: ChatMessage) throws -> JSONValue {
         switch message.role {
         case .assistant:
             .object(["role": .string("assistant"), "content": .string(message.text)])
@@ -150,14 +155,18 @@ public struct OpenAICompatibleClient: ModelClient {
         }
     }
 
-    private static func part(_ content: UserContent) throws -> JSONValue {
+    private func part(_ content: UserContent) throws -> JSONValue {
         switch content {
-        case .video:
-            throw MediaInput.unsupportedVideo()
+        case let .video(data, mediaType):
+            guard acceptsVideo else { throw MediaInput.unsupportedVideo() }
+            return .object([
+                "type": .string("video_url"),
+                "video_url": .object(["url": .string("data:\(mediaType);base64,\(data.base64EncodedString())")]),
+            ])
         case let .text(text):
-            .object(["type": .string("text"), "text": .string(text)])
+            return .object(["type": .string("text"), "text": .string(text)])
         case let .image(data, mediaType):
-            .object([
+            return .object([
                 "type": .string("image_url"),
                 "image_url": .object(["url": .string("data:\(mediaType);base64,\(data.base64EncodedString())")]),
             ])

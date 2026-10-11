@@ -54,7 +54,8 @@ struct DemoModelClient: ModelClient {
         instructions: String,
         messages: [ChatMessage],
         output: OutputRequest,
-        settings: RequestSettings
+        settings: RequestSettings,
+        onPartialText: (@Sendable (String) async -> Void)? = nil
     ) async throws -> ModelReply {
         try await Task.sleep(for: .milliseconds(180))
         try Task.checkCancellation()

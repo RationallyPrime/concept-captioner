@@ -58,9 +58,9 @@ class Skill:
         root = self.directory / "references" / "profiles"
         return sorted(p.stem for p in root.glob("*.md")) if root.is_dir() else []
 
-    def profile(self, name_or_path: str) -> str:
+    def profile(self, name_or_path: str, *, relative_to: Path | None = None) -> str:
         """``h3-still`` -> ``references/profiles/h3-still.md``; or any ``.md`` path."""
-        candidate = Path(name_or_path)
+        candidate = resolve_path(name_or_path, relative_to=relative_to)
         if candidate.suffix == ".md" and candidate.is_file():
             return candidate.read_text(encoding="utf-8")
         path = self.directory / "references" / "profiles" / f"{name_or_path}.md"
@@ -87,8 +87,15 @@ def _frontmatter(text: str) -> tuple[dict[str, Any], str]:
     return meta, text[match.end() :]
 
 
-def load(path: str | Path | None = None) -> Skill:
-    directory = Path(path).expanduser() if path is not None else default_skill_dir()
+def resolve_path(path: str | Path, *, relative_to: Path | None = None) -> Path:
+    candidate = Path(path).expanduser()
+    return relative_to / candidate if relative_to and not candidate.is_absolute() else candidate
+
+
+def load(path: str | Path | None = None, *, relative_to: Path | None = None) -> Skill:
+    directory = (
+        resolve_path(path, relative_to=relative_to) if path is not None else default_skill_dir()
+    )
     skill_md = directory / "SKILL.md"
     if not skill_md.is_file():
         raise ConfigurationError(f"not a skill directory (no SKILL.md): {directory}")

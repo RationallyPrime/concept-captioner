@@ -19,9 +19,24 @@ public enum MediaInput {
         return .image(data: image.data, mediaType: image.mediaType)
     }
 
+    /// Conservative client limit on the entire encoded video request, including prompts and retries.
+    static let maximumVideoRequestBytes = 20 * 1024 * 1024
+
+    static func checkVideoRequest(_ body: JSONObject, messages: [ChatMessage]) throws {
+        guard messages.flatMap(\.content).contains(where: {
+            if case .video = $0 { return true }; return false
+        }) else { return }
+        guard JSONValue.object(body).pythonDumpsData().count < maximumVideoRequestBytes else {
+            throw ConfigurationError("This video request exceeds the app’s 20 MiB client limit, including "
+                + "the clip, instructions and response schema. Select a shorter segment; no video was sent.")
+        }
+    }
+
     static func unsupportedVideo() -> ConfigurationError {
-        ConfigurationError("This provider route does not accept video clips. Choose a Gemini video-capable model "
-            + "or review and save the clip's caption manually. No still frame was sent as a video.")
+        ConfigurationError(
+            "This provider route does not accept video clips. Choose a video-capable Gemini, OpenRouter or vLLM model "
+                + "or review and save the clip's caption manually. No still frame was sent as a video."
+        )
     }
 }
 
@@ -402,15 +417,31 @@ public protocol ModelClient: Sendable {
     var requestedModel: String { get }
 
     /// One provider round trip over the whole conversation (first message is a user turn).
+    /// Streaming routes report cumulative output text for display through `onPartialText`.
+    /// Only the completed reply is an output for validation or saving; buffered routes emit no partial text.
     func request(
         instructions: String,
         messages: [ChatMessage],
         output: OutputRequest,
-        settings: RequestSettings
+        settings: RequestSettings,
+        onPartialText: (@Sendable (String) async -> Void)?
     ) async throws -> ModelReply
 }
 
 public extension ModelClient {
+    /// Buffered callers use the same request implementation without a display callback.
+    func request(
+        instructions: String, messages: [ChatMessage], output: OutputRequest, settings: RequestSettings
+    ) async throws -> ModelReply {
+        try await request(
+            instructions: instructions,
+            messages: messages,
+            output: output,
+            settings: settings,
+            onPartialText: nil
+        )
+    }
+
     /// Single-turn convenience: wraps `user` in one user message.
     func request(
         instructions: String,

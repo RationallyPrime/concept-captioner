@@ -328,7 +328,10 @@ struct GPUWorkflowTests {
             name: PodNaming.name(project: "nora"), offer: offer, count: 2, image: "own/image:verified",
             minCudaVersion: GPUWorkspace.minimumCUDA(trainer),
             volume: GPUVolume(id: "volume", name: "Data", size: 100, dataCenter: "EU-IS-1"),
-            agentToken: "agent-key", hubToken: "hub-key"
+            env: [
+                "PODAGENT_TOKEN": PodSecrets.reference("conceptstudio_agent_test"),
+                "HF_TOKEN": PodSecrets.reference(PodSecrets.hubTokenName),
+            ]
         ))
         let request = try #require(await transport.requests.first)
         #expect(request.url?.absoluteString == "https://api.runpod.io/v2/pods")
@@ -342,7 +345,10 @@ struct GPUWorkflowTests {
         #expect(body?["ports"]?.arrayValue?.compactMap(\.stringValue) == ["8800/http", "8000/http"])
         #expect(body?["mounts"]?.objectValue?["network"]?.arrayValue?.first?.objectValue?["path"]?.stringValue
             == "/workspace")
-        #expect(body?["env"]?.objectValue?["HF_TOKEN"]?.stringValue == "hub-key")
+        // Credentials reach the pod as secret references, never as values (POD-SPEC §1).
+        #expect(body?["env"]?.objectValue?["HF_TOKEN"]?.stringValue == "{{ RUNPOD_SECRET_conceptstudio_hf_token }}")
+        #expect(body?["env"]?.objectValue?["PODAGENT_TOKEN"]?.stringValue
+            == "{{ RUNPOD_SECRET_conceptstudio_agent_test }}")
         #expect(provider.url(for: pod, port: PodPort.agent).absoluteString == "https://pod1-8800.proxy.runpod.net")
         _ = try? await provider.offers(count: 1, minCudaVersion: GPUWorkspace.minimumCUDA(trainer))
         let query = try #require(await transport.requests.last?.url?.query())

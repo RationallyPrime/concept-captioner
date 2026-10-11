@@ -1,49 +1,88 @@
 # ConceptStudio app status
 
-Updated 2026-10-11 after the overnight implementation, based on all seven hardening lanes and
-follow-up `cd5f746`. Source checks, native offline demo checks and bounded current-image
-FLUX/LTX generation, resume and video training checks have completed. Owner acceptance remains
-separate. See [RUNNING.md](RUNNING.md),
+Updated 2026-10-11 after the review repairs, based on all seven hardening lanes and
+follow-up `cd5f746`, with the review corrections and owner acceptance below. Source checks,
+native offline demo checks and bounded FLUX/LTX generation, resume and video training checks
+have completed. The GPU proofs predate the review repairs: FLUX used r1; LTX used r2.
+Published r2 images do not contain this repair round. See [RUNNING.md](RUNNING.md),
 [CORE-STATUS.md](CORE-STATUS.md) and [POD-STATUS.md](../../pod/docs/POD-STATUS.md).
 
 ## Implemented
 
-- **Onboarding and the entire nine-screen flow:** the owner's full explanation of diffusion
-  training, concepts, training data, captions and concept boundaries; italic glossary terms;
-  hover, click and keyboard definitions. Welcome uses ordinary project/account actions and
-  photographic demo examples. Labels describe operations, inputs and consequences.
+- **Onboarding:** Welcome and Images contain the owner's full explanation of diffusion
+  training, concepts, training data, captions and concept boundaries, with italic glossary
+  terms and hover, click and keyboard definitions. Later journey screens have tooltips at most;
+  the interactive glossary does not yet cover the entire flow. Welcome uses ordinary
+  project/account actions and photographic demo examples. Labels describe operations,
+  inputs and consequences.
 - **One concept by default:** category-specific questions and caption/mapping/reviewer
   instructions for person, object/character, style and motion. Multiple concepts and detailed
-  overrides are under Advanced. A sole style applies to the entire training target without
-  face identification. Human confirmation remains required for subject proposals.
+  overrides are under Advanced. Style and motion apply to the entire training target;
+  Mapping appears only when a concept needs a locator. Human confirmation remains required
+  for person, object, character and custom-concept proposals. Concepts restores its ⌘↩ action.
 - **Dataset curation:** duplicate candidate groups, Include/Exclude and session Undo, crop
   inspection and approval, HEIC/TIFF normalization. Captioning and publication use only
-  included approved targets. Approval invalidates old captions and subject mappings; a sole
-  style is reassigned automatically. Previously published excluded targets are removed from
+  included approved targets. Approval invalidates old captions and subject mappings; style
+  and motion are reassigned automatically. Previously published excluded targets are removed from
   the next dataset commit; unrelated remote files are preserved and excluded from app training.
 - **Real clips:** import from files, folders, Photos or Hub imagefolder; playback, frame
   inspection, exact segment approval and LTX video captions. Approved segments preserve the
   selected frames and timing, with aspect-preserving 32-aligned dimensions. Variable-rate
   selections are refused because pinned LTX preprocessing cannot preserve their timestamps;
   constant-rate portions remain selectable. LTX derives its
-  preprocessing buckets from those targets. Direct Gemini and Pydantic's Google route accept
-  native video; other native transports fail explicitly instead of sending a poster frame.
-- **Saved training runs:** project-local dataset revisions, settings, checkpoints, outputs and
+  preprocessing buckets from those targets. Native Gemini routes accept inline video;
+  OpenRouter and vLLM accept a video content part. Python uses pydantic-ai for Gemini and
+  OpenRouter and explicitly refuses vLLM video until supported by that library. OpenAI and
+  Anthropic refuse clips before sending. Both languages enforce the same encoded-body client
+  limit; model capability remains separate from route capability. Hashing and Photos video
+  transfer use files on disk, and timeline inspection reads compressed timestamps.
+- **Direct dataset upload:** when no Hub token is configured, Publish checks saved inputs and
+  Start training uploads an immutable copy directly through the authenticated agent. It includes
+  only approved included media, saved captions/records, metadata and the job, with 2 GiB/file
+  and 20 GiB/dataset limits. Training waits for atomic installation. Local Resume checks the
+  exact input digest in both app and pod; Repeat allows edited data as a new run. No Hub
+  dataset account is required; gated base-model access is unchanged. This requires updated
+  pod source; the published r2 images predate the upload route.
+- **Saved training runs:** project-local dataset revisions or local input digests, settings, checkpoints, outputs and
   available GPU cost information; reopen history, Load settings for repeat and supported
   checkpoint resume. Missing revision or cost information is shown as unavailable.
 - **Generated results:** actual pod generation services for FLUX.1-dev and LTX-2, checkpoint
   choice, paired base/LoRA generation with matched prompts and seeds, downloaded galleries,
-  and Save trained model to this Mac. Other generation combinations explain their limits.
+  and Save trained model to this Mac. A comparison is successful only when its downloaded
+  manifest says complete and every listed pair is present; partial files remain available
+  with a failure message. Other generation combinations explain their limits.
 - **OpenRouter browser authorization:** documented PKCE consent, temporary loopback callback,
   Keychain key storage, cancellation, direct API calls afterward, key usage and allowance.
   Manual keys remain available. ChatGPT sign-in remains a separate account path.
+- **Caption progress:** ChatGPT's actual deltas reach a per-sample preview while writing.
+  Retries, completion, failure and cancellation clear it; partial text never becomes a saved
+  caption or response record. Other clients do not simulate a stream.
+- **Recent projects:** a missing `job.yaml` has recovery advice distinct from an access failure.
+  Remove from recent projects only removes the saved entry, preserving files on disk.
+- **Workspace storage:** authenticated usage readout and explicit completed-dataset cleanup.
+  Pod starts retain active/current inputs and the last three resumable completed datasets;
+  Resume restores a pruned Hub dataset only from its saved exact revision. Pod-side step
+  validation refuses a total at or below the saved checkpoint step.
+- **Pod credentials as RunPod secrets:** the Hub token and each pod's agent bearer are written
+  to the account's secret store before a computer is rented and reach the pod only as
+  `{{ RUNPOD_SECRET_… }}` references, so a pod listing never shows a token. The agent secret
+  is deleted when the computer is removed; unreferenced ones are pruned at launch.
 - **Shared project and cost controls:** CLI-compatible job/sidecar formats, project-contained
   custom skills, private Hub upload, local retrieval, budget/idle stop, launch reconciliation,
   and explicit handling of pending outputs before a computer is stopped.
 
 ## Exercised in the native window
 
-The 2026-10-11 rebuilt unsigned app was opened and controlled directly:
+**Review-repair check:** the rebuilt window showed recent-entry removal controls. In the
+offline demo, Concepts ⌘↩ opened Mapping for Person, and opened Captioning directly for
+Style and Motion with Mapping absent from the sidebar. The expanded Concepts Advanced
+section and exact **Demo · no charges** badge were visually inspected. A simulated computer
+displayed storage usage; its cleanup action completed with the retention explanation, then
+Stop everything returned it to Exited. No real computer or account was used. Two stale Mapping
+instructions found here were corrected and rebuilt. Missing-job removal, no-Hub preparation
+and streaming-caption edge cases are covered by automated checks, not a new live GUI claim.
+
+**Earlier overnight check:** the 2026-10-11 rebuilt unsigned app was opened and controlled directly:
 
 - Welcome and the full training explanation; an inline definition opens a native popover.
 - Images: three synthetic photographs, Exclude and Undo, crop sheet and Cancel.
@@ -61,15 +100,26 @@ check passed, including preserving custom style details through reopening and un
 
 ## Offline verification
 
+- **Review-repair gate, 2026-10-11:** **450 Swift tests** (190 app in 29 suites, 260 Core in
+  38 suites), **116 Python tests**, **660 agent**, **291 pod scripts** and **125 podctl**
+  tests pass. Strict SwiftLint and SwiftFormat are clean across 145 files (two formatter
+  resource exclusions); Python Ruff/format are clean. The debug app bundle builds.
+  Independent source review accepted all six repair threads and their composed upload flow.
+  The final native-copy corrections were rebuilt and linted after the full test gate.
+- Current direct-upload tests use synthetic local inputs, stubbed native HTTP/agent seams
+  and the real local installer. They prove exact input preservation, quotas, admission and
+  changed-input refusals; they do not establish a live RunPod upload. Streaming-caption proof
+  uses actual URLSession SSE through the runner, with no provider request in this round.
 - Focused tests cover account authorization/cancellation, category-aware prompts, exact media,
   curation/Undo, Hub file selection, output generation requests, run restore/repeat/resume and
   cost/output custody. Independent source review has driven repairs at the integration seams.
 - Actual local video fixtures exercise frame counts, variable timing and visible-edge
   preservation, plus HEIC/TIFF normalization and file/sidecar restoration.
-- 114 offscreen render frames cover Welcome, nine journey screens, Settings, Advanced,
+- 116 offscreen render frames cover Welcome, nine journey screens, Settings,
   concept/crop editors, empty/error states and generated/saved-result surfaces in light and
-  dark at minimum/default sizes. Native vibrancy and interactions are verified separately.
-- The full implementation gate passed **402 Swift tests** (160 app, 242 Core) and **94 Python tests**.
+  dark at minimum/default sizes. None captures an expanded Advanced section. Native vibrancy
+  and interactions are verified separately.
+- The overnight implementation gate passed **402 Swift tests** (160 app, 242 Core) and **94 Python tests**.
   The final dataset-switch repair then passed **23 focused session/history tests**, including
   the offline demo and current-versus-saved dataset requests, with independent source acceptance.
   Strict SwiftLint is clean; SwiftFormat is clean on 129 source/test files, with two resource
@@ -122,10 +172,17 @@ Current trainer images are published under `v0.2.0-overnight20261011-r2` and ver
 anonymous digest pulls. The app defaults and public template use these images. Bounded GPU
 checks and their limits are recorded in POD-STATUS.
 
+On 2026-10-11 the owner confirmed signing in and captioning live through both ChatGPT and
+OpenRouter. These are owner-reported native acceptance checks for account access and captioning;
+they supersede the earlier pending account/captioning notes. The OpenRouter credential method
+was not separately recorded, so this does not prove a particular OAuth callback URL. These
+checks do not establish a quality comparison or every model's video support.
+
 Owner acceptance and distribution still pending:
 
-- OpenRouter browser consent and authenticated captioning remain unverified. The owner has
-  completed ChatGPT sign-in and saved a manual OpenRouter key; both loaded in the current app.
+- The separately assigned pod-image rebuild/default update before live checks of direct
+  upload, storage cleanup and the repaired generation/Resume behavior. CI and the Hub-token
+  RunPod-secret change are also separate tickets, untouched by this repair round.
 - Native TensorBoard rendering during an actual run. Offline state and the live backend
   handshake are verified separately; no GPU was restarted solely for this UI check.
 - The owner's full morning walkthrough and first real dataset training run.
@@ -153,7 +210,8 @@ required connection instruction. The retained LTX comparison reopened as two nat
 players and playback was exercised. These checks reuse the earlier actual downloads; they are
 not another live training or download claim. Command-number navigation and Go Back worked.
 OpenRouter opened its real browser authorization entry and native Cancel returned to an
-unconnected state. ChatGPT reached the owner's two-factor challenge; cancellation also passed. Live consent remains pending.
+unconnected state. ChatGPT reached the owner's two-factor challenge; cancellation also passed.
+The owner subsequently completed sign-in and live captioning with both providers, as recorded above.
 
 Recent-project restoration passed after quitting and reopening the same preview build. A
 rebuild exposed an access-restoration failure that was incorrectly reported as a deleted
@@ -195,8 +253,9 @@ The post-fix live check used the actual rebuilt `ChatGPTModelClient` with the ow
 unexpired ChatGPT registration and one synthetic demo PNG. It received HTTP 200 and decoded a
 usable Caption from `gpt-6.1-sol` (2,067 input / 49 output tokens). This proves the production
 client's image/structured-output path; it is not a caption-quality evaluation or a native Runner
-sidecar-save check. The final Settings click remains an owner check after relaunch because
-computer-control access timed out. Focused gates passed 19 Core stream test methods and 23 app
+sidecar-save check. Computer-control access timed out on the final Settings click; the owner
+subsequently confirmed that test succeeded and that live captioning worked. Focused gates
+passed 19 Core stream test methods and 23 app
 account test methods; both changes received independent source acceptance. The usual primary
 checkout preview is updated along with the worktree build. Development signing remains deferred
 at the owner's request.

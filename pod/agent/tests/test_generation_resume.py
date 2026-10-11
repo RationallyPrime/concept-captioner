@@ -2,11 +2,15 @@
 
 import hashlib
 import json
+import struct
 
 import pytest
 from pydantic import ValidationError
 
 from podagent.catalog import CATALOG, parse_params
+
+HEADER = json.dumps({"__metadata__": {"training_info": json.dumps({"step": 2})}}).encode()
+CHECKPOINT = struct.pack("<Q", len(HEADER)) + HEADER
 
 
 def saved_run(paths, *, model="black-forest-labs/FLUX.1-dev"):
@@ -20,6 +24,7 @@ def saved_run(paths, *, model="black-forest-labs/FLUX.1-dev"):
         "steps": 2,
         "rank": 2,
     }
+    (paths.datasets / "source-run").mkdir(parents=True, exist_ok=True)
     (run / "run.json").write_text(json.dumps(cfg))
     checkpoint = (
         run / "output/lora_step_00002.safetensors"
@@ -27,7 +32,7 @@ def saved_run(paths, *, model="black-forest-labs/FLUX.1-dev"):
         else run / "output/source-run/source-run_000002.safetensors"
     )
     checkpoint.parent.mkdir(exist_ok=True)
-    checkpoint.write_bytes(b"checkpoint")
+    checkpoint.write_bytes(CHECKPOINT)
     return run, cfg
 
 
@@ -55,7 +60,7 @@ def test_generation_writes_own_config_and_uses_exact_trainer_venv(settings):
     assert argv[0] == paths.venv_bin("aitoolkit", "python")
     assert argv[1] == str(paths.scripts / "generate_results.py")
     assert argv[2:4] == ["--trainer", "aitoolkit"]
-    assert (run / "output/source-run/source-run_000002.safetensors").read_bytes() == b"checkpoint"
+    assert (run / "output/source-run/source-run_000002.safetensors").read_bytes() == CHECKPOINT
 
 
 @pytest.mark.parametrize(
@@ -171,7 +176,85 @@ def test_generation_prepares_private_immutable_checkpoint_and_config_snapshot(se
     original.write_bytes(b"resumed weights")
     source["steps"] = 3
     (run / "run.json").write_text(json.dumps(source))
-    assert (target / "selected-checkpoint.safetensors").read_bytes() == b"checkpoint"
-    assert prepared["checkpoint_sha256"] == hashlib.sha256(b"checkpoint").hexdigest()
+    assert (target / "selected-checkpoint.safetensors").read_bytes() == CHECKPOINT
+    assert prepared["checkpoint_sha256"] == hashlib.sha256(CHECKPOINT).hexdigest()
     assert captured["steps"] == 2 and "hf_token" not in captured
     assert not (target / "output").exists()  # snapshots are outside served run outputs
+
+
+@pytest.mark.parametrize("steps", [1, 2])
+def test_resume_refuses_no_op_or_regressing_saved_checkpoint_step(settings, steps):
+    _, cfg = saved_run(settings.paths)
+    with pytest.raises(ValidationError, match=r"must exceed.*step 2"):
+        parse_params("trainer-aitoolkit", {**cfg, "steps": steps, "resume": True}, settings.paths)
+
+
+def test_resume_refuses_unknown_checkpoint_step(settings):
+    run, cfg = saved_run(settings.paths)
+    (run / "output/source-run/source-run_000002.safetensors").write_bytes(
+        b"not safetensors metadata"
+    )
+    with pytest.raises(ValidationError, match="readable saved training step"):
+        parse_params("trainer-aitoolkit", {**cfg, "steps": 4, "resume": True}, settings.paths)
+
+
+@pytest.mark.parametrize("steps", [1, 2])
+def test_ltx_resume_refuses_no_op_with_matching_native_state(settings, steps):
+    run, cfg = saved_run(settings.paths, model="Lightricks/LTX-2")
+    (run / "output/training_state_step_00002.pt").write_bytes(b"native state")
+    with pytest.raises(ValidationError, match=r"must exceed.*step 2"):
+        parse_params("trainer-ltx", {**cfg, "steps": steps, "resume": True}, settings.paths)
+
+
+def test_resume_pruned_dataset_requires_exact_manifest_before_prepare(settings):
+    run, cfg = saved_run(settings.paths)
+    (settings.paths.datasets / "source-run").rmdir()
+    with pytest.raises(ValidationError, match="restore Resume inputs"):
+        parse_params("trainer-aitoolkit", {**cfg, "steps": 4, "resume": True}, settings.paths)
+    manifest = {
+        "repo_id": "me/data",
+        "revision": "a" * 40,
+        "split": "validation",
+        "image_column": "media",
+        "caption_column": "text",
+        "id_column": None,
+        "only_metadata": True,
+    }
+    (run / "dataset-manifest.json").write_text(json.dumps(manifest))
+    params = parse_params("trainer-aitoolkit", {**cfg, "steps": 4, "resume": True}, settings.paths)
+    CATALOG["trainer-aitoolkit"].prepare(params, settings.paths)
+    assert json.loads((run / "dataset-manifest.json").read_text()) == manifest
+    assert not (settings.paths.datasets / "source-run").exists()  # child performs the pull
+    manifest["revision"] = "main"
+    (run / "dataset-manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValidationError, match="exact resolved Hub commit"):
+        parse_params("trainer-aitoolkit", {**cfg, "steps": 5, "resume": True}, settings.paths)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"model": {"load_checkpoint": None}},
+        {"model": {"load_checkpoint": "/workspace/models/older.safetensors"}},
+        {"checkpoints": {"no_resume": True}},
+    ],
+)
+def test_ltx_resume_refuses_overrides_that_restart_or_select_another_checkpoint(settings, extra):
+    run, cfg = saved_run(settings.paths, model="Lightricks/LTX-2")
+    extra = json.loads(json.dumps(extra))
+    if extra.get("model", {}).get("load_checkpoint") is not None:
+        extra["model"]["load_checkpoint"] = str(settings.paths.models / "older.safetensors")
+    cfg["extra"] = extra
+    (run / "run.json").write_text(json.dumps(cfg))
+    (run / "output/training_state_step_00002.pt").write_bytes(b"native state")
+    assert not parse_params("trainer-ltx", cfg, settings.paths).resume  # ordinary extra unchanged
+    with pytest.raises(ValidationError, match="latest native checkpoint"):
+        parse_params("trainer-ltx", {**cfg, "steps": 4, "resume": True}, settings.paths)
+
+
+def test_ltx_resume_accepts_explicit_native_state_restoration(settings):
+    run, cfg = saved_run(settings.paths, model="Lightricks/LTX-2")
+    cfg["extra"] = {"checkpoints": {"no_resume": False}}
+    (run / "run.json").write_text(json.dumps(cfg))
+    (run / "output/training_state_step_00002.pt").write_bytes(b"native state")
+    assert parse_params("trainer-ltx", {**cfg, "steps": 4, "resume": True}, settings.paths).resume

@@ -77,6 +77,11 @@ async def test_pure_video_hf_materializes_binary_video_and_reads_without_decoder
     assert embedded[0]["image"] == {"bytes": content, "path": "selected.mp4"}
     default_decoding = embedded.cast_column("image", datasets.Video())
     monkeypatch.setattr(datasets, "load_dataset", lambda *_args, **_kwargs: default_decoding)
+    import huggingface_hub
+
+    monkeypatch.setattr(
+        huggingface_hub.HfApi, "list_repo_files", lambda *_a, **_k: ["data/train.parquet"]
+    )
     remote = HFDatasetSource("offline/fixture", token="fixture")
     assert remote.dataset.features["image"].decode is False
     sample = await anext(remote.samples())

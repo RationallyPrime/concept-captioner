@@ -102,11 +102,16 @@ struct ConceptCategoryTests {
         #expect(session.mappingProposals.isEmpty)
     }
 
-    @Test func wholeImageAssignmentOnlyAppliesToOneStyleConcept() throws {
+    @Test func wholeTargetAssignmentIncludesStyleAndMotionWithoutReplacingLocatorConfirmation() throws {
         let style = try Concept(trigger: "INKSTYLE", targetConcept: .style)
-        #expect(try Job(concepts: [style]).wholeImageStyleMapping == styleMapping)
-        #expect(try Job(concepts: [style, Concept(trigger: "PERSON")]).wholeImageStyleMapping == nil)
-        #expect(try Job(concepts: [Concept(trigger: "MUG", targetConcept: .object)]).wholeImageStyleMapping == nil)
+        #expect(try Job(concepts: [style]).mappingIncludingWholeTargets(nil) == styleMapping)
+        let mixed = try Job(concepts: [style, Concept(trigger: "PERSON")])
+        #expect(mixed.mappingIncludingWholeTargets(nil) == nil)
+        let confirmed = mixed.mappingIncludingWholeTargets(["PERSON": "the person on the left"])
+        #expect(confirmed?["INKSTYLE"] == styleMapping["INKSTYLE"])
+        #expect(confirmed?["PERSON"] == "the person on the left")
+        #expect(try Job(concepts: [Concept(trigger: "MUG", targetConcept: .object)])
+            .mappingIncludingWholeTargets(nil) == nil)
     }
 
     private var styleMapping: Job.Mapping {

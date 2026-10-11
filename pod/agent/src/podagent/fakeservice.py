@@ -50,7 +50,7 @@ EXIT_REQUESTED_FAILURE = 3
 EXIT_BIND_FAILED = 4
 DEFAULT_TRANSFER_S = 2.0
 PORTED_SERVICES = frozenset({"vllm", "tensorboard"})
-TRANSFER_SERVICES = frozenset({"pull-dataset", "push-lora"})
+TRANSFER_SERVICES = frozenset({"pull-dataset", "push-lora", "cleanup-datasets"})
 PRESENCE_ONLY_ENV = ("HF_TOKEN", "VLLM_API_KEY", "PODAGENT_TOKEN")
 ORPHAN_SLEEP_S = 600
 # The grandchild ``--orphan`` leaves behind: stdlib only, prints its pid, sleeps.

@@ -131,10 +131,10 @@ struct RunnerStreamTests {
         let source = try space.source
         let sink = try CountingSink(space.sink)
         let run = Task {
-            try await runner.run(source: source, sink: sink, only: ["solo.png", "unmapped.png"]) { outcome in
+            try await runner.run(source: source, sink: sink, only: ["solo.png", "unmapped.png"], onOutcome: { outcome in
                 seen.withLock { $0.append(outcome) }
                 if outcome.sampleID == "unmapped.png" { await observed.arrive() }
-            }
+            })
         }
         await observed.arrive()
         #expect(seen.withLock { $0.map(\.sampleID) } == ["unmapped.png"])
@@ -160,9 +160,9 @@ struct RunnerStreamTests {
         let source = try space.source
         let sink = try CountingSink(space.sink)
         let run = Task {
-            try await runner.run(source: source, sink: sink, only: ["solo.png"]) { outcome in
+            try await runner.run(source: source, sink: sink, only: ["solo.png"], onOutcome: { outcome in
                 seen.withLock { $0.append(outcome) }
-            }
+            })
         }
         await entered.arrive()
         run.cancel()

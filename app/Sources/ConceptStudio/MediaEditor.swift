@@ -173,7 +173,8 @@ enum MediaEditor {
         return result
     }
 
-    /// Decode the actual frame timeline; nominal frame rate alone cannot count variable-rate video.
+    /// Read compressed sample timestamps without decoding every frame into a pixel buffer.
+    /// Nominal frame rate alone cannot count variable-rate video.
     static func videoTimeline(url: URL) async throws -> VideoTimeline {
         let asset = AVURLAsset(url: url)
         guard let track = try await asset.loadTracks(withMediaType: .video).first else {
@@ -181,25 +182,26 @@ enum MediaEditor {
         }
         let end = try await track.load(.timeRange).end
         let reader = try AVAssetReader(asset: asset)
-        let frames = AVAssetReaderTrackOutput(track: track, outputSettings: [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-        ])
+        let frames = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
         frames.alwaysCopiesSampleData = false
-        guard reader.canAdd(frames) else { throw StudioError.message("This clip's frames cannot be decoded.") }
+        guard reader.canAdd(frames) else { throw StudioError.message("This clip's frame times cannot be read.") }
         reader.add(frames)
         guard reader.startReading() else { throw reader.error ?? StudioError.message("This clip cannot be read.") }
         defer { reader.cancelReading() }
         var times: [CMTime] = []
         while let sample = frames.copyNextSampleBuffer() {
             try Task.checkCancellation()
-            let time = CMSampleBufferGetPresentationTimeStamp(sample)
+            // Compressed readers also emit zero-sample decoder commands. Output PTS applies
+            // the container's edit offset; raw PTS includes the encoder's reordering delay.
+            guard CMSampleBufferGetNumSamples(sample) > 0 else { continue }
+            let time = CMSampleBufferGetOutputPresentationTimeStamp(sample)
             guard time.isNumeric, time >= .zero else {
                 throw StudioError.message("This clip has unreadable frame times. Choose another copy.")
             }
             times.append(time)
         }
         guard reader.status == .completed else {
-            throw reader.error ?? StudioError.message("This clip's frame decoding did not complete.")
+            throw reader.error ?? StudioError.message("Reading this clip's frame times did not complete.")
         }
         times.sort { $0 < $1 }
         guard !times.isEmpty, zip(times, times.dropFirst()).allSatisfy({ $0.0 < $0.1 }) else {

@@ -1,6 +1,6 @@
 # ConceptCore: Swift design with parity to `concept_captioner` (Python)
 
-Status: architecture, 2026-10-10; contract revised 2026-10-11 (see "Contract revisions"). The
+Status: architecture, 2026-10-10; contract ratified by the owner on 2026-10-11 (see "Contract revisions"). The
 Python package under `src/concept_captioner/` is the reference implementation;
 `docs/v0.2-plan.md` (including "Beyond v0.2") and `README.md` are the design it was built to.
 This document is the Swift port's contract. Every implementer edits only the files assigned to
@@ -10,8 +10,12 @@ them and follows the signatures here; signature changes are proposed in this doc
 
 Changes to the conventions and public surface after the 2026-10-10 architecture, so a reader
 comparing code with this document finds each one recorded rather than discovering it as drift.
-Implementing sessions made these edits; the owner has not ratified them one by one, and any of
-them is open to the owner's review.
+These revisions are **ratified by the owner on 2026-10-11**, including the existing rows and
+the new fix-round decisions recorded in
+[the overnight review](../../docs/process/overnight-review-2026-10-11.md#fix-round-decisions-decided-2026-10-11-afternoon).
+Ratification defines the required behavior; it does not claim that pending implementation or
+live verification has completed. Current-source notes include the 2026-10-11 review repairs;
+test results and live acceptance are recorded separately in CORE-STATUS and APP-STATUS.
 
 | Date | Change | Where |
 | --- | --- | --- |
@@ -32,8 +36,22 @@ them is open to the owner's review.
 | 2026-10-11 | Job `extra_headers` that carry authentication or routing are rejected | Resolve |
 | 2026-10-11 | Job `extra_body` keys `store`, `metadata`, `user`, `safety_identifier` are rejected (both languages) | RequestSettings |
 | 2026-10-11 | The app's on-disk project folder is part of the shared contract | The language-neutral contract |
-| 2026-10-11 | Swift resolves relative `skill` and `.md` profile paths in a job file against the job file's folder (`Job.directory`); Python still uses the working directory | Project folder, Job, Skills, Runner, Deviation 10 |
+| 2026-10-11 | Swift job-relative paths (`Job.directory`) introduced before Python parity was approved; the later ratified row below requires Python to match | Project folder, Job, Skills, Runner, Deviation 10 |
 | 2026-10-11 | Redirect credential stripping compares the origin (scheme, host, port), not the host alone | Transport |
+| 2026-10-11 | Category-derived Concept defaults; `TargetConcept.isPersonIdentity`, `defaultClassNoun`, `defaultLearningTarget`, `defaultDescribedAttributes` | Job |
+| 2026-10-11 | `Job.wholeImageStyleMapping` supplies an ordinary whole-target mapping for a sole style concept | Job |
+| 2026-10-11 | Category-aware captioner and critic tasks, generic training-target user turns and updated parity hashes | Prompt |
+| 2026-10-11 | Prompt `isVideo` / Python `is_video` selects video evidence and uninspected audio in the assembled job view | Prompt, Runner |
+| 2026-10-11 | `UserContent.video` and `MediaInput` carry exact clip bytes; images retain provider normalization | Protocol and value types |
+| 2026-10-11 | `.mp4`, `.mov`, `.m4v` targets join image suffixes; `HubFolderSource.isImage` becomes `isMedia` | Sources, HubFolderSource |
+| 2026-10-11 | Gemini inline video carries `videoMetadata.fps = 24`; its existing 20 MiB encoded-request guard and other clients' video refusals are recorded | Video route contract, GeminiClient |
+| 2026-10-11 | Bundled `ltx-video` profile is shared verbatim with Python | Skills |
+| 2026-10-11 | ChatGPT retains indexed `response.output_item.done` items when a successful terminal response has an empty output array | ChatGPTModelClient |
+| 2026-10-11 | Video routes: Gemini inline, Swift OpenRouter/vLLM `video_url`; Python Gemini/OpenRouter through pydantic-ai, Python vLLM refused until supported; conservative 20 MiB client cap on each supported route | Video route contract |
+| 2026-10-11 | `usable` describes the declared training target rather than requiring a visible person; `requiresLocatorMapping`, `wholeTargetMapping` and `mappingIncludingWholeTargets` replace the sole-style helper with automatic style/motion mappings | Schemas, Job |
+| 2026-10-11 | Job-relative skill and `.md` profile paths resolve in both languages; Deviation 10 is closed | Project folder, Skills, Runner |
+| 2026-10-11 | Python imagefolder Hub datasets dispatch images and clips by file name, including mixed datasets | Sources |
+| 2026-10-11 | Per-sample partial-caption progress is an app-only hook through ModelClient, StructuredStage and Runner; shared job/record formats do not change | ModelClient, Runner |
 
 ## Package
 
@@ -52,7 +70,7 @@ app/
     Prompt/Prompt.swift              Prompt.userTurn, captionerTask, criticTask, captionerInstructions, criticInstructions, criticUserTurn
     Triggers/Triggers.swift          CaptionDeps, Triggers.exactTriggerSpans, triggerProblems, retryMessage
     Images/ProviderImage.swift       Images.providerImage
-    ModelClient/ModelClient.swift    ModelClient, UserContent, ChatMessage, OutputRequest, RequestSettings, ModelReply, TokenUsage
+    ModelClient/ModelClient.swift    ModelClient, UserContent, MediaInput, ChatMessage, OutputRequest, RequestSettings, ModelReply, TokenUsage
     ModelClient/HTTPTransport.swift  HTTPTransport, HTTPStreamingTransport, URLSessionTransport, HTTPResponse, HTTPStreamResponse
     ModelClient/ServerSentEvents.swift ServerSentEvent, ServerSentEventParser, ServerSentEventStream
     ModelClient/OpenAICompatibleClient.swift
@@ -63,7 +81,7 @@ app/
     ModelClient/Resolve.swift        Provider, KeyStore, StaticKeyStore, ResolvedEndpoint, Endpoints.resolve / parseSpec
     ModelClient/StructuredStage.swift StructuredStage<Output>, StageRun, StageFailure, RetryPrompt
     Runner/Runner.swift              Runner
-    Sources/Sample.swift             Sample, ImageSource, CaptionSink, Sources.imageSuffixes
+    Sources/Sample.swift             Sample, ImageSource, CaptionSink, Sources.imageSuffixes / videoSuffixes / mediaSuffixes
     Sources/LocalFolderSource.swift
     Sources/SidecarSink.swift        SidecarSink, AtomicFile
     Hub/HubClient.swift              RepoID, HubFile, CommitOperation, CommitResult, HubClient
@@ -96,7 +114,8 @@ Conventions (non-negotiable):
   the app must act on, and its text is written for a person, not a log.
 - `swiftformat` and `swiftlint lint --quiet` clean (configs in `app/.swiftformat`,
   `app/.swiftlint.yml`).
-- Fixtures use the placeholder triggers `NORA7` / `IVAN9`. No real concept names anywhere.
+- Synthetic test fixtures and examples use the placeholder triggers `NORA7` / `IVAN9`.
+  This fixture convention does not restrict the owner's actual concept names or triggers.
 - Key names in JSON/YAML are the Python snake_case names, always. Swift property names are
   camelCase; `CodingKeys` (or explicit `JSONObject` construction) maps them.
 
@@ -107,10 +126,10 @@ Conventions (non-negotiable):
 | job file | YAML mapping, keys and validation rules of `job.py` (below) |
 | skill directory | `SKILL.md` frontmatter + body, `references/`, `references/profiles/*.md` |
 | profile | a Markdown file, used as text |
-| response record | one JSON object per captioned image, keys of `runner.py::_base_record` |
+| response record | one JSON object per captioned image or clip, keys of `runner.py::_base_record` |
 | sidecars | `<stem>.txt` caption, `<stem>.json` record, `_summary.json` (CLI/app) |
-| Hub dataset | imagefolder convention: images + `metadata.jsonl` with `file_name`, `caption`, `caption_response` |
-| project folder | the layout below; the app writes it, the CLI runs on it unchanged when started from the project folder (Deviation 10) |
+| Hub dataset | imagefolder convention: image/clip files + `metadata.jsonl` with `file_name`, `caption`, `caption_response`; dispatch by file name |
+| project folder | the layout below; job-relative skill/profile paths must work independently of the caller's working directory (implementation status below) |
 
 #### Project folder
 
@@ -119,7 +138,7 @@ The app's project is a folder the CLI can caption as is:
 ```
 <project>/
   job.yaml       the shared job file; never holds a key, token or absolute path
-  images/        the training images, each with its sidecars beside it:
+  images/        the included training images or approved clips, each with its sidecars beside it:
                  <stem>.txt caption, <stem>.json response record, _summary.json after a run
   skill/<name>/  present only when the user chose a custom skill: a copy of that skill
                  directory, named in job.yaml as `skill: ./skill/<name>`. The folder carries the
@@ -129,29 +148,36 @@ The app's project is a folder the CLI can caption as is:
                  never read by the core or the CLI and never published
 ```
 
-**Relative paths in a job file: the two implementations differ (Deviation 10).** That covers
-`skill` and a `profile` given as a path to a `.md` file (a bare profile name is looked up in the
-skill). `~` is expanded and an absolute path is used as is, but the app never writes either.
+**Relative paths in a job file resolve against that job file's folder (owner decision,
+2026-10-11).** This covers `skill` and a `profile` given as a `.md` path; a bare profile name
+still resolves inside the selected skill. `~` expands and an absolute path is used as is, but
+the app writes project-contained relative paths.
 
-- Swift resolves them against the folder that holds the job file. `Job.load(contentsOf:)`
-  records that folder in `Job.directory`; `Runner` loads the skill with
-  `Skills.load(path: job.skill, relativeTo: job.directory)` and the profile with
-  `skill.profile(job.profile, relativeTo: job.directory)`. A job that was not read from a file
-  (parsed from text, built in memory) has no folder, and its relative paths fall back to the
-  working directory. `directory` is not serialized, so a caller that rebuilds a job (for
-  example `Job(json: job.jsonValue)`) must copy `directory` onto the rebuilt value.
-- Python resolves them against the process's working directory: `Job.load(path)` keeps no
-  path, and `skills.load(job.skill)` and `Skill.profile(job.profile)` use the path as given.
+Swift implements this with `Job.directory`, set by `Job.load(contentsOf:)`, and
+`Skills.load(path:relativeTo:)` / `Skill.profile(_:relativeTo:)`. Python retains the job
+folder in a private `Job._directory` and uses `skills.load(..., relative_to=job.directory)`
+and `Skill.profile(..., relative_to=job.directory)`. An in-memory or text-parsed job with no
+source folder uses the caller's working directory. The source folder is not serialized or
+part of job equality; rebuilding a job must preserve that loading context separately.
+Command-line overrides (`--skill`, `--profile`) remain the caller's paths, resolved against
+the working directory; they do not rewrite the stored job's loading context.
 
-Both agree when the CLI is started from the project folder. Command-line overrides (`--skill`,
-`--profile`) are the caller's own paths and resolve against the working directory in both.
+Both implementations use this loading context. CLI input/output folder arguments remain
+caller-relative; resolving a job's skill does not change the process's working directory.
 
-Image file stems are unique within `images/` (the source rejects colliding stems), and a file
-name is the sample ID in `job.yaml`, the sidecars, and a published Hub dataset. Run from the
-project folder, the CLI equivalent of the app's captioning is
-`concept-captioner run job.yaml --images images --out images`. Started from another directory,
-the Python CLI cannot find a project's custom `skill: ./skill/<name>` until the Python change in
-Deviation 10 lands.
+File stems are unique within `images/` (the source rejects colliding stems). The file name is
+the sample ID in the job, sidecars and published dataset. A clip remains the selected target;
+no still frame may be substituted and presented as evidence of the clip's motion.
+
+**Mixed Hub imagefolder media uses file-name dispatch in both languages.** Python lists raw
+media files and downloads each image or clip by name, preserving its ID, suffix and bytes.
+Its imagefolder sink updates `metadata.jsonl` without converting mixed targets into an image
+column. Root `metadata.jsonl` with media files takes precedence over unrelated Parquet/Arrow
+files retained in the repository. Without that root metadata, tabular shards retain the
+datasets-library path even when loose media is present. Pure-video Python tables use
+`Video(decode=False)` descriptors; the Python sink refuses mixed tabular image/clip
+materialization. Swift's parquet limitation remains unchanged. These implementation limits do
+not reduce the required raw imagefolder interoperability.
 
 ### Deviations from the Python code, decided here
 
@@ -170,34 +196,30 @@ Deviation 10 lands.
 4. **`resolve` has a finite provider set**: `google`, `anthropic`, `openai`, `openrouter`,
    `vercel`, `vllm`, and `gateway/` followed by `google`, `google-cloud`, `anthropic`, `openai`,
    `openai-responses`, `openai-chat`, or the aliases `responses` and `chat`. Python forwards
-   unknown prefixes to pydantic-ai, so it also accepts `gateway/bedrock` and `gateway/groq`;
-   Swift has no client for those and raises `ConfigurationError`, as for any unknown kind.
+   unknown direct prefixes to pydantic-ai; both implementations keep the named `gateway/`
+   upstreams finite and reject `gateway/bedrock`, `gateway/groq` and other unknown gateway families.
+   Swift raises `ConfigurationError` for every unsupported direct kind as well.
    `gemini` raises a message that names `kind: google`.
 5. **Keys come from an injected `KeyStore`**, never from the environment inside the library.
    The app's Keychain-backed store and the CLI's environment store both conform to it.
 6. **Parquet-backed Hub datasets are out of scope for the Swift core in v1.** The Hub source
-   and sink speak the imagefolder convention only (image files + `metadata.jsonl`). A dataset
+   and sink speak the imagefolder convention only (image/clip files + `metadata.jsonl`). A dataset
    whose images live in parquet shards is rejected with a `HubError` naming this limitation.
 7. **Retry prompts render as plain user turns** in every output mode (pydantic-ai renders a
    tool-return retry in tool mode). The text is what pydantic-ai 2.55's
    `RetryPromptPart.model_response()` would send for the same failure (see `RetryPrompt`).
    Conversation history is text in, text out: an assistant turn is the JSON the model
    returned, as text.
-8. `CLAUDE.md` in the repository root predates v0.2 (receipts, `POLICY_VERSION`,
-   `require_model_match`); those rules no longer exist in either implementation. The v0.2 plan
-   governs.
+8. **Removed v0.1 machinery remains removed.** Receipts, `POLICY_VERSION` and
+   `require_model_match` are not part of this contract. Current `CLAUDE.md`, the v0.2 plan and
+   the retained owner decisions in `docs/ADR-LOG.md` govern together.
 9. **The vLLM key is bound to an origin.** Swift attaches the stored vLLM key only when the
    job's `base_url` has the same scheme, host and port (default ports filled in) as the
    configured endpoint; another port on the same host is another service. Python has matched
    since 2026-10-11 (`models.py` `_origin`). Closed; kept for the record.
-10. **Relative `skill` and `.md` profile paths in a job file resolve against the job file's
-    folder in Swift, against the working directory in Python.** The app's working directory is
-    `/`, so under the working-directory rule the app could not load a project's custom
-    `skill: ./skill/<name>` at all. Python is unchanged and works when the CLI is started from
-    the project folder. Proposed Python fix, for the owner to accept or reject since it changes
-    the shared job file's meaning: `Job.load(path)` keeps `path.parent`, and the CLI and runner
-    resolve `job.skill` and a `.md` `job.profile` against it. (Python fix to file, pending the
-    owner.)
+10. **Closed by owner decision, 2026-10-11: both languages resolve job-derived relative
+    skill and `.md` profile paths against the job file's folder.** Implemented in both languages.
+    Command-line overrides retain working-directory semantics.
 
 ---
 
@@ -303,21 +325,24 @@ extension JSONValue {
 public enum TargetConcept: String, Codable, Sendable, CaseIterable {
     case facialIdentity = "facial_identity", fullIdentity = "full_identity", style, object, motion,
          characterDesign = "character_design", custom
+    public var isPersonIdentity: Bool { get }    // facialIdentity or fullIdentity
+    public var requiresLocator: Bool { get }    // all categories except style and motion
+    public var wholeTargetLocator: String? { get } // fixed style/motion assignment; nil otherwise
+    public var defaultClassNoun: String { get }
+    public var defaultLearningTarget: String { get }
+    public var defaultDescribedAttributes: [String] { get }
 }
 public enum ThinkingLevel: String, Codable, Sendable, CaseIterable { case none, minimal, low, medium, high, xhigh }
 public enum OutputMode: String, Codable, Sendable, CaseIterable { case native, tool, prompted }
 
 public struct Concept: Sendable, Equatable {
     public var trigger: String
-    public var classNoun: String = "person"                       // class_noun
+    public var classNoun: String                                // class_noun; category default when omitted
     public var targetConcept: TargetConcept = .facialIdentity     // target_concept
-    public var traitsToLearn: [String] = ["distinctive facial identity"]
-    public var attributesToDescribe: [String] = [
-        "clothing and removable accessories", "hair presentation", "expression and gaze",
-        "pose", "setting", "lighting", "framing and visible image treatment",
-    ]
+    public var traitsToLearn: [String]                           // category default when omitted
+    public var attributesToDescribe: [String]                    // category default when omitted
     public var explicitBoundaryDecisions: [String: String] = [:]  // explicit_boundary_decisions; ORDER PRESERVED on dump (see note)
-    public init(trigger: String, classNoun: String = "person", targetConcept: TargetConcept = .facialIdentity,
+    public init(trigger: String, classNoun: String? = nil, targetConcept: TargetConcept = .facialIdentity,
                 traitsToLearn: [String]? = nil, attributesToDescribe: [String]? = nil,
                 explicitBoundaryDecisions: OrderedDictionary<String, String> = [:]) throws
     /// Ordered JSON exactly as `Concept.model_dump()`: trigger, class_noun, target_concept,
@@ -325,6 +350,19 @@ public struct Concept: Sendable, Equatable {
     public var jsonValue: JSONValue { get }
 }
 ```
+
+Omitted Concept fields derive from `target_concept` in both languages; explicit values,
+including an explicitly empty list, are kept. These are the current source defaults:
+
+| Category | Class noun | Traits to learn | Attributes to describe |
+| --- | --- | --- | --- |
+| `facial_identity` | `person` | distinctive facial identity | clothing and removable accessories; hair presentation; expression and gaze; pose; setting; lighting; framing and visible image treatment |
+| `full_identity` | `person` | the person's enduring face and physique | expression and gaze; pose and action; permitted clothing changes; setting; lighting; framing |
+| `style` | `style` | the visual style, including its rendering, texture and palette | subject matter; objects; actions; spatial arrangement; visible scene content |
+| `object` | `object` | the object's distinctive design | placement; orientation; use; surroundings; lighting; occlusion |
+| `motion` | `motion` | the defining movement pattern | performer; clothing; scene; framing; lighting; independent start and end state |
+| `character_design` | `character` | the character's distinctive appearance and design | expression and gaze; pose and action; permitted clothing changes; setting; lighting; framing |
+| `custom` | `concept` | the concept described by the user | observable details outside the stated concept |
 
 Note on ordered dictionaries: `explicit_boundary_decisions`, `samples`, each sample's mapping and
 `policy_overrides` are insertion-ordered in Python and that order reaches the prompt. They are
@@ -374,6 +412,12 @@ public struct Job: Sendable, Equatable {
                 captionerThinking: ThinkingLevel = .low, criticThinking: ThinkingLevel = .high,
                 policyOverrides: OrderedDictionary<String, String> = [:]) throws
 
+    /// App mapping policy using the existing serialized mapping; no new job fields.
+    public var requiresLocatorMapping: Bool { get } // any concept requires a locator
+    public var wholeTargetMapping: Mapping { get }  // automatic style/motion entries in concept order
+    /// nil stays unconfirmed for locator jobs; otherwise merge automatic whole-target entries.
+    public func mappingIncludingWholeTargets(_ mapping: Mapping?) -> Mapping?
+    public typealias Mapping = OrderedDictionary<String, String>
     public var triggers: [String] { get }
     public func concept(for trigger: String) -> Concept?
     public func mapping(for sampleID: String) -> OrderedDictionary<String, String>?
@@ -408,7 +452,21 @@ Validation rules (all `ConfigurationError`, messages as in Python where it has o
   `"single_subject_only jobs map exactly one trigger per sample"`.
 - `load`: a non-mapping document is `"job file must be a YAML mapping"`.
 
-`sampleView(mapping:)` returns, in this order, exactly:
+`sampleView(mapping:)` returns the base still-target view below, in this order. During prompt
+assembly, `isVideo: true` (Python `is_video=True`) replaces only `inputs.evidence` with
+`attached_target_video` and `inputs.audio_status` with `uninspected`, preserving key order and
+all other fields. The job file stores neither field. Video evidence does not claim that audio
+has been inspected.
+
+**Mapping requirement, owner decision 2026-10-11:** person identity, object and character
+concepts retain a locator and explicit confirmation; style and motion map automatically to the
+whole selected target. Custom concepts retain locator confirmation. The app uses the helpers
+above for import, approval, Undo, re-inclusion and reopening, and hides Mapping from its
+sidebar, Go menu and Back/Next order when no concept requires a locator. In mixed jobs, an
+unconfirmed mapping stays nil; confirming locator assignments merges the automatic entries.
+No new job field or a second mapping representation is introduced.
+
+Base view:
 
 ```
 {"training": {"profile": <profile>, "trigger_handling": "literal"},
@@ -454,6 +512,10 @@ public struct Critique: Codable, Sendable, Equatable {
 }
 ```
 
+The category-neutral `usable` description below is implemented in both schema definitions.
+A style, object, character or motion target must not be deemed unusable merely because there
+is no visible person.
+
 One schema per type, written in the strict style every provider accepts (all properties
 required, `additionalProperties: false`, nullability via `"type": ["string", "null"]`):
 
@@ -461,7 +523,7 @@ required, `additionalProperties: false`, nullability via `"type": ["string", "nu
 {"type": "object", "title": "Caption",
  "properties": {
    "caption": {"type": "string", "description": "The training caption in the selected profile's format."},
-   "usable": {"type": "boolean", "description": "False when a mapped subject is absent, too small, obscured, or cannot be bound to one visible person. Then leave the caption empty and explain in note."},
+   "usable": {"type": "boolean", "description": "False when the declared training target cannot be found in the sample. Then leave the caption empty and explain in note."},
    "note": {"type": ["string", "null"], "description": "Why the sample is not usable."}},
  "required": ["caption", "usable", "note"], "additionalProperties": false}
 
@@ -606,7 +668,7 @@ first line that is `---[ \t]*` followed by `\r?\n` or end of text; body is every
 ### Tests `SkillsTests.swift` must pass
 
 1. `Skills.load()` (default): `name == "diffusion-training-captioner"`, `instructions()`
-   contains `"# Core Caption Policy"`, `profiles() == ["flux-image", "h3-still", "ltx-image", "plain"]`,
+   contains `"# Core Caption Policy"`, `profiles() == ["flux-image", "h3-still", "ltx-image", "ltx-video", "plain"]`,
    `profile("h3-still")` contains `"[Shot 1]"`, `profile("nope")` throws.
 2. A temp skill `my-skill` with frontmatter `description: Mine.` and `metadata.references: [extra.md]`,
    `references/extra.md` = `EXTRA TEXT`, `references/unused.md` = `NEVER`: `name == "my-skill"`,
@@ -624,42 +686,49 @@ Python counterpart: `prompt.py`. File: `Prompt/Prompt.swift`.
 
 ```swift
 public enum Prompt {
-    public static let userTurn = "Inspect this exact target image and return the configured JSON object."
+    public static let userTurn = "Inspect this exact training target and return the configured JSON object."
     public static let captionerTask: String   // verbatim CAPTIONER_TASK, see below
     public static let criticTask: String      // verbatim CRITIC_TASK, see below
 
     /// Sections: skill.instructions(), profileText, one "# Job policy override: <key>\n\n<text.trimmed>\n"
     /// per policy override (job order), "ACTIVE JOB CONFIGURATION\n" + job.sampleView(mapping).pythonDumps(),
-    /// then the task text. Each section is trimmed of whitespace and newlines; joined with "\n\n"; one trailing "\n".
+    /// `isVideo` replaces evidence/audio fields as above; then the task text. Trim each section; join with "\n\n"; one trailing "\n".
     public static func captionerInstructions(skill: Skill, profileText: String, job: Job,
-                                             mapping: OrderedDictionary<String, String>) throws -> String
+                                             mapping: Job.Mapping, isVideo: Bool = false) throws -> String
     public static func criticInstructions(skill: Skill, profileText: String, job: Job,
-                                          mapping: OrderedDictionary<String, String>) throws -> String
-    public static func criticUserTurn(caption: String) -> String   // "Review this proposed caption against the attached image:\n\n" + caption
+                                          mapping: Job.Mapping, isVideo: Bool = false) throws -> String
+    public static func criticUserTurn(caption: String) -> String   // "Review this proposed caption against the attached training target:\n\n" + caption
 }
 ```
 
-The task texts, copied verbatim (line breaks are literal newlines; no trailing newline):
+The current category-aware task texts are identical in Swift and Python, copied below verbatim
+(line breaks are literal newlines; no trailing newline). The generic user turns above apply
+to an image or clip; only the supplied evidence and `isVideo` flag distinguish them.
 
 ```
 RESPONSE
 Return one JSON object. `caption` is the training text only, in the profile's format, with
-line breaks as JSON escapes. Keep uncertainty out of it. Apply exactly the mapped triggers to
-exactly the mapped subjects; describe any other people ordinarily. If a mapped subject is
-absent, too small or obscured, or cannot be bound to one visible person, set `usable` false,
-leave `caption` empty and explain in `note`. Do not guess. For single_subject_only jobs any
+line breaks as JSON escapes. Keep uncertainty out of it. Apply the mapped triggers according
+to each concept's target_concept and boundary. For person, object or character concepts, bind
+the trigger to the correct visible subject. For style, apply it to the declared whole target
+or region and describe subject matter without verbalizing the style being learned. For
+motion, bind it to the observed movement and describe the performer and scene outside that
+movement concept. Describe unrelated people and objects ordinarily. If the mapped concept is
+absent, obscured or cannot be identified from the supplied evidence, set `usable` false, leave
+`caption` empty and explain in `note`. Do not guess. For single_subject_only person jobs any
 second identity makes the sample unusable. Do not quote readable text (labels, logos, signs)
 verbatim; describe it generically.
 ```
 
 ```
 REVIEW TASK (replaces the captioning task above)
-You are reviewing a proposed caption against the supplied target image and the ACTIVE JOB
-CONFIGURATION. Approve only if every statement in the caption is visible in the image, the
-mapped triggers are bound to the right people, no trait the configuration reserves for a
-trigger is described, nothing is inferred that a still cannot show (age, biography, sound,
-motion), and no readable text is quoted verbatim. Otherwise reject with short, specific notes
-the captioner can act on.
+Review the proposed caption against the supplied training target and ACTIVE JOB CONFIGURATION.
+Approve only if every statement is supported by the target, each trigger is applied to the
+correct person, object, character, style or motion, and no defining trait reserved for that
+concept is described, including through synonyms. A whole-image style does not require a
+visible person. Do not infer age, biography, sound or motion from a still. For a video, assess
+only observed changes and inspected audio; never infer sound from thumbnails. No readable text
+may be quoted verbatim. Otherwise reject with short, specific notes the captioner can act on.
 ```
 
 Python trims with `str.strip()` (all Unicode whitespace). Use
@@ -673,11 +742,22 @@ Python trims with `str.strip()` (all Unicode whitespace). Use
    solo mapping.
 3. Critic text contains `"REVIEW TASK"` and not `"RESPONSE\n"`.
 4. **Byte parity with Python.** For the bundled skill, profile `h3-still`, the fixture job and
-   mapping `{"NORA7": "The only person in the crop."}`, SHA-256 of the UTF-8 text:
-   captioner `cdc285aba4c7b1ec2f33d07e4de67d502f5670e8804a36712514c564d1b6e926`,
-   critic `26d8a1f3125c9f2ac334cde96f46f42ecd9319670364d130ecca8b7186323837`
-   (computed from `src/concept_captioner` at this commit; recompute if the skill text changes).
-   Captioner length is 23257 characters.
+   mapping `{"NORA7": "The only person in the crop."}`, current UTF-8 SHA-256 and Python
+   character counts are:
+
+   | Assembly | SHA-256 | Characters |
+   | --- | --- | --- |
+   | captioner, still (`isVideo: false`) | `83871f8c9d0db25a084864921e38578baf72c05eddc4af45c75f32c4e623fef1` | 23627 |
+   | critic, still | `b4ac9c6b6719629cabb6f84e413cd4594217dda221e676395db3db3894dbc4ba` | 23360 |
+   | captioner, video (`isVideo: true`) | `85498d6f8e22404100fe15410d590708639861a44eabb487e001071e6a65b989` | 23624 |
+   | critic, video | `e8716ca6011a9b4007588396330a35b702096ec6fca3998468896add9b8ad7b0` | 23357 |
+
+   Recomputed from current Python assembly on 2026-10-11; the Swift task literals and all ten
+   bundled skill resource files were compared with their Python counterparts. These are
+   source-derived reference values. `CategoryVideoParityTests` pins the captioner and critic
+   hashes for still and video inputs across all seven categories, alongside the existing still
+   fixture tests. Recompute if instruction, profile or job-view text changes.
+
 5. A policy override `{"tone": "Plain."}` yields a section `# Job policy override: tone\n\nPlain.`
    between the profile and the job configuration.
 
@@ -870,6 +950,15 @@ still buffered when the body ends is dispatched.
 public enum UserContent: Sendable, Equatable {
     case text(String)
     case image(data: Data, mediaType: String)
+    case video(data: Data, mediaType: String)
+}
+
+public enum MediaInput {
+    /// Exact video bytes for .mp4/.mov/.m4v; other targets use Images.providerImage.
+    public static func content(data: Data, suffix: String) throws -> UserContent
+    // Internal request admission shared by the supported clients.
+    static let maximumVideoRequestBytes = 20 * 1024 * 1024
+    static func checkVideoRequest(_ body: JSONObject, messages: [ChatMessage]) throws
 }
 
 public struct ChatMessage: Sendable, Equatable {
@@ -947,10 +1036,14 @@ public protocol ModelClient: Sendable {
     var requestedModel: String { get }
     /// One provider round trip. `messages` is the whole conversation (first message is a user turn).
     func request(instructions: String, messages: [ChatMessage], output: OutputRequest,
-                 settings: RequestSettings) async throws -> ModelReply
+                 settings: RequestSettings,
+                 onPartialText: (@Sendable (String) async -> Void)?) async throws -> ModelReply
 }
 
 extension ModelClient {
+    /// Delegates to the requirement above with no progress callback.
+    public func request(instructions: String, messages: [ChatMessage], output: OutputRequest,
+                        settings: RequestSettings) async throws -> ModelReply
     /// Single-turn convenience: wraps `user` in one user message.
     public func request(instructions: String, user: [UserContent], output: OutputRequest,
                         settings: RequestSettings) async throws -> ModelReply
@@ -963,10 +1056,55 @@ Common rules for the API-key clients (ChatGPTModelClient has its own error type,
 - Transport errors -> `ModelError.transport`.
 - A reply without a text/arguments payload -> `ModelError.malformedReply`.
 - `prompted` mode: append to `instructions`:
-  `"\n\nAlways respond with a JSON object matching this schema:\n\n" + schema.pythonDumps() + "\n\nDon't include any text or Markdown fencing before or after."`
+  `"\n\nAlways respond with a JSON object that's compatible with this schema:\n\n" + schema.pythonDumps() + "\n\nDon't include any text or Markdown fencing before or after."`
   and strip a leading ```` ```json ```` / trailing ```` ``` ```` fence from the reply text.
-- History: assistant turns are sent as plain text content; user turns carry text and images.
+- History: assistant turns are sent as plain text content; user turns carry text and image/video
+  evidence supported by the selected route (the video table below governs).
 - `extraBody` keys are merged into the top-level request object after everything else.
+
+### Video route contract (owner decision, 2026-10-11)
+
+A clip goes to a route that can carry actual video evidence. Never replace it with a still and
+claim to have inspected motion. The selected model or local server must itself support video;
+a wire format does not guarantee that every model at the route accepts it. Unsupported routes
+raise a clear `ConfigurationError` before any network call, including credential refresh.
+No request switches provider or billing method automatically.
+
+**One client size policy:** the fully encoded UTF-8 body of a video request must be **less than
+20 MiB (`20 * 1024 * 1024` bytes)** on every supported video route below, in both languages.
+This is a conservative client limit, not a claimed provider maximum. Count the actual body
+that will be sent, including base64 expansion, instructions, schema, settings and the entire
+conversation/retry history. Compare before transport sends it; refuse rather than truncate,
+resample or silently change the approved target. A tighter provider/model limit may still
+produce a normal provider error. No new job setting is needed for this shared policy.
+
+| Route | Ratified video behavior | Swift implementation | Python implementation |
+| --- | --- | --- | --- |
+| `google`; Gemini `gateway/google`, `gateway/google-cloud` | Exact clip as inline binary data; `videoMetadata.fps = 24`; shared client cap | GeminiClient checks the encoded body before transport | pydantic-ai Gemini BinaryContent with fps metadata; SDK HTTP request hook checks the encoded body before transport |
+| `openrouter` | Data URL in a `video_url` content part; shared client cap | Compatible client enables video and checks the encoded body | pydantic-ai OpenRouter video part with the same SDK request hook |
+| `vllm` | Data URL in a `video_url` content part to the configured video-capable server; shared client cap | Compatible client enables video and checks the encoded body | Clear refusal until pydantic-ai supports video on its OpenAI-compatible chat route |
+| `openai`, `gateway/openai`, `gateway/openai-responses`, `gateway/responses`; ChatGPT plan route | Refuse video before any network call | Responses encoder refuses; ChatGPT builds that body before requesting a credential | Runner refuses the route before invoking the captioner or critic |
+| `anthropic`, `gateway/anthropic` | Refuse video before any network call | Refused during body encoding before inference transport | Runner refuses the route before invoking the captioner or critic |
+| `vercel`, `gateway/openai-chat`, `gateway/chat`, other unlisted routes | No additional video support is claimed; refuse | Compatible encoder refuses unless a supported resolver route enables video | Runner refuses unknown video routes, including injected models without a supported route identity |
+
+The approved OpenRouter/vLLM content part is
+`{type: "video_url", video_url: {url: "data:<mediaType>;base64,<data>"}}`.
+See the [OpenRouter video format](https://openrouter.ai/docs/guides/overview/multimodal/videos)
+and [vLLM multimodal inputs](https://docs.vllm.ai/en/latest/features/multimodal_inputs/).
+Python keeps pydantic-ai as its model layer; it does not add a hand-written adapter to make
+vLLM video work ahead of library support. Video admission and body-size checks apply to the
+captioner, critic and retries. Python keeps exact `BinaryContent` bytes and uses pydantic-ai's
+public provider/HTTP-client injection points to check the SDK's actual wire body.
+
+**App-only progress requirement (owner decision, 2026-10-11):** carry per-sample partial text
+through ModelClient, StructuredStage and Runner to Captioning while the provider is writing.
+ChatGPT emits cumulative text from actual `response.output_text.delta` events. StructuredStage
+clears the preview before each attempt; Runner projects the top-level JSON `caption` string
+and associates it with the sample ID. The app clears previews when samples settle or the run
+fails or is cancelled. Non-streaming clients accept the hook but emit no artificial deltas.
+Partial text is display-only; it must never be committed as a Caption
+before successful terminal completion, structured decoding and the existing validation. It
+adds no key to the shared job or response record and has no required Python counterpart.
 
 ### OpenAICompatibleClient (`ModelClient/OpenAICompatibleClient.swift`)
 
@@ -985,8 +1123,10 @@ public struct OpenAICompatibleClient: ModelClient {
     public let transport: any HTTPTransport
     public let extraHeaders: [String: String]   // OpenRouter: HTTP-Referer / X-Title may be set by the app
     public let reasoningDialect: ReasoningDialect
+    public let acceptsVideo: Bool
     public init(baseURL: URL, apiKey: String?, model: String, transport: any HTTPTransport = URLSessionTransport(),
-                extraHeaders: [String: String] = [:], reasoningDialect: ReasoningDialect = .reasoningEffort)
+                extraHeaders: [String: String] = [:], reasoningDialect: ReasoningDialect = .reasoningEffort,
+                acceptsVideo: Bool = false)
 }
 ```
 
@@ -996,6 +1136,8 @@ nil), `Content-Type: application/json`. Body:
 ```
 model, messages: [{role: "system", content: instructions}, {role: "user"|"assistant", content: [...]}, ...]
   user content parts: {type: "text", text} | {type: "image_url", image_url: {url: "data:<mediaType>;base64,<data>"}}
+  approved video routes additionally carry {type: "video_url", video_url: {url: "data:<mediaType>;base64,<data>"}}
+  (admission and size policy in the video table)
   assistant content: a plain string
 native:   response_format: {type: "json_schema", json_schema: {name, schema, strict: true}}
 prompted: response_format: {type: "json_object"}            (plus the instruction suffix)
@@ -1095,10 +1237,12 @@ temperature, max_tokens, seed, top_p, top_k, stop_sequences, presence/frequency 
 logit_bias, parallel_tool_calls, service_tier, extra_headers, extra_body or an ignored key ->
 `ConfigurationError`. An empty token or one containing whitespace -> `ConfigurationError`.
 
-Reply: the body is read as server-sent events. Lifecycle and delta events (`response.created`,
-`response.in_progress`, `response.output_*`, `[DONE]`) and keep-alives whose data is empty are
-skipped; the event type is the JSON `type`, else the SSE `event:` name. `response.completed` whose `response.status` is
-`completed` is parsed like OpenAIResponsesClient's reply; `response.failed` or `error` ->
+Reply: the body is read as server-sent events. The event type is the JSON `type`, else the SSE
+`event:` name. Indexed `response.output_item.done` items are retained. A successful
+`response.completed` whose response has an empty output array uses those completed items in
+index order; a nonempty terminal output remains authoritative. Lifecycle events, deltas,
+`[DONE]` and empty-data keep-alives do not yield a final reply. The response must have status
+`completed` and is parsed like OpenAIResponsesClient's reply; `response.failed` or `error` ->
 `ChatGPTInferenceError`; `response.incomplete` -> `ModelError.malformedReply` naming the reason;
 an event that is not JSON, or a body that ends without a terminal event ->
 `ModelError.malformedReply`. Partial text never becomes a caption. A non-2xx status ->
@@ -1182,6 +1326,7 @@ Request: `POST {baseURL}/models/{model}:generateContent`, headers `x-goog-api-ke
 ```
 systemInstruction: {parts: [{text: instructions}]}
 contents: [{role: "user"|"model", parts: [{text} | {inlineData: {mimeType, data: base64}}]}]
+  video part: {inlineData: {mimeType: "video/mp4"|"video/quicktime", data: base64}, videoMetadata: {fps: 24}}
 generationConfig:
   native:   responseMimeType: "application/json", responseJsonSchema: schema
   prompted: responseMimeType: "application/json"
@@ -1195,6 +1340,13 @@ generationConfig:
   temperature, maxOutputTokens, topP, topK, seed, stopSequences, presencePenalty, frequencyPenalty
   (logit_bias, parallel_tool_calls, service_tier unsupported -> ignored; extraHeaders on the request)
 ```
+
+For a video request, GeminiClient measures the serialized full request and refuses at or above
+the shared client cap before transport; this guard exists at `ce52a22`. The cap is specified
+once in the video-route section. Exact clip bytes are retained; `.mov` uses `video/quicktime`,
+`.mp4`/`.m4v` use `video/mp4`. Explicit fps avoids the default sparse sampling of short clips;
+it does not retime, trim or replace the supplied clip, and does not assert that audio was
+inspected.
 
 Reply: `candidates[0].content.parts[]` first part with `text` (native/prompted) or with
 `functionCall.args` re-serialized (tool); `servedModel = modelVersion`; usage from
@@ -1317,7 +1469,8 @@ public struct StructuredStage<Output: Decodable & Sendable>: Sendable {
     /// decode failures, `RetryPrompt.undecodable(failure)`.
     public func run(instructions: String, messages: [ChatMessage],
                     validate: @Sendable (Output) -> [String] = { _ in [] },
-                    retryMessage: @Sendable ([String]) -> String = { $0.joined(separator: "; ") })
+                    retryMessage: @Sendable ([String]) -> String = { $0.joined(separator: "; ") },
+                    onPartialText: (@Sendable (String) async -> Void)? = nil)
         async throws -> StageRun<Output>
 }
 ```
@@ -1432,6 +1585,7 @@ public struct Runner: Sendable {
     /// Awaits each outcome callback in completion order, then sink.finalize(); elapsed is wall-clock.
     /// Cancellation drains in-flight samples/callbacks before throwing, without finalizing.
     public func run(source: some ImageSource, sink: some CaptionSink, only: Set<String>? = nil,
+                    onPartialCaption: (@Sendable (String, String) async -> Void)? = nil,
                     onOutcome: @escaping @Sendable (Outcome) async -> Void = { _ in })
         async throws -> RunSummary
 }
@@ -1446,9 +1600,11 @@ existing?.isHumanFinal                    -> Outcome(skipped, notes: ["human-fin
 !overwrite && sink.exists(id)             -> Outcome(skipped, record: existing)   (record may be nil)
 record = base record (status rejected, source model, skill.name, profileName,
          captioner {requested, served: nil}, critic {requested, nil} or nil, attempts 0, requests 0)
-image = Images.providerImage(sample.data, suffix: sample.suffix)
-deps = CaptionDeps(mapping, job.triggers); instructions = Prompt.captionerInstructions(...)
-run = captionerStage.run(instructions, [.user([.text(Prompt.userTurn), .image(...)])],
+media = MediaInput.content(data: sample.data, suffix: sample.suffix)
+isVideo = Sources.isVideo(sample.suffix)
+deps = CaptionDeps(mapping, job.triggers)
+instructions = Prompt.captionerInstructions(..., isVideo: isVideo)
+run = captionerStage.run(instructions, [.user([.text(Prompt.userTurn), media])],
                          validate: { $0.usable ? Triggers.triggerProblems($0.caption, deps) : [] },
                          retryMessage: Triggers.retryMessage)
    StageFailure.rejected -> record.status = rejected, attempts 1, requests, served, caption = last decodable reply if any;
@@ -1456,8 +1612,8 @@ run = captionerStage.run(instructions, [.user([.text(Prompt.userTurn), .image(..
 record.attempts = 1; requests += run.requests; captioner.served = run.servedModel; caption = run.output
 !usable -> status unusable; sink.write(id, nil, record); Outcome(unusable, notes: [note] if note)
 if critic:
-    reviewInstructions = Prompt.criticInstructions(...)
-    verdict = review(caption, image, reviewInstructions, &record)      // critic stage, single turn
+    reviewInstructions = Prompt.criticInstructions(..., isVideo: isVideo)
+    verdict = review(caption, media, reviewInstructions, &record)      // critic stage, single turn
     if !approved:
         feedback = "Reviewer notes:\n- " + (notes.isEmpty ? ["not approved"] : notes).joined("\n- ")
         run = captionerStage.run(instructions, run.messages + [.user(feedback)], same validate)
@@ -1468,8 +1624,10 @@ if critic:
 record.status = written; sink.write(id, caption, record); Outcome(written, caption, notes, record)
 ```
 
-`review` sends `[.user([.text(Prompt.criticUserTurn(caption)), .image])]` with the critic
-instructions, adds `requests`, sets `critic.served` and `record.critique`.
+`review` sends `[.user([.text(Prompt.criticUserTurn(caption)), media])]` with the critic
+instructions, adds `requests`, sets `critic.served` and `record.critique`. For video the critic
+receives the same exact clip as the captioner, with `isVideo: true`; image normalization applies
+only to still images. Unsupported routes fail before sending, as required by the video table.
 
 Any other thrown error (transport, HTTP, `StageFailure.undecodable`, image decoding, sink
 errors) -> `Outcome(failed, notes: ["<TypeName>: <description>"])`, no record written (Python
@@ -1512,16 +1670,23 @@ Files: `Sources/Sample.swift`, `Sources/LocalFolderSource.swift`, `Sources/Sidec
 public struct Sample: Sendable, Equatable {
     public let sampleID: String      // sample_id (file name for folders)
     public let data: Data
-    public let suffix: String        // ".png", ".jpg", ...
+    public let suffix: String        // image or video suffix, e.g. ".png", ".jpg", ".mp4"
 }
 
 public enum Sources {
     public static let imageSuffixes: Set<String> = [".png", ".jpg", ".jpeg", ".webp"]
+    public static let videoSuffixes: Set<String> = [".mp4", ".mov", ".m4v"]
+    public static let mediaSuffixes = imageSuffixes.union(videoSuffixes)
+    public static let videoSamplingFPS = 24
+    public static func isVideo(_ suffix: String) -> Bool
+    public static func videoMediaType(_ suffix: String) -> String   // .mov: video/quicktime; else video/mp4
 }
 
 public protocol ImageSource: Sendable {
     var name: String { get }
     func samples() -> AsyncThrowingStream<Sample, any Error>
+    /// Optional selection hint; default delegates to samples(), and Runner still enforces only.
+    func samples(only ids: Set<String>?) -> AsyncThrowingStream<Sample, any Error>
     func count() async throws -> Int
     func sampleIDs() async throws -> [String]
 }
@@ -1537,7 +1702,7 @@ public protocol CaptionSink: Sendable {
 public struct LocalFolderSource: ImageSource {
     public let name = "folder"
     public let directory: URL
-    public let files: [URL]                          // sorted by file name, image suffixes only
+    public let files: [URL]                          // sorted by file name, Sources.mediaSuffixes
     /// ConfigurationError "input directory does not exist: <dir>" / "image stems collide; sidecar captions would be ambiguous"
     public init(directory: URL) throws
     public func sampleIDs() async throws -> [String]  // file names
@@ -1564,6 +1729,13 @@ public struct SidecarSink: CaptionSink {
     public func finalize() async throws -> JSONObject    // {"directory": <path>}
 }
 ```
+
+LocalFolderSource and HubFolderSource admit the declared media suffixes case-insensitively.
+`isMedia` checks the last path component's suffix; it does not try to decode a clip as an image.
+MediaInput uses exact clip bytes and MIME type. Source selection, caption sidecars, existing
+caption skips and human-final protection apply to clips exactly as they do to images. Python's
+local source uses the same media suffixes. Python's mixed imagefolder Hub path dispatches by
+file name; its tabular path still uses the declared datasets feature.
 
 Sorting: Python sorts `Path` objects, i.e. by full path string with byte order. Use
 `files.sorted { $0.lastPathComponent.utf8.lexicographicallyPrecedes($1.lastPathComponent.utf8) }`.
@@ -1689,14 +1861,16 @@ public struct HubFolderSource: ImageSource {
     public let repo: RepoID
     public let revision: String
     public let captionColumn: String
-    public let files: [HubFile]                       // image files only, sorted by path
+    public let files: [HubFile]                       // image and video files, sorted by path
     public let rows: [MetadataRow]                    // existing metadata.jsonl rows ([] when absent)
-    /// Lists the repo once. HubError.unsupported when the repo has parquet shards and no image files
+    /// Lists the repo once. HubError.unsupported when the repo has parquet shards and no media files
     /// ("parquet-backed datasets are not supported by the Swift core; convert to imagefolder").
     public static func open(client: HubClient, repo: RepoID, revision: String = "main", captionColumn: String = "caption") async throws -> HubFolderSource
     public func sampleIDs() async throws -> [String]  // file paths relative to the repo root (file_name)
     public func count() async throws -> Int
-    public func samples() -> AsyncThrowingStream<Sample, any Error>   // downloads each image lazily
+    public func samples() -> AsyncThrowingStream<Sample, any Error>   // downloads each image/clip lazily
+    public func samples(only ids: Set<String>?) -> AsyncThrowingStream<Sample, any Error>
+    static func isMedia(_ path: String) -> Bool       // Sources.mediaSuffixes; renamed from isImage
 }
 ```
 
@@ -1740,7 +1914,7 @@ public actor HubFolderSink: CaptionSink {
    returns the parsed `caption_response`; after `write` for a new sample `finalize` commits a
    single `metadata.jsonl` whose rows keep the existing captions, add the new one with its
    record as a JSON string, and the summary is `{repo_id, rows: 2, captions: 2, pushed: true}`.
-   With a folder origin and an empty repo tree, the commit also carries the image files.
+   With a folder origin and an empty repo tree, the commit also carries the image/clip files.
    `push: false` makes no commit and reports `pushed: false`.
 
 ---
@@ -1759,7 +1933,9 @@ public actor FakeModelClient: ModelClient {
     public init(model: String = "fake", respond: @escaping @Sendable (Request) async throws -> Reply)
     public var requests: [Request]                 // recorded, in order
     public var maxInFlight: Int                    // for the concurrency test
-    public func request(instructions:messages:output:settings:) async throws -> ModelReply
+    public func request(instructions: String, messages: [ChatMessage], output: OutputRequest,
+                        settings: RequestSettings,
+                        onPartialText: (@Sendable (String) async -> Void)? = nil) async throws -> ModelReply
     // helpers
     public static func caption(_ c: Caption, model: String = "fake") -> FakeModelClient       // always this caption
     public static func critique(_ c: Critique, model: String = "fake") -> FakeModelClient

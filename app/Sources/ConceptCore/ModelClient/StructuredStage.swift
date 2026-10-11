@@ -116,7 +116,8 @@ public struct StructuredStage<Output: Decodable & Sendable>: Sendable {
         instructions: String,
         messages: [ChatMessage],
         validate: @Sendable (Output) -> [String] = { _ in [] },
-        retryMessage: @Sendable ([String]) -> String = { $0.joined(separator: "; ") }
+        retryMessage: @Sendable ([String]) -> String = { $0.joined(separator: "; ") },
+        onPartialText: (@Sendable (String) async -> Void)? = nil
     ) async throws -> StageRun<Output> {
         var conversation = messages
         var requests = 0
@@ -125,11 +126,13 @@ public struct StructuredStage<Output: Decodable & Sendable>: Sendable {
         let retries = max(retries, 0)
 
         for attempt in 0 ... retries {
+            await onPartialText?("")
             let reply = try await endpoint.client.request(
                 instructions: instructions,
                 messages: conversation,
                 output: output,
-                settings: endpoint.settings
+                settings: endpoint.settings,
+                onPartialText: onPartialText
             )
             requests += reply.requestCount
             usage = usage.adding(reply.usage)

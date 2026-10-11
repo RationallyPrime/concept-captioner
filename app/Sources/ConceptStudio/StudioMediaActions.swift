@@ -43,7 +43,7 @@ extension StudioSession {
             let previous = self.project?.mediaState.selections[id]
             let offset = previous?.startSeconds ?? 0
             try self.project?.approveTarget(
-                id: id, data: Data(contentsOf: output), name: Sources.stem(of: id) + ".mp4",
+                id: id, sourceFile: output, name: Sources.stem(of: id) + ".mp4",
                 selection: MediaSelection(
                     originalName: previous?.originalName ?? id,
                     startSeconds: offset + selected.range.start.seconds,
@@ -60,7 +60,8 @@ extension StudioSession {
     private func mediaDidChange() {
         PhotoThumbnails.removeAll()
         startImageAnalysis()
-        message = "Approved target saved. Confirm its mapping and caption this exact crop or segment. "
-            + "Undo restores the previous target."
+        message = "Approved target saved. "
+            + (project?.job.requiresLocatorMapping == true ? "Confirm its mapping, then caption " : "Caption ")
+            + "this exact crop or segment. Undo restores the previous target."
     }
 }

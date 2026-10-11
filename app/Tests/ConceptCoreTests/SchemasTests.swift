@@ -7,6 +7,16 @@ import Testing
 
 @Suite("models: schema strictness")
 struct SchemaStrictnessTests {
+    @Test func usabilityDescribesTheDeclaredTargetInEveryCategory() throws {
+        let description = Caption.jsonSchema.objectValue?["properties"]?.objectValue?["usable"]?
+            .objectValue?["description"]?.stringValue
+        #expect(description == "False when the declared training target cannot be found in the sample. "
+            + "Then leave the caption empty and explain in note.")
+        let caption = try JSONValue(parsing: #"{"caption":"STYLE8, a landscape.","usable":true}"#)
+            .decode(Caption.self)
+        #expect(caption.usable)
+    }
+
     /// pydantic's `extra="forbid"`: a key the schema does not name is a validation error in
     /// Python, so it must be a decode failure here too (same reply, same sample status).
     @Test("Caption and Critique reject unknown keys like pydantic extra=forbid")

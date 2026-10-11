@@ -20,7 +20,8 @@ demo so an iCloud Photos download cannot be triggered there.
    opens that existing definition. The ordinary flow uses one concept; multiple concepts and
    detailed caption overrides are under Advanced settings.
 3. **Mapping:** inspect or edit the prepared assignments and confirm a sample. Model requests
-   are simulated. A sole style concept applies to the whole image or clip without face mapping.
+   are simulated. This screen is omitted for projects containing only style or motion concepts,
+   which apply to the whole target automatically.
 4. **Captioning:** choose Start captioning to load captions prepared for these exact photographs.
    Try Unusable, Failed, or Rejected to see recovery; Rejected needs the reviewer enabled.
    Return to Success and enable overwriting existing model captions to repeat a batch.
@@ -103,14 +104,15 @@ controls which samples are captioned and published. Undo curation restores the p
 selection or approved edit during the current session. Excluded media remains in the project,
 outside the training set.
 
-Define one concept and confirm its assignments. Person and object/character concepts can use
-reference images. A sole style concept is assigned to the entire image or clip automatically.
+Define one concept and press **Confirm concept and continue** (⌘↩). Person and object/character
+concepts can use reference images and need confirmed locators. Style and motion are assigned
+to the whole image or clip automatically, so their journey skips Mapping.
 On-device face matches and model proposals remain suggestions until confirmed. Parquet-only
 Hub datasets are not supported by the Swift app.
 
 Inspect and crop shows the actual crop before approval. Approval replaces the training target
-and clears its old caption and subject assignment so they can be reviewed again. A sole style
-concept is reassigned automatically. For video, choose Start time and Duration, then preview
+and clears its old caption and subject assignment so they can be reviewed again. Style and
+motion are reassigned automatically. For video, choose Start time and Duration, then preview
 the segment. Advanced: Exact frames and size exposes frame indices, supported frame counts
 (9–257, in steps of eight) and maximum width or height. Approval preserves the selected frame
 timing and full visible scene, fits dimensions to the trainer's alignment, and writes the exact
@@ -118,8 +120,11 @@ MP4 that captioning and training consume. Inspect the frames or play the approve
 
 Selected portions with variable frame timing are refused for LTX training because the current
 trainer would discard that timing. Choose a constant-frame-rate portion; the app does not retime
-it silently. Direct Gemini and Pydantic AI Gateway's Google route support native video captions.
-Other native transports, including OpenRouter and Vercel AI Gateway, report video as unsupported.
+it silently. Gemini routes support inline video; OpenRouter and vLLM accept a video content
+part when the selected model supports it. OpenAI and Anthropic refuse clips before sending.
+Python uses pydantic-ai for Gemini/OpenRouter and explicitly refuses vLLM video until that
+library supports the route. Both clients refuse encoded video request bodies of 20 MiB or more,
+including prompts, schema and retry history. See the route table in [CORE-SPEC](CORE-SPEC.md).
 Gemini receives the complete clip with sampling set to 24 frames per second; this does not mean
 that every source frame above 24 fps is observed. Select the LTX video caption format for clip
 training. LTX derives preprocessing buckets from the approved targets; it does not silently
@@ -141,10 +146,20 @@ rank-16 LTX run succeeded on one 32 GB GPU with a 125 GB host; a smaller 256-pix
 succeeded with a 62 GB host. Those checks establish execution, not training quality or a
 universal memory guarantee for other models and datasets.
 
-Publishing sends included training targets and saved sidecars at the dataset root, imagefolder metadata, and
+With a configured Hub token, publishing sends included training targets and saved sidecars at the dataset root, imagefolder metadata, and
 `concept-captioner/job.yaml` in one Hub commit. The image names remain the shared sample IDs.
 Reference images stay local so the Hub and pod readers cannot mistake them for training targets.
-Private dataset is the default. GPU rental displays
+Private dataset is the default.
+
+Without a Hub token, Publish shows **Check training data**. It checks the included targets and
+saved captions locally. **Start training** then captures a temporary immutable copy, uploads
+files directly through the authenticated pod agent and waits for dataset installation before
+launching the trainer. Each file is limited to 2 GiB and the dataset to 20 GiB. Editing is held
+only while the copies are captured. This requires the updated agent; published r2 images
+predate the upload route. No Hub dataset account is needed, but access requirements for a
+gated base model such as FLUX.1-dev still apply.
+
+GPU rental displays
 prices and a budget before creation. Stop everything cancels local work, waits for it to
 settle and stops the rented computer. Close and quit warn while work or a computer is active;
 the project remains open if a stop cannot be confirmed. Stopping clears the temporary container
@@ -157,14 +172,21 @@ before you open a project. Missing credentials do not hide that retained compute
 Caption edits remain in the open project while moving between samples or screens. Save caption
 (or Command-S while Review is active) writes the selected draft; Discard edits restores the
 saved caption. Closing, quitting or switching projects warns before discarding unsaved drafts.
-Publishing uploads saved captions and warns when drafts still need saving.
+Dataset preparation uses saved captions and warns when drafts still need saving.
+
+GPU pods shows the volume's used/free space, dataset usage and reclaimable dataset bytes.
+**Clean completed dataset copies** invokes the agent's validated cleanup step. The same policy
+runs at training/generation start: preserve current, active, failed, unknown and shared inputs
+plus the latest three resumable completed runs; remove only eligible completed-run datasets.
+Checkpoints, generated results and model caches remain. There is no cleanup timer.
 
 ### Try a trained result and reuse a run
 
 Monitor → Generated results can generate a matched base-versus-LoRA comparison for the
 supported FLUX.1-dev and LTX-2 routes. Select an available checkpoint, enter prompts and seeds,
 and generate. Both sides use the same inputs; the LoRA is the changed variable. Results are
-saved in the project gallery. Unsupported model/trainer combinations show an explanation.
+saved in the project gallery. A failed/incomplete comparison keeps downloaded partial files and
+shows a failure message; it is not presented as a saved complete pair. Unsupported model/trainer combinations show an explanation.
 Save trained model to this Mac retrieves the actual model files.
 
 Saved training runs retain the dataset revision reported by the agent, settings, available
@@ -173,7 +195,11 @@ run's settings into Training; edit them before starting a new run. It initially 
 run's recorded dataset revision. **Use this project's current dataset instead** refreshes the
 dataset revision, caption format, concept triggers and video status while preserving the
 training settings you edited. Resume latest checkpoint
-continues on the same saved storage when the selected trainer and checkpoint support it.
+continues on the same saved storage when the selected trainer and checkpoint support it,
+with a total step count above the actual checkpoint step. A pruned Hub dataset is restored
+from its pinned revision. Direct-upload runs record a local input digest instead of a Hub
+revision; Resume reuploads the original inputs and refuses changed media, saved captions or
+job settings. Repeat can use changed inputs as a new run.
 Missing revisions or wallet information are shown as unavailable. GPU estimates exclude
 separately billed storage.
 
