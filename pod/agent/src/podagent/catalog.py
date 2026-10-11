@@ -3,7 +3,8 @@
 Six services, one ``ServiceSpec`` each. Everything a client sends arrives as ``params`` and
 passes two checks before anything is built:
 
-1. ``spec.params_model.model_validate(raw)``: shape, patterns and ranges. Pure pydantic; raises
+1. ``spec.params_model.model_validate(raw)``: shape, patterns and ranges, including the rules
+   only one service has (``LtxRunConfig`` checks ``extra.preprocess``). Pure pydantic; raises
    ``pydantic.ValidationError``.
 2. ``validate(params, paths)``: the checks that need the workspace layout (``dataset.path`` under
    ``<workspace>/datasets``, ``logdir`` under ``<workspace>``, local model paths under
@@ -25,7 +26,7 @@ import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, Literal, TypeVar
+from typing import Annotated, Any, ClassVar, Literal, TypeVar
 
 from pydantic import (
     AfterValidator,
@@ -36,10 +37,12 @@ from pydantic import (
     ValidationInfo,
     field_validator,
     model_validator,
+    with_config,
 )
 from pydantic_core import InitErrorDetails, PydanticCustomError
+from typing_extensions import TypedDict
 
-from .ltx_preprocess import preprocess_options
+from .ltx_rules import LTX_HUB_MODEL, LTX_HUB_REVISION, check_preprocess
 from .settings import Paths, Settings
 
 RUN_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
@@ -267,8 +270,9 @@ class VllmParams(ServiceParams):
 
 
 class TensorboardParams(ServiceParams):
+    """No port: TensorBoard always listens on the catalog's port, which the agent proxies."""
+
     logdir: str | None = None  # default: <workspace>/runs
-    port: Port = 6006
 
     @field_validator("logdir")
     @classmethod
@@ -359,6 +363,32 @@ class RunConfig(ServiceParams):
         if self.alpha is None:
             self.alpha = self.rank
         return self
+
+
+def _ltx_preprocess(value: Any) -> Any:
+    try:
+        check_preprocess(value)
+    except ValueError as error:
+        raise PydanticCustomError("preprocess_args", "{reason}", {"reason": str(error)}) from None
+    return value
+
+
+@with_config(ConfigDict(extra="allow"))
+class LtxExtra(TypedDict, total=False):
+    """``extra`` for LTX: free-form like every trainer's, except the one key the wrapper reads."""
+
+    preprocess: Annotated[Any, AfterValidator(_ltx_preprocess)]
+
+
+class LtxRunConfig(RunConfig):
+    """``RunConfig`` for ``trainer-ltx``: ``extra.preprocess`` must pass the shared allowlist
+    (``ltx_rules.py``, which the isolated wrapper loads too), so a bad flag is a 422 before any
+    run directory exists."""
+
+    # The Hub source launch_ltx.py prepares on its own, and the revision it is pinned to.
+    hub_source: ClassVar[tuple[str, str]] = (LTX_HUB_MODEL, LTX_HUB_REVISION)
+
+    extra: LtxExtra = {}  # type: ignore[assignment]
 
 
 class PullDatasetParams(ServiceParams):
@@ -537,24 +567,6 @@ def parse_params(
     """
     model = CATALOG[name].params_model
     params = model.model_validate(dict(raw), context={"fake": fake})
-    if name == "trainer-ltx":
-        assert isinstance(params, RunConfig)
-        sizes = [params.resolution] if isinstance(params.resolution, int) else params.resolution
-        try:
-            preprocess_options(params.extra.get("preprocess"), max(sizes))
-        except ValueError as error:
-            raise ValidationError.from_exception_data(
-                type(params).__name__,
-                [
-                    {
-                        "type": PydanticCustomError(
-                            "preprocess_args", "{reason}", {"reason": str(error)}
-                        ),
-                        "loc": ("extra", "preprocess"),
-                        "input": params.extra.get("preprocess"),
-                    }
-                ],
-            ) from error
     validate(params, paths)
     return params
 
@@ -581,9 +593,16 @@ class ServiceSpec:
 
 
 def fake_argv(name: str, params: ServiceParams) -> list[str]:
-    """What the supervisor runs instead of the real argv in fake mode (POD-SPEC §3)."""
-    payload = params.model_dump_json(exclude=set(SECRET_FIELDS))
-    return [sys.executable, "-m", "podagent.fakeservice", name, payload]
+    """What the supervisor runs instead of the real argv in fake mode (POD-SPEC §3).
+
+    A service whose port is fixed by the catalog (TensorBoard) gets it added to the payload, so
+    the fake binds where the real one would.
+    """
+    payload = params.model_dump(mode="json", exclude=set(SECRET_FIELDS))
+    port = CATALOG[name].port if name in CATALOG else None
+    if port is not None and "port" not in payload:
+        payload["port"] = port
+    return [sys.executable, "-m", "podagent.fakeservice", name, json.dumps(payload)]
 
 
 P = TypeVar("P", bound=ServiceParams)
@@ -677,7 +696,7 @@ def _tensorboard_argv(params: ServiceParams, _gpus: list[int], paths: Paths) -> 
         "--host",
         "127.0.0.1",
         "--port",
-        str(p.port),
+        str(CATALOG["tensorboard"].port),
         "--reload_multifile",
         "true",
         "--reload_interval",
@@ -800,7 +819,7 @@ CATALOG: dict[str, ServiceSpec] = {
     ),
     "trainer-ltx": ServiceSpec(
         name="trainer-ltx",
-        params_model=RunConfig,
+        params_model=LtxRunConfig,
         gpus=(1, ANY),
         port=None,
         argv=_trainer_argv("ltx"),

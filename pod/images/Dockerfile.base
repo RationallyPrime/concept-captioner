@@ -168,8 +168,8 @@ RUN uv venv --python "${PYTHON_VERSION}" /opt/venvs/agent \
 # --help from a bare interpreter (the scripts README contract: nothing heavy at import time), which
 # is checked here so a broken script fails the build rather than the first service start.
 COPY pod/scripts/*.py /opt/pod/scripts/
-# One preprocessing validator for the API and the isolated trainer wrapper.
-COPY pod/agent/src/podagent/ltx_preprocess.py /opt/pod/agent/src/podagent/ltx_preprocess.py
+# One LTX rule file (preprocess allowlist, pinned Hub source) for the API and the isolated wrapper.
+COPY pod/agent/src/podagent/ltx_rules.py /opt/pod/agent/src/podagent/ltx_rules.py
 COPY --chmod=0755 pod/images/entrypoint.sh /opt/pod/entrypoint.sh
 RUN for script in /opt/pod/scripts/*.py; do \
       /opt/venvs/agent/bin/python -I "$script" --help > /dev/null || exit 1; \

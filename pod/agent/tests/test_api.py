@@ -34,6 +34,8 @@ from podagent.catalog import SERVICE_NAMES
 from podagent.gpus import FakeBackend, InventoryUnavailable
 from podagent.settings import Settings
 
+pytestmark = pytest.mark.usefixtures("tensorboard_port")
+
 WAIT_S = 10.0
 POLL_S = 0.02
 VLLM_SECRET = "super-secret-key-000"
@@ -374,8 +376,7 @@ def test_malformed_json_is_400_authenticated_and_401_otherwise(
 
 def test_every_error_uses_the_one_envelope(client: TestClient, settings: Settings) -> None:
     """One request per row of the §2.2 table (the 500 has its own test)."""
-    tb_port = free_port()
-    start(client, "tensorboard", [], {"port": tb_port})
+    start(client, "tensorboard", [], {})
     start(client, "vllm", [0], vllm_params())
     rows: list[tuple[int, str, httpx.Response]] = [
         (400, "bad_request", client.post("/plan", json={})),
@@ -493,7 +494,7 @@ def test_gpus_in_use_by_follows_running_services(client: TestClient, settings: S
     vllm = start(client, "vllm", [0], vllm_params())
     assert in_use(client) == ["vllm", None]
     # 0-GPU services never hold anything.
-    start(client, "tensorboard", [], {"port": free_port()})
+    start(client, "tensorboard", [], {})
     assert in_use(client) == ["vllm", None]
     start(client, "trainer-ltx", [1], run_config(settings))
     assert in_use(client) == ["vllm", "trainer-ltx"]
@@ -523,7 +524,7 @@ def test_gpus_empty_inventory(make_client: ClientFactory) -> None:
     )
     assert error["detail"] == {"gpu": 0, "known": []}
     # 0-GPU services still work on such a pod.
-    start(client, "tensorboard", [], {"port": free_port()})
+    start(client, "tensorboard", [], {})
 
 
 # --- §2.5 /plan, driven end to end -------------------------------------------------------------
@@ -595,7 +596,7 @@ def test_topology_two_gpus_is_concurrent(client: TestClient, settings: Settings)
         "gpu_busy",
     )
     assert error["detail"] == {"gpu": 1, "service": "trainer-ltx"}
-    start(client, "tensorboard", [], {"port": free_port()})
+    start(client, "tensorboard", [], {})
     assert in_use(client) == ["vllm", "trainer-ltx"]
 
     # Train-only on 2+ GPUs leaves GPU 0 to captioning.
@@ -851,30 +852,78 @@ def test_tensorboard_requires_auth(anon_client: TestClient, path: str) -> None:
     expect_error(anon_client.get(path), 401, "unauthorized")
 
 
-def test_tensorboard_proxy_and_browser_cookie(client: TestClient) -> None:
-    from podagent.auth import TENSORBOARD_COOKIE
-
-    port = free_port()
-    state = start(client, "tensorboard", [], {"port": port})
-    wait_for_log(state["log_path"], f"listening on 127.0.0.1:{port}")
+def test_tensorboard_proxy_with_bearer_issues_no_cookie(client: TestClient) -> None:
+    state = start(client, "tensorboard", [], {})
+    wait_for_log(state["log_path"], f"listening on 127.0.0.1:{state['port']}")
     response = client.get("/tensorboard/")
     assert response.status_code == 200 and response.text == "fakeservice tensorboard ok\n"
+    assert "set-cookie" not in response.headers  # only the explicit handshake issues one
+
+
+def test_tensorboard_session_handshake(client: TestClient) -> None:
+    from podagent.auth import TENSORBOARD_COOKIE, TENSORBOARD_SESSION_TTL_S
+
+    state = start(client, "tensorboard", [], {})
+    wait_for_log(state["log_path"], "listening on")
+    response = client.post("/tensorboard-session")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cookie"] == TENSORBOARD_COOKIE and body["path"] == "/tensorboard"
+    assert body["max_age_s"] == TENSORBOARD_SESSION_TTL_S and body["url"] == "/tensorboard/"
+    assert ISO_SECONDS_UTC.match(body["expires_at"])
+    session = body["value"]
+    # Derived, never the master token, and not reversible into it.
+    assert session != TOKEN and TOKEN not in session
     cookie = response.headers["set-cookie"]
-    assert "HttpOnly" in cookie and "Path=/tensorboard" in cookie and "SameSite=strict" in cookie
+    assert cookie.startswith(f"{TENSORBOARD_COOKIE}={session};")
+    for attribute in ("HttpOnly", "Path=/tensorboard", "SameSite=strict"):
+        assert attribute in cookie
+    assert f"Max-Age={TENSORBOARD_SESSION_TTL_S}" in cookie
+    assert "Secure" not in cookie  # fake mode over plain http
+
     client.headers.pop("authorization")
-    assert client.get("/tensorboard/data/plugin/scalars/tags").status_code == 200
-    # Even presenting the browser credential manually at a control route cannot authorize it.
     client.cookies.clear()
-    client.cookies.set(TENSORBOARD_COOKIE, TOKEN, path="/")
+    client.cookies.set(TENSORBOARD_COOKIE, session, path="/tensorboard")
+    assert client.get("/tensorboard/").status_code == 200
+    assert client.get("/tensorboard/data/plugin/scalars/tags").status_code == 200
+    # The session reaches nothing outside the TensorBoard subtree, the handshake included.
+    client.cookies.clear()
+    client.cookies.set(TENSORBOARD_COOKIE, session, path="/")
     for path in ["/health", "/gpus", "/services", "/tensorboardevil", "/tensorboard/../health"]:
         expect_error(client.get(path), 401, "unauthorized")
-    client.cookies.clear()
-    client.cookies.set(TENSORBOARD_COOKIE, "wrong-token", path="/tensorboard")
-    expect_error(client.get("/tensorboard/"), 401, "unauthorized")
+    expect_error(client.post("/tensorboard-session"), 401, "unauthorized")
+    expect_error(client.post("/services/tensorboard/stop"), 401, "unauthorized")
+    # The master token is not a session: the cookie carries only what the handshake issued.
+    for value in (TOKEN, "wrong-token", f"v1.99999999999.{'0' * 64}", session + "0"):
+        client.cookies.clear()
+        client.cookies.set(TENSORBOARD_COOKIE, value, path="/tensorboard")
+        expect_error(client.get("/tensorboard/"), 401, "unauthorized")
+
+
+def test_tensorboard_session_expires(client: TestClient) -> None:
+    from podagent.auth import TENSORBOARD_COOKIE, TENSORBOARD_SESSION_TTL_S
+
+    state = start(client, "tensorboard", [], {})
+    wait_for_log(state["log_path"], "listening on")
+    session = client.post("/tensorboard-session").json()["value"]
+    client.headers.pop("authorization")
+    client.cookies.set(TENSORBOARD_COOKIE, session, path="/tensorboard")
+    assert client.get("/tensorboard/").status_code == 200
+    auth = client.app.state.auth  # type: ignore[attr-defined]
+    later = time.time() + TENSORBOARD_SESSION_TTL_S + 1
+    auth._clock = lambda: later
+    error = expect_error(client.get("/tensorboard/"), 401, "unauthorized")
+    assert "expired" in error["message"]
+
+
+def test_tensorboard_session_needs_the_bearer(anon_client: TestClient) -> None:
+    response = anon_client.post("/tensorboard-session")
+    expect_error(response, 401, "unauthorized")
+    assert "set-cookie" not in response.headers
 
 
 def test_tensorboard_proxy_target_and_secure_cookie(
-    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, tensorboard_port: int
 ) -> None:
     import podagent.app as app_module
 
@@ -895,20 +944,22 @@ def test_tensorboard_proxy_target_and_secure_cookie(
         lambda **kwargs: original_client(transport=httpx.MockTransport(upstream), **kwargs),
     )
     with TestClient(app, base_url="https://agent", headers=AUTH) as client:
-        port = free_port()
-        start(client, "tensorboard", [], {"port": port})
+        # The proxy targets the catalog's port and never asks the supervisor.
         response = client.get(
             "/tensorboard/index.js?name=scalar", headers={"Cookie": "unrelated=secret"}
         )
         assert response.status_code == 200 and response.content == b"asset"
         assert response.headers["content-type"] == "text/javascript"
-        assert "Secure" in response.headers["set-cookie"]
-        assert "content-encoding" not in response.headers
+        assert "content-encoding" not in response.headers and "set-cookie" not in response.headers
         assert len(observed) == 1
         request = observed[0]
-        assert str(request.url) == f"http://127.0.0.1:{port}/tensorboard/index.js?name=scalar"
+        assert (
+            str(request.url)
+            == f"http://127.0.0.1:{tensorboard_port}/tensorboard/index.js?name=scalar"
+        )
         assert "authorization" not in request.headers and "cookie" not in request.headers
-        assert client.post("/services/tensorboard/stop").status_code == 200
+        handshake = client.post("/tensorboard-session")
+        assert handshake.json()["secure"] is True and "Secure" in handshake.headers["set-cookie"]
 
 
 def test_tensorboard_not_running(client: TestClient) -> None:
@@ -972,7 +1023,7 @@ def test_start_gpu_count_422(
     elif name == "push-lora":
         params = {"run_id": "nora7-h3-001", "repo_id": "org/nora7-lora"}
     else:
-        params = {"port": free_port()}
+        params = {}
     error = expect_error(
         client.post(f"/services/{name}/start", json={"gpus": gpus, "params": params}),
         422,
@@ -1022,9 +1073,9 @@ def test_start_gpu_busy_409(client: TestClient, settings: Settings) -> None:
 
 
 def test_start_already_running_409(client: TestClient) -> None:
-    first = start(client, "tensorboard", [], {"port": free_port()})
+    first = start(client, "tensorboard", [], {})
     error = expect_error(
-        client.post("/services/tensorboard/start", json={"params": {"port": free_port()}}),
+        client.post("/services/tensorboard/start", json={"params": {}}),
         409,
         "already_running",
     )
@@ -1109,7 +1160,7 @@ def test_stop_not_running_409(client: TestClient) -> None:
     for name in SERVICE_NAMES:
         error = expect_error(client.post(f"/services/{name}/stop"), 409, "not_running")
         assert error["detail"] == {"state": "idle"}
-    state = start(client, "tensorboard", [], {"port": free_port()})
+    state = start(client, "tensorboard", [], {})
     wait_for_log(state["log_path"], "listening on")
     assert client.post("/services/tensorboard/stop").status_code == 200
     error = expect_error(client.post("/services/tensorboard/stop"), 409, "not_running")
@@ -1118,7 +1169,7 @@ def test_stop_not_running_409(client: TestClient) -> None:
 
 def test_stop_accepts_no_body_or_an_empty_one(client: TestClient) -> None:
     for body in (None, {}, {"timeout_s": 5}):
-        state = start(client, "tensorboard", [], {"port": free_port()})
+        state = start(client, "tensorboard", [], {})
         wait_for_log(state["log_path"], "listening on")
         response = client.post("/services/tensorboard/stop", json=body)
         assert response.status_code == 200, (body, response.text)
@@ -1152,7 +1203,7 @@ def test_stop_timeout_escalates_to_sigkill(client: TestClient) -> None:
     ids=["zero", "half", "too-long", "string", "wrong-key", "list"],
 )
 def test_stop_body_shape_422(client: TestClient, body: Any) -> None:
-    state = start(client, "tensorboard", [], {"port": free_port()})
+    state = start(client, "tensorboard", [], {})
     error = expect_error(client.post("/services/tensorboard/stop", json=body), 422, "validation")
     assert isinstance(error["detail"], list) and error["detail"]
     assert client.get("/services/tensorboard").json()["pid"] == state["pid"]
@@ -1163,7 +1214,7 @@ def test_stop_timeout_is_capped_under_the_proxy_cutoff(client: TestClient) -> No
     # The call blocks for the whole SIGTERM wait and the RunPod proxy cuts requests at 100 s,
     # so the largest accepted wait stays observable; one second more is refused up front.
     assert MAX_STOP_TIMEOUT_S <= 90
-    state = start(client, "tensorboard", [], {"port": free_port()})
+    state = start(client, "tensorboard", [], {})
     wait_for_log(state["log_path"], "listening on")
     error = expect_error(
         client.post("/services/tensorboard/stop", json={"timeout_s": MAX_STOP_TIMEOUT_S + 0.5}),
@@ -1188,7 +1239,7 @@ def test_logs_404_before_the_first_start(client: TestClient) -> None:
 
 
 def test_logs_tail_bounds_and_truncation(client: TestClient) -> None:
-    state = start(client, "tensorboard", [], {"port": free_port()})
+    state = start(client, "tensorboard", [], {})
     wait_for_log(state["log_path"], "listening on")
 
     full = client.get("/services/tensorboard/logs", params={"tail": 5000}).json()
@@ -1214,15 +1265,14 @@ def test_logs_tail_bounds_and_truncation(client: TestClient) -> None:
 
 
 def test_logs_survive_a_stop_and_restart_truncates(client: TestClient) -> None:
-    port = free_port()
-    first = start(client, "tensorboard", [], {"port": port})
+    first = start(client, "tensorboard", [], {})
     wait_for_log(first["log_path"], "listening on")
     assert client.post("/services/tensorboard/stop").status_code == 200
     lines = client.get("/services/tensorboard/logs").json()["lines"]
     assert any("exiting 0" in line for line in lines)
     assert sum(line == "fakeservice: name=tensorboard" for line in lines) == 1
 
-    second = start(client, "tensorboard", [], {"port": port})
+    second = start(client, "tensorboard", [], {})
     assert second["log_path"] == first["log_path"]
     wait_for_log(second["log_path"], "listening on")
     lines = client.get("/services/tensorboard/logs").json()["lines"]
@@ -1232,7 +1282,7 @@ def test_logs_survive_a_stop_and_restart_truncates(client: TestClient) -> None:
 
 
 def test_logs_404_when_the_file_is_gone(client: TestClient) -> None:
-    state = start(client, "tensorboard", [], {"port": free_port()})
+    state = start(client, "tensorboard", [], {})
     wait_for_log(state["log_path"], "listening on")
     assert client.post("/services/tensorboard/stop").status_code == 200
     Path(state["log_path"]).unlink()
@@ -1305,7 +1355,7 @@ def test_invalid_params_detail_redacts_secrets(client: TestClient) -> None:
 def test_lifespan_shutdown_stops_every_running_child(app: FastAPI) -> None:
     with TestClient(app, headers=AUTH) as client:
         vllm = start(client, "vllm", [0], vllm_params())
-        tensorboard = start(client, "tensorboard", [], {"port": free_port()})
+        tensorboard = start(client, "tensorboard", [], {})
         wait_for_log(vllm["log_path"], "listening on")
         wait_for_log(tensorboard["log_path"], "listening on")
         assert in_use(client) == ["vllm", None]
@@ -1434,7 +1484,7 @@ def test_inventory_unavailable_is_503_on_gpus_plan_and_start(settings: Settings)
         assert error["code"] != "unknown_gpu"
         assert client.get("/services/vllm").json()["state"] == "idle"
         # A 0-GPU service does not consult the inventory.
-        start(client, "tensorboard", [], {"port": free_port()})
+        start(client, "tensorboard", [], {})
 
         backend.fail = False
         assert client.get("/health").json()["gpu_count"] == 1

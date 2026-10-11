@@ -10,6 +10,7 @@ app's lifespan, so the supervisor's shutdown hook stops whatever a test left run
 from __future__ import annotations
 
 import contextlib
+import socket
 from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
@@ -19,6 +20,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from podagent.app import create_app
+from podagent.catalog import CATALOG
 from podagent.gpus import FakeBackend
 from podagent.settings import Paths, Settings
 
@@ -73,3 +75,14 @@ def make_client(settings: Settings, fast_transfers: None) -> Iterator[ClientFact
             return stack.enter_context(TestClient(app, headers=AUTH if auth else None))
 
         yield factory
+
+
+@pytest.fixture
+def tensorboard_port(monkeypatch: pytest.MonkeyPatch) -> int:
+    """TensorBoard's port is fixed by the catalog (6006 on a pod, and the proxy's target); tests
+    that start one move it to a free port so they never collide with each other or the host."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = int(sock.getsockname()[1])
+    monkeypatch.setitem(CATALOG, "tensorboard", replace(CATALOG["tensorboard"], port=port))
+    return port
