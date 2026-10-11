@@ -2,9 +2,11 @@
 
 The three status documents as they stood at lab commit `e620882` (2026-10-10 23:04 UTC), before
 they were rewritten as current-state summaries on 2026-10-11. The text below is the original,
-unchanged except for one thing: evidence paths under `/tmp/` were moved on 2026-10-11 to the
+unchanged except for two things: evidence paths under `/tmp/` were moved on 2026-10-11 to the
 private notes directory and are cited at their new location,
-`~/Projects/concept-captioner-notes/evidence/2026-10-10/` (file names unchanged).
+`~/Projects/concept-captioner-notes/evidence/2026-10-10/` (file names unchanged); and relative
+link targets were repointed so they resolve from `docs/process/` (the core section's
+APP-STATUS link now points at the app section of this file).
 
 Current state: [APP-STATUS](../../app/docs/APP-STATUS.md),
 [CORE-STATUS](../../app/docs/CORE-STATUS.md), [POD-STATUS](../../pod/docs/POD-STATUS.md).
@@ -68,13 +70,13 @@ read or reused. The latest native-control attempt reported `cgWindowNotFound`; p
 shows ConceptStudio running, but the rebuilt version's window could not be inspected or its
 relaunch confirmed. Quit and reopen the preview for the human check. The preview remains unsigned;
 signed sandbox and distribution checks remain
-pending. See [RUNNING.md](RUNNING.md#caption-with-your-chatgpt-plan) for the user flow and the
+pending. See [RUNNING.md](../../app/docs/RUNNING.md#caption-with-your-chatgpt-plan) for the user flow and the
 official integration references.
 
 ## Previous UI checkpoint
 
 The development preview at `app/dist/ConceptStudio.app` includes the 2026-10-10 native UI
-refinement using Impeccable. Its design direction is recorded in [DESIGN.md](../DESIGN.md),
+refinement using Impeccable. Its design direction is recorded in [DESIGN.md](../../app/DESIGN.md),
 with APP-BRIEF remaining the product authority. The owner supplied hakonfreyr.com as a quality
 reference. The refinement uses a photo workspace, clearer hierarchy and progressive controls
 while preserving the nine-screen journey and the shared captioning/training contracts.
@@ -262,7 +264,7 @@ strict lint and formatting passed. Interrupted, failed, incomplete and malformed
 image/schema requests, cancellation, token acquisition and usage-limit handling have offline
 evidence. Real ChatGPT-plan inference still requires a user's sign-in and remains unverified.
 The app owns browser OAuth, Keychain credentials and account/model controls; see
-[APP-STATUS.md](APP-STATUS.md) for their evidence and remaining boundaries.
+[APP-STATUS.md](#conceptstudio-app-status) for their evidence and remaining boundaries.
 
 ## What exists
 
