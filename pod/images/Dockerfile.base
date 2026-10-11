@@ -163,6 +163,13 @@ RUN uv venv --python "${PYTHON_VERSION}" /opt/venvs/agent \
  && /opt/venvs/agent/bin/python -m podagent --help > /dev/null \
  && uv pip freeze --python /opt/venvs/agent/bin/python > /opt/venvs/agent/freeze.txt
 
+# The vLLM extra_args allowlist (VLLM_EXTRA_FLAGS in podagent/catalog.py) against the vLLM just
+# installed: a flag the pinned release removed fails the build here instead of passing the agent's
+# 422 check and killing vLLM at startup. A source probe; it needs no GPU and never imports vllm.
+COPY pod/images/check_vllm_flags.py /opt/pod/checks/check_vllm_flags.py
+RUN /opt/venvs/agent/bin/python -I /opt/pod/checks/check_vllm_flags.py \
+      "$(/opt/venvs/vllm/bin/python -I -c "import importlib.util as u; print(u.find_spec('vllm').submodule_search_locations[0])")"
+
 # --- scripts and entrypoint ------------------------------------------------------------------------
 # Only the programs: pod/scripts/tests/ and its README stay out of the image. Each script must answer
 # --help from a bare interpreter (the scripts README contract: nothing heavy at import time), which

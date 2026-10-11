@@ -64,9 +64,13 @@ RUN uv lock --directory /opt/ltx-2 \
 
 # The wrapper writes curves through this trainer venv's torch.utils.tensorboard. LTX's
 # upstream workspace does not install TensorBoard; the agent venv's copy is isolated.
-# Exercise an actual CPU event write/read so an import-only check cannot miss that boundary.
-RUN uv pip install --python /opt/venvs/ltx/bin/python tensorboard \
- && /opt/venvs/ltx/bin/python -c "import tempfile, importlib.metadata as m; from torch.utils.tensorboard import SummaryWriter; from tensorboard.backend.event_processing.event_accumulator import EventAccumulator; d = tempfile.TemporaryDirectory(); w = SummaryWriter(d.name); w.add_scalar('build/loss', 0.5, 1); w.close(); a = EventAccumulator(d.name); a.Reload(); e = a.Scalars('build/loss'); assert len(e) == 1 and e[0].step == 1 and e[0].value == 0.5, e; print('TensorBoard', m.version('tensorboard'), 'SummaryWriter CPU event: step 1, loss 0.5'); d.cleanup()" \
+# Pinned to 2.21.0, the version the repaired image verified (POD-STATUS), like every other
+# package in this image: an unpinned install outside the lock would pick up whatever is newest
+# at each rebuild. Exercise an actual CPU event write/read, and the version, so an import-only
+# check cannot miss that boundary.
+ARG LTX_TENSORBOARD_VERSION=2.21.0
+RUN uv pip install --python /opt/venvs/ltx/bin/python "tensorboard==${LTX_TENSORBOARD_VERSION}" \
+ && /opt/venvs/ltx/bin/python -c "import tempfile, importlib.metadata as m; assert m.version('tensorboard') == '${LTX_TENSORBOARD_VERSION}', m.version('tensorboard'); from torch.utils.tensorboard import SummaryWriter; from tensorboard.backend.event_processing.event_accumulator import EventAccumulator; d = tempfile.TemporaryDirectory(); w = SummaryWriter(d.name); w.add_scalar('build/loss', 0.5, 1); w.close(); a = EventAccumulator(d.name); a.Reload(); e = a.Scalars('build/loss'); assert len(e) == 1 and e[0].step == 1 and e[0].value == 0.5, e; print('TensorBoard', m.version('tensorboard'), 'SummaryWriter CPU event: step 1, loss 0.5'); d.cleanup()" \
  && uv pip freeze --python /opt/venvs/ltx/bin/python > /opt/venvs/ltx/freeze.txt
 
 # VERIFY on a pod (POD-SPEC §4.2): the preprocessing arguments (resolution buckets, caption field),
