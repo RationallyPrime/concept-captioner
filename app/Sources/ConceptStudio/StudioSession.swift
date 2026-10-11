@@ -348,4 +348,14 @@ final class StudioSession {
         }
         return try Skills.load(skillAccess)
     }
+
+    // MARK: - Lane ui stored state (added 2026-10-11; owned by the view layer, see AppLifetime.swift)
+
+    /// The confirmation the window is presenting, if any. Views present it; `ask(_:)` awaits the answer.
+    var pendingPrompt: StudioPrompt?
+    /// Set once the user has answered the quit confirmation, so the second terminate pass does not ask again.
+    var quitDecision: StudioCloseDecision?
+    /// The GPU workspace whose RunPod and Hub keys were last read from the Keychain.
+    @ObservationIgnored weak var gpuKeysLoadedFor: GPUWorkspace?
+    // MARK: - End lane ui stored state
 }

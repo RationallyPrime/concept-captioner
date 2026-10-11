@@ -37,7 +37,7 @@ struct WelcomeView: View {
         .sheet(isPresented: $showRetainedComputer) {
             VStack(alignment: .leading, spacing: 20) {
                 Text("Retained rented computer").font(.title2.bold())
-                GPUJourneyView(workspace: session.gpu, step: .pods, datasetRepo: session.repoID)
+                GPUJourneyView(session: session, step: .pods)
                 Button("Close controls") { showRetainedComputer = false }
                     .keyboardShortcut(.cancelAction)
             }.padding(28).frame(minWidth: 850, minHeight: 650)
@@ -99,7 +99,7 @@ struct WelcomeView: View {
                 Spacer()
                 Button("Manage retained computer") { showRetainedComputer = true }
                 Button(session.gpu.isStopping ? "Stopping…" : "Stop everything", systemImage: "stop.circle") {
-                    Task { await session.stopEverything() }
+                    session.requestStopEverything()
                 }.disabled(session.gpu.isStopping)
             }
             Text(session.gpu.message).font(.callout)

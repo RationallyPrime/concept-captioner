@@ -20,6 +20,12 @@ enum StudioStyle {
     static let surface = Color(nsColor: .controlBackgroundColor)
     static let supportingText = Color.primary.opacity(0.78)
     static let contentSpacing: CGFloat = 28
+
+    /// The one money format in the interface: US dollars in the reader's locale.
+    /// Lane app-contract provides the shared formatter; at integration this forwards to it.
+    static func money(_ amount: Double) -> String {
+        amount.formatted(.currency(code: "USD"))
+    }
 }
 
 /// A consistent heading and spacing rhythm without putting every section in a card.
