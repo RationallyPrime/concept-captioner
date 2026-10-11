@@ -96,7 +96,7 @@ struct PhotoView: View {
 
     @ViewBuilder private func content(for key: PhotoThumbnails.Key) -> some View {
         if let image = PhotoThumbnails.cached(key) ?? (loaded?.key == key ? loaded?.image : nil) {
-            Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
+            Image(nsImage: image).resizable().scaledToFit()
                 .overlay { faceBoxes }
         } else if loaded?.key == key {
             ContentUnavailableView("Cannot read this photo", systemImage: "photo")

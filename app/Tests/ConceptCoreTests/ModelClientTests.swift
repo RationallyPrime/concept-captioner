@@ -482,7 +482,9 @@ struct GeminiClientTests {
 @Suite("modelclient transport", .serialized)
 struct URLSessionTransportTests {
     func send(_ path: String) async throws -> (HTTPResponse, [URLRequest]) {
-        let transport = URLSessionTransport(session: RedirectStubProtocol.session(), timeout: 5)
+        // Generous: on a three-core CI runner the redirect's async delegate can wait seconds for a pool thread
+        // while the rest of the suite starts.
+        let transport = URLSessionTransport(session: RedirectStubProtocol.session(), timeout: 30)
         var request = URLRequest(url: URL(string: "https://origin.test\(path)")!)
         for name in Self.credentialHeaders {
             request.setValue("secret", forHTTPHeaderField: name)

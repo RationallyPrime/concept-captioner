@@ -6,5 +6,5 @@
 --wrapcollections before-first
 --commas always
 --stripunusedargs closure-only
---disable wrapMultilineStatementBraces
+--disable wrapMultilineStatementBraces,wrapIfStatementBodies,wrapIfExpressionBodies
 --exclude .build, Sources/ConceptCore/Resources
