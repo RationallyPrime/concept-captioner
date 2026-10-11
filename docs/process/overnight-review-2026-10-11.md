@@ -284,3 +284,26 @@ wording where clips can appear.
 
 Not Ari's: CI's macOS job, the clean image build on cx53, and the Hub token as a RunPod secret
 reference are separate tickets.
+
+## Fix-round decisions, decided 2026-10-11 afternoon
+
+The five items left open in `fix-round-2026-10-11.md`:
+
+1. **Relative skill and profile paths.** Python resolves them against the job file's folder,
+   as Swift does. Deviation 10 closes. Thread 3.
+2. **Caption text while it is written.** Build the app-only progress hook through the core
+   (per-sample partial text) and show it on the Captioning screen. Not part of the shared
+   contract; Python has no counterpart. Thread 3.
+3. **Training without a Hub account.** The agent gains an authenticated, path-confined,
+   size-limited upload endpoint; the app uploads images, captions and the job file to the
+   network volume in the layout the dataset pull produces when no Hub token is set. Thread 6.
+4. **Contract revisions table.** All rows approved; the preamble changes from "not ratified"
+   to "ratified by the owner on 2026-10-11". Thread 1.
+5. **Demo badge.** The badge reads "Demo · no charges"; every real amount stays
+   locale-formatted. Thread 5.
+
+**Thread 6: upload without the Hub** (pod/agent upload route and catalog entry, the dataset
+pull's local mode, the app's upload step and PublishView). Runs after Thread 2 finishes, because
+it edits the same pod and GPU files.
+
+All six threads are Ari's. Thread 1 first; 2, 3, 4, 5 in parallel; 6 after 2.
