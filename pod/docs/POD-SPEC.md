@@ -711,9 +711,13 @@ rejects combining it with `resolution_buckets`. Before downloading a model or la
 preprocessing, the wrapper counts each approved clip's actual decoded frames with `ffprobe`
 and derives its `width×height×frames` bucket. Video dimensions must be multiples of 32,
 frame counts 8n+1 from 9 through 257. Still images add the ordinary square one-frame bucket.
-The native segment editor exports and re-counts that exact segment, preserves sample timing
-and audio, and fits the full picture into a 32-aligned aspect-preserving canvas before
-captioning. Common HD footage can therefore use 512×288 or 288×512, rather than an unseen
+The native segment editor approves constant-rate selected segments only, exports and
+re-counts that exact segment, preserves sample timing and audio, and fits the full picture
+into a 32-aligned aspect-preserving canvas before captioning. Both native approval and the
+wrapper refuse variable-rate timestamps: pinned `video_utils.read_video` discards frame PTS
+and supplies `stream.average_rate` to the trainer. The wrapper checks every decoded interval
+and the final interval against that rate within container timestamp rounding tolerance.
+Choose a constant-rate source or portion; no automatic retiming is performed. Common HD footage can therefore use 512×288 or 288×512, rather than an unseen
 square center crop. Changing the target requires approval, captioning and publishing again.
 The included memory-saving training preset skips audio optimization; video/audio bytes in
 the approved target are retained. This is a visual/motion LoRA path, not an audio-training proof.

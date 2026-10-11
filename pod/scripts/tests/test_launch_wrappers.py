@@ -1530,6 +1530,27 @@ def test_ltx_preprocess_failure_stops_run(
     assert "Loading config..." not in out  # the trainer never started
 
 
+def video_probe(count, width=512, height=512, timestamps=None, duration=None):
+    return {
+        "streams": [
+            {
+                "nb_read_frames": str(count),
+                "width": width,
+                "height": height,
+                "avg_frame_rate": "30/1",
+                "time_base": "1/600",
+                "duration": str(count / 30 if duration is None else duration),
+            }
+        ],
+        "frames": [
+            {"best_effort_timestamp_time": f"{timestamp:.6f}"}
+            for timestamp in (
+                timestamps if timestamps is not None else [i / 30 for i in range(count)]
+            )
+        ],
+    }
+
+
 @pytest.mark.parametrize("count", [17, 49])
 def test_ltx_approved_video_cannot_be_shortened_by_bucket(workspace, monkeypatch, count):
     cfg = ltx_run_config(
@@ -1540,9 +1561,7 @@ def test_ltx_approved_video_cannot_be_shortened_by_bucket(workspace, monkeypatch
     ]
 
     def probe(frames):
-        return json.dumps(
-            {"streams": [{"nb_read_frames": str(frames), "width": 512, "height": 512}]}
-        )
+        return json.dumps(video_probe(frames))
 
     monkeypatch.setattr(
         ltx.subprocess,
@@ -1564,7 +1583,7 @@ def test_ltx_video_bucket_must_preserve_approved_frame_aspect(workspace, monkeyp
     entries = [
         {"media_path": str(workspace / "datasets/faces/approved.mp4"), "caption": "NORA7 walks"}
     ]
-    response = json.dumps({"streams": [{"nb_read_frames": "33", "width": 1920, "height": 1080}]})
+    response = json.dumps(video_probe(33, 1920, 1080))
     monkeypatch.setattr(
         ltx.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, response, "")
     )
@@ -1584,7 +1603,7 @@ def test_ltx_derives_exact_buckets_from_approved_video_and_still_targets(workspa
         {"media_path": str(workspace / "approved.mp4"), "caption": "NORA7 walks"},
         {"media_path": str(workspace / "still.png"), "caption": "NORA7"},
     ]
-    response = json.dumps({"streams": [{"nb_read_frames": "49", "width": 512, "height": 288}]})
+    response = json.dumps(video_probe(49, 512, 288))
     monkeypatch.setattr(
         ltx.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, response, "")
     )
@@ -1601,11 +1620,49 @@ def test_ltx_refuses_unapproved_dimensions_or_frame_count(
 ):
     cfg = ltx_run_config(workspace, extra={"preprocess": {"buckets_from_media": True}})
     entries = [{"media_path": str(workspace / "approved.mp4"), "caption": "NORA7 walks"}]
-    response = json.dumps(
-        {"streams": [{"nb_read_frames": str(count), "width": width, "height": height}]}
-    )
+    response = json.dumps(video_probe(count, width, height))
     monkeypatch.setattr(
         ltx.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, response, "")
     )
     with pytest.raises(ltx.ConfigError, match="Approve its training segment in Images"):
         ltx.check_video_lengths(entries, cfg)
+
+
+@pytest.mark.parametrize("derive", [False, True])
+def test_ltx_refuses_variable_timing_before_preprocessing(workspace, monkeypatch, derive):
+    options = {"buckets_from_media": True} if derive else {"resolution_buckets": "512x288x9"}
+    cfg = ltx_run_config(workspace, extra={"preprocess": options})
+    timestamps = [0, 0.02, 0.07, 0.10, 0.13, 0.17, 0.20, 0.23, 0.27]
+    response = json.dumps(video_probe(9, 512, 288, timestamps))
+    monkeypatch.setattr(
+        ltx.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, response, "")
+    )
+    entries = [{"media_path": str(workspace / "approved.mp4"), "caption": "NORA7 moves"}]
+    with pytest.raises(ltx.ConfigError, match=r"variable frame timing.*constant-rate"):
+        ltx.check_video_lengths(entries, cfg)
+    assert cfg["extra"]["preprocess"] == options
+
+
+def test_ltx_cfr_container_rounding_is_accepted_but_last_interval_is_checked():
+    media = Path("approved.mp4")
+    # Rounded PTS from a 600-Hz container, matching the retained native 30-fps fixture.
+    probe = video_probe(9, 512, 288)
+    ltx.check_constant_frame_timing(probe, 9, media)
+    probe["streams"][0]["duration"] = "0.340000"
+    with pytest.raises(ltx.ConfigError, match="variable frame timing"):
+        ltx.check_constant_frame_timing(probe, 9, media)
+
+
+@pytest.mark.parametrize("broken", ["frames", "duration", "rate", "nonfinite"])
+def test_ltx_missing_or_invalid_timing_is_refused(broken):
+    probe = video_probe(9)
+    if broken == "frames":
+        probe["frames"].pop()
+    elif broken == "duration":
+        del probe["streams"][0]["duration"]
+    elif broken == "rate":
+        probe["streams"][0]["avg_frame_rate"] = "0/0"
+    else:
+        probe["frames"][2]["best_effort_timestamp_time"] = "nan"
+    with pytest.raises(ltx.ConfigError, match="Cannot validate complete frame timing"):
+        ltx.check_constant_frame_timing(probe, 9, Path("approved.mp4"))

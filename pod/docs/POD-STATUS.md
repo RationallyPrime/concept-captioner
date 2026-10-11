@@ -93,8 +93,11 @@ dependencies; Ruff check/format clean. These checks use fake agent/model seams, 
   Approved MP4 targets and caption/response sidecars are retained; unrelated unlisted Hub files
   are excluded from the training snapshot. FLUX refuses videos. LTX derives actual 32-aligned
   width/height and full 8n+1 frame-count buckets from the approved clips before model preparation.
-  Explicit custom buckets are refused if they would crop or truncate those clips. The native
-  editor owns the visible fit and exact-segment export before captioning. Audio bytes remain in
+  Explicit custom buckets are refused if they would crop or truncate those clips. Variable-rate
+  selected segments are refused at native approval and backend preflight, because the pinned
+  LTX loader discards frame timestamps and reconstructs uniform timing from the average rate.
+  Constant-rate selected segments retain their timing; no automatic retiming is performed.
+  The native editor owns the visible fit and exact-segment export before captioning. Audio bytes remain in
   approved media; the included memory-saving preset trains visual/motion behavior and skips
   audio optimization.
 - Pinned primary-source witnesses are cached under

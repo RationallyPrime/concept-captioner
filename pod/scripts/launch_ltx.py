@@ -92,6 +92,8 @@ import signal
 import subprocess
 import sys
 import threading
+from fractions import Fraction
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -842,6 +844,38 @@ def buckets_from_media(cfg: dict[str, Any]) -> bool:
     return isinstance(options, dict) and options.get("buckets_from_media", False)
 
 
+def check_constant_frame_timing(probe: dict[str, Any], count: int, media: Path) -> None:
+    """Pinned read_video discards PTS and uses average_rate: accept only matching CFR input."""
+    try:
+        stream = probe["streams"][0]
+        fps = float(Fraction(stream["avg_frame_rate"]))
+        tick = float(Fraction(stream["time_base"]))
+        duration = float(stream["duration"])
+        timestamps = [float(frame["best_effort_timestamp_time"]) for frame in probe["frames"]]
+        if (
+            fps <= 0
+            or tick <= 0
+            or not math.isfinite(duration)
+            or duration <= 0
+            or len(timestamps) != count
+            or not all(map(math.isfinite, timestamps))
+        ):
+            raise ValueError("incomplete timing")
+    except (ValueError, KeyError, IndexError, TypeError, ZeroDivisionError):
+        raise ConfigError(
+            f"Cannot validate complete frame timing in approved clip {media.name}"
+        ) from None
+    tolerance = max(2 * tick, 0.00001)  # container timestamp rounding, not a retiming allowance
+    intervals = [right - left for left, right in pairwise(timestamps)]
+    intervals.append(duration - (timestamps[-1] - timestamps[0]))
+    if any(interval <= 0 or abs(interval - 1 / fps) > tolerance for interval in intervals):
+        raise ConfigError(
+            f"Approved clip {media.name} has variable frame timing. LTX training supports constant-rate "
+            "segments only. Select a constant-rate portion or a constant-rate source in Images; "
+            "the app and trainer do not silently retime footage."
+        )
+
+
 def check_video_lengths(entries: list[dict[str, str]], cfg: dict[str, Any]) -> None:
     """Require the pinned preprocessor to consume the entire approved clip.
 
@@ -868,8 +902,9 @@ def check_video_lengths(entries: list[dict[str, str]], cfg: dict[str, Any]) -> N
                 "-select_streams",
                 "v:0",
                 "-count_frames",
+                "-show_frames",
                 "-show_entries",
-                "stream=nb_read_frames,width,height",
+                "stream=nb_read_frames,width,height,avg_frame_rate,time_base,duration:frame=best_effort_timestamp_time",
                 "-of",
                 "json",
                 str(media),
@@ -879,7 +914,8 @@ def check_video_lengths(entries: list[dict[str, str]], cfg: dict[str, Any]) -> N
             check=False,
         )
         try:
-            stream = json.loads(result.stdout)["streams"][0]
+            probe = json.loads(result.stdout)
+            stream = probe["streams"][0]
             count, width, height = (
                 int(stream[key]) for key in ("nb_read_frames", "width", "height")
             )
@@ -894,8 +930,10 @@ def check_video_lengths(entries: list[dict[str, str]], cfg: dict[str, Any]) -> N
                     "Approve its training segment in Images: dimensions must be multiples of 32 "
                     "and the frame count must be 8n+1 from 9 through 257."
                 )
+            check_constant_frame_timing(probe, count, media)
             derived.add((width, height, count))
             continue
+        check_constant_frame_timing(probe, count, media)
         eligible = [bucket for bucket in buckets if bucket[2] <= count]
         chosen = min(
             eligible,
