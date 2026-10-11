@@ -9,13 +9,17 @@ them and follows the signatures here; signature changes are proposed in this doc
 ### Contract revisions
 
 Changes to the conventions and public surface after the 2026-10-10 architecture, so a reader
-comparing code with this document sees them as decisions rather than drift.
+comparing code with this document finds each one recorded rather than discovering it as drift.
+Implementing sessions made these edits; the owner has not ratified them one by one, and any of
+them is open to the owner's review.
 
 | Date | Change | Where |
 | --- | --- | --- |
 | 2026-10-10 | Provider set grows to `vercel` and the Pydantic AI Gateway upstreams | Convention 4, Resolve |
 | 2026-10-10 | Anthropic and Gemini thinking follow the model family (pydantic-ai 2.55 tables), not one fixed mapping | Convention 3, AnthropicClient, GeminiClient |
 | 2026-10-10 | `KeyStore.vllmBaseURL`: the vLLM key is bound to the endpoint the user configured | Resolve |
+| 2026-10-10 | Job `base_url` hardening: userinfo, escaped hosts, whitespace, control characters, backslashes and invalid ports are rejected; the URL that is checked is the URL that is sent | Resolve |
+| 2026-10-10 | `GeminiClient.bearerAuth`: the gateway's Google routes send the key as bearer Authorization | GeminiClient, Resolve |
 | 2026-10-10 | `Runner.run` takes an awaited `onOutcome` callback | Runner |
 | 2026-10-11 | Streaming transport (`HTTPStreamingTransport`, `HTTPStreamResponse`, server-sent events) | Transport |
 | 2026-10-11 | `ChatGPTModelClient` and `ChatGPTInferenceError`: plan-backed OpenAI captioning (owner requirement "Log in with ChatGPT") | ChatGPTModelClient |
@@ -26,8 +30,9 @@ comparing code with this document sees them as decisions rather than drift.
 | 2026-10-11 | `gateway/chat` and `gateway/responses` aliases; credential headers stripped on cross-host redirects | Resolve, Transport |
 | 2026-10-11 | `AnthropicClient.bearerAuth`: the gateway's Anthropic route sends the key as bearer Authorization | AnthropicClient, Resolve |
 | 2026-10-11 | Job `extra_headers` that carry authentication or routing are rejected | Resolve |
+| 2026-10-11 | Job `extra_body` keys `store`, `metadata`, `user`, `safety_identifier` are rejected (both languages) | RequestSettings |
 | 2026-10-11 | The app's on-disk project folder is part of the shared contract | The language-neutral contract |
-| 2026-10-11 | Relative `skill` and `.md` profile paths in a job file resolve against the job file's folder (`Job.directory`), never the working directory | Project folder, Job, Skills, Runner |
+| 2026-10-11 | Swift resolves relative `skill` and `.md` profile paths in a job file against the job file's folder (`Job.directory`); Python still uses the working directory | Project folder, Job, Skills, Runner, Deviation 10 |
 | 2026-10-11 | Redirect credential stripping compares the origin (scheme, host, port), not the host alone | Transport |
 
 ## Package
@@ -105,7 +110,7 @@ Conventions (non-negotiable):
 | response record | one JSON object per captioned image, keys of `runner.py::_base_record` |
 | sidecars | `<stem>.txt` caption, `<stem>.json` record, `_summary.json` (CLI/app) |
 | Hub dataset | imagefolder convention: images + `metadata.jsonl` with `file_name`, `caption`, `caption_response` |
-| project folder | the layout below; the app writes it, the CLI runs on it unchanged |
+| project folder | the layout below; the app writes it, the CLI runs on it unchanged when started from the project folder (Deviation 10) |
 
 #### Project folder
 
@@ -124,25 +129,29 @@ The app's project is a folder the CLI can caption as is:
                  never read by the core or the CLI and never published
 ```
 
-**Relative paths in a job file resolve against the folder that holds the job file**, never
-against the process's working directory. That covers `skill` and a `profile` given as a path to
-a `.md` file (a bare profile name is looked up in the skill). `~` is expanded and an absolute
-path is used as is, but the app never writes either. The app's working directory is `/`, and a
-CLI can be launched from anywhere, so a working-directory rule would break the project as soon
-as either ran from somewhere else. A job that was not read from a file (parsed from text, built
-in memory) has no folder; its relative paths fall back to the working directory. Command-line
-overrides (`--skill`, `--profile`) are the caller's own paths and resolve against the working
-directory as usual.
+**Relative paths in a job file: the two implementations differ (Deviation 10).** That covers
+`skill` and a `profile` given as a path to a `.md` file (a bare profile name is looked up in the
+skill). `~` is expanded and an absolute path is used as is, but the app never writes either.
 
-Swift: `Job.load(contentsOf:)` records the folder in `Job.directory`; `Runner` loads the skill
-with `Skills.load(path: job.skill, relativeTo: job.directory)` and the profile with
-`skill.profile(job.profile, relativeTo: job.directory)`. Python: `Job.load(path)` keeps
-`path.parent` and the CLI and runner resolve `job.skill` and a `.md` `job.profile` against it.
+- Swift resolves them against the folder that holds the job file. `Job.load(contentsOf:)`
+  records that folder in `Job.directory`; `Runner` loads the skill with
+  `Skills.load(path: job.skill, relativeTo: job.directory)` and the profile with
+  `skill.profile(job.profile, relativeTo: job.directory)`. A job that was not read from a file
+  (parsed from text, built in memory) has no folder, and its relative paths fall back to the
+  working directory. `directory` is not serialized, so a caller that rebuilds a job (for
+  example `Job(json: job.jsonValue)`) must copy `directory` onto the rebuilt value.
+- Python resolves them against the process's working directory: `Job.load(path)` keeps no
+  path, and `skills.load(job.skill)` and `Skill.profile(job.profile)` use the path as given.
+
+Both agree when the CLI is started from the project folder. Command-line overrides (`--skill`,
+`--profile`) are the caller's own paths and resolve against the working directory in both.
 
 Image file stems are unique within `images/` (the source rejects colliding stems), and a file
-name is the sample ID in `job.yaml`, the sidecars, and a published Hub dataset. From any
-directory, the CLI equivalent of the app's captioning is
-`concept-captioner run <project>/job.yaml --images <project>/images --out <project>/images`.
+name is the sample ID in `job.yaml`, the sidecars, and a published Hub dataset. Run from the
+project folder, the CLI equivalent of the app's captioning is
+`concept-captioner run job.yaml --images images --out images`. Started from another directory,
+the Python CLI cannot find a project's custom `skill: ./skill/<name>` until the Python change in
+Deviation 10 lands.
 
 ### Deviations from the Python code, decided here
 
@@ -181,6 +190,14 @@ directory, the CLI equivalent of the app's captioning is
    job's `base_url` has the same scheme, host and port (default ports filled in) as the
    configured endpoint; another port on the same host is another service. Python still compares
    the host alone. (Python fix to file.)
+10. **Relative `skill` and `.md` profile paths in a job file resolve against the job file's
+    folder in Swift, against the working directory in Python.** The app's working directory is
+    `/`, so under the working-directory rule the app could not load a project's custom
+    `skill: ./skill/<name>` at all. Python is unchanged and works when the CLI is started from
+    the project folder. Proposed Python fix, for the owner to accept or reject since it changes
+    the shared job file's meaning: `Job.load(path)` keeps `path.parent`, and the CLI and runner
+    resolve `job.skill` and a `.md` `job.profile` against it. (Python fix to file, pending the
+    owner.)
 
 ---
 
@@ -1079,8 +1096,8 @@ logit_bias, parallel_tool_calls, service_tier, extra_headers, extra_body or an i
 `ConfigurationError`. An empty token or one containing whitespace -> `ConfigurationError`.
 
 Reply: the body is read as server-sent events. Lifecycle and delta events (`response.created`,
-`response.in_progress`, `response.output_*`, `[DONE]`) are skipped; the event type is the
-JSON `type`, else the SSE `event:` name. `response.completed` whose `response.status` is
+`response.in_progress`, `response.output_*`, `[DONE]`) and keep-alives whose data is empty are
+skipped; the event type is the JSON `type`, else the SSE `event:` name. `response.completed` whose `response.status` is
 `completed` is parsed like OpenAIResponsesClient's reply; `response.failed` or `error` ->
 `ChatGPTInferenceError`; `response.incomplete` -> `ModelError.malformedReply` naming the reason;
 an event that is not JSON, or a body that ends without a terminal event ->

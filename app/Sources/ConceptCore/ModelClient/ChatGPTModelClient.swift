@@ -192,11 +192,11 @@ public struct ChatGPTModelClient: ModelClient {
     }
 
     /// The reply for a terminal success event, a thrown error for a terminal failure, nil for
-    /// everything else (created, in_progress, deltas, `[DONE]`).
+    /// everything else (created, in_progress, deltas, `[DONE]`, and a keep-alive whose data is empty).
     private func terminalReply(
         _ event: ServerSentEvent, response: HTTPStreamResponse, mode: OutputMode
     ) throws -> ModelReply? {
-        guard event.data != "[DONE]" else { return nil }
+        guard event.data != "[DONE]", !event.data.isEmpty else { return nil }
         guard let envelope = try? JSONValue(parsing: Data(event.data.utf8)) else {
             throw ModelError.malformedReply("ChatGPT returned an invalid stream event. No caption was saved.")
         }

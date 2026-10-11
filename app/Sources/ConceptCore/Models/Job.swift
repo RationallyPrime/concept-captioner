@@ -243,12 +243,10 @@ public struct Job: Sendable, Equatable {
         try check()
     }
 
-    /// Equality is the job file's content; where it was loaded from does not count.
+    /// Equality is the job file's content (`jsonValue`), so a field added to the job file is
+    /// compared without touching this; where the job was loaded from (`directory`) does not count.
     public static func == (lhs: Job, rhs: Job) -> Bool {
-        lhs.skill == rhs.skill && lhs.profile == rhs.profile && lhs.concepts == rhs.concepts
-            && lhs.samples == rhs.samples && lhs.singleSubjectOnly == rhs.singleSubjectOnly
-            && lhs.endpoints == rhs.endpoints && lhs.captionerThinking == rhs.captionerThinking
-            && lhs.criticThinking == rhs.criticThinking && lhs.policyOverrides == rhs.policyOverrides
+        lhs.jsonValue == rhs.jsonValue
     }
 
     /// A path from the job file as a file URL: `~` expanded, an absolute path as is, a relative

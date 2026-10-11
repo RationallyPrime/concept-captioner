@@ -321,6 +321,18 @@ struct ChatGPTModelClientTests {
         #expect(reply.text == ChatGPTWire.caption)
     }
 
+    @Test func emptyDataKeepAliveDoesNotFailTheCaption() async throws {
+        // A lone `data:` line dispatches an event whose data is "" (WHATWG); it is not a reply.
+        let script = ["data:", ""] + ChatGPTWire.event(ChatGPTWire.completed())
+        let wire = ChatGPTStreamWire { _ in ChatGPTWire.response(script) }
+        let reply = try await ChatGPTWire.request(ChatGPTModelClient(
+            model: "gpt-6.1-sol",
+            accessToken: { "oauth" },
+            transport: wire
+        ))
+        #expect(reply.text == ChatGPTWire.caption)
+    }
+
     @Test(arguments: ["response.failed", "response.incomplete", "error", "truncated", "malformed", "wrong-status"])
     func partialValidJSONDoesNotMakeFailureSuccessful(_ kind: String) async {
         let delta: JSONValue = .object([

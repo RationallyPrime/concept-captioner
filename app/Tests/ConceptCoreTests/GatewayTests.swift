@@ -76,6 +76,23 @@ struct GatewayTests {
         #expect(body.field("store") == (url.hasSuffix("/responses") ? .bool(false) : nil))
     }
 
+    /// The gateway's Google routes are Vertex with bearer auth; direct `google` is the Developer
+    /// API with only `x-goog-api-key`. The `api` flag changes model capabilities, not the URL, so
+    /// the wire test above cannot see it.
+    @Test(arguments: [
+        ("gateway/google", GeminiClient.API.vertex, true),
+        ("gateway/google-cloud", GeminiClient.API.vertex, true),
+        ("google", GeminiClient.API.developer, false),
+    ])
+    func googleRoutesChooseTheGeminiAPI(kind: String, api: GeminiClient.API, bearer: Bool) throws {
+        let resolved = try Endpoints.resolve(
+            "\(kind):gemini-3.8-flash", keys: GatewayWire.keys, transport: GatewayWire.transport()
+        )
+        let client = try #require(resolved.client as? GeminiClient)
+        #expect(client.api == api)
+        #expect(client.bearerAuth == bearer)
+    }
+
     @Test(arguments: ["us", "eu"])
     func keyRegionChoosesFixedHost(_ region: String) async throws {
         let transport = try GatewayWire.transport()
