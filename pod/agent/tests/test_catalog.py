@@ -19,6 +19,7 @@ from podagent.catalog import (
     FAKE_EXTRA_FLAGS,
     SERVICE_NAMES,
     VLLM_EXTRA_FLAGS,
+    LtxRunConfig,
     PullDatasetParams,
     PushLoraParams,
     RunConfig,
@@ -76,7 +77,7 @@ def test_catalog_contract() -> None:
         "vllm": ((1, 1), 8000, VllmParams),
         "tensorboard": ((0, 0), 6006, TensorboardParams),
         "trainer-aitoolkit": ((1, ANY), None, RunConfig),
-        "trainer-ltx": ((1, ANY), None, RunConfig),
+        "trainer-ltx": ((1, ANY), None, LtxRunConfig),
         "pull-dataset": ((0, 0), None, PullDatasetParams),
         "push-lora": ((0, 0), None, PushLoraParams),
     }
@@ -357,11 +358,11 @@ def test_tensorboard_argv_defaults_to_runs(paths: Paths, agent_settings: Setting
 
 def test_tensorboard_custom_logdir(paths: Paths) -> None:
     logdir = str(paths.runs / "nora7-h3-001" / "tensorboard")
-    params = TensorboardParams(logdir=logdir, port=6007)
+    params = TensorboardParams(logdir=logdir)
     validate(params, paths)
     argv = CATALOG["tensorboard"].argv(params, [], paths)
     assert argv[argv.index("--logdir") + 1] == logdir
-    assert argv[argv.index("--port") + 1] == "6007"
+    assert argv[argv.index("--port") + 1] == "6006"  # the catalog's port, never a param
     validate(TensorboardParams(logdir=str(paths.workspace)), paths)  # the workspace itself is ok
 
 
@@ -374,7 +375,7 @@ def test_tensorboard_logdir_must_be_under_workspace(paths: Paths, logdir: str) -
 
 
 @pytest.mark.parametrize(
-    "bad", [{"logdir": "runs"}, {"logdir": ""}, {"port": 1023}, {"port": 65536}]
+    "bad", [{"logdir": "runs"}, {"logdir": ""}, {"port": 6006}, {"port": 7000}]
 )
 def test_tensorboard_rejects(bad: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
@@ -767,6 +768,30 @@ def test_push_lora_rejects(bad: dict[str, Any]) -> None:
         PushLoraParams.model_validate({"run_id": "nora7-h3-001", "repo_id": "you/x", **bad})
 
 
+# --- LTX: the trainer-specific rule lives in its params model ---------------------------------
+
+
+def test_ltx_preprocess_is_checked_by_the_ltx_params_model(paths: Paths) -> None:
+    bad = run_config(paths, extra={"preprocess": {"args": ["--output-dir=/tmp"]}, "lora": {}})
+    with pytest.raises(ValidationError) as exc:
+        LtxRunConfig.model_validate(bad)
+    assert [(e["type"], tuple(e["loc"])) for e in exc.value.errors()] == [
+        ("preprocess_args", ("extra", "preprocess"))
+    ]
+    with pytest.raises(ValidationError):
+        parse_params("trainer-ltx", bad, paths)
+    # The rule is LTX's: ai-toolkit has no preprocess step and keeps a free-form extra.
+    assert isinstance(parse_params("trainer-aitoolkit", bad, paths), RunConfig)
+    good = {"resolution_buckets": "768x768x49", "args": ["--decode", "--batch-size=2"]}
+    cfg = LtxRunConfig.model_validate(run_config(paths, extra={"preprocess": good, "lora": {}}))
+    assert cfg.extra == {"preprocess": good, "lora": {}}
+    assert LtxRunConfig.model_validate(run_config(paths)).extra == {}
+    assert LtxRunConfig.hub_source == (
+        "Lightricks/LTX-2",
+        "dfcc2108383fe1aaa0584bdf55d368a4bdadd90c",
+    )
+
+
 # --- fake mode, parse_params, argv hygiene -------------------------------------------------------
 
 
@@ -786,6 +811,11 @@ def test_fake_argv_strips_secrets(paths: Paths) -> None:
         "max_num_seqs": 16,
         "served_model_name": None,
         "extra_args": [],
+    }
+    # TensorBoard has no port param; the fake binds the catalog's port like the real one.
+    assert json.loads(fake_argv("tensorboard", TensorboardParams())[4]) == {
+        "logdir": None,
+        "port": 6006,
     }
 
 
@@ -809,7 +839,7 @@ def test_every_argv_element_is_a_string_and_builders_reject_wrong_params(paths: 
         "vllm": VllmParams(model="org/model"),
         "tensorboard": TensorboardParams(),
         "trainer-aitoolkit": RunConfig.model_validate(run_config(paths)),
-        "trainer-ltx": RunConfig.model_validate(run_config(paths)),
+        "trainer-ltx": LtxRunConfig.model_validate(run_config(paths)),
         "pull-dataset": PullDatasetParams(repo_id="you/faces"),
         "push-lora": PushLoraParams(run_id="nora7-h3-001", repo_id="you/x"),
     }

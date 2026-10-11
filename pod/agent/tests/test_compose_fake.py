@@ -27,7 +27,7 @@ AGENT_PACKAGE_INPUTS = {
     "pod/agent/pyproject.toml",
     "pod/agent/README.md",
     "pod/agent/src/",
-    "pod/agent/src/podagent/ltx_preprocess.py",  # shared with the isolated wrapper
+    "pod/agent/src/podagent/ltx_rules.py",  # shared with the isolated wrapper
 }
 
 # Agent and vLLM: the public ports; TensorBoard is private behind the agent.

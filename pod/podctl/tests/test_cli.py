@@ -12,6 +12,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -146,6 +147,10 @@ def test_parser_covers_every_spec_command() -> None:
         ["train", "aitoolkit", "--config", "run.json", "--gpus", "1,2"],
         ["train", "ltx", "--config", "run.json", "--gpus", "1", "--wait"],
         ["caption-up", "Qwen/Qwen3-VL-32B-Instruct", "--gpus", "1"],
+        ["files", "nora7-h3-001"],
+        ["pull", "nora7-h3-001", "--to", "out", "--include", "*.safetensors"],
+        ["pull", "nora7-h3-001", "--latest"],
+        ["tensorboard", "data/runs", "--session"],
     ):
         args = parser.parse_args(["--url", URL, "--token", TOKEN, *argv])
         assert args.command == argv[0]
@@ -159,6 +164,9 @@ def test_parser_covers_every_spec_command() -> None:
         "stop",
         "logs",
         "events",
+        "files",
+        "pull",
+        "tensorboard",
         "train",
         "caption-up",
     }
@@ -1036,3 +1044,189 @@ def test_client_wraps_non_envelope_json_error() -> None:
         client.health()
     assert info.value.code == "http"
     assert info.value.detail == {"detail": "Not Found"}
+
+
+# --- run files, pull, tensorboard -------------------------------------------------------
+
+RUN_ID = "nora7-h3-001"
+STEP1 = b"lora step one" * 100
+STEP2 = b"lora step two" * 120
+SAMPLE = b"png bytes"
+
+
+def listed(path: str, data: bytes, modified_at: str) -> dict[str, Any]:
+    import hashlib
+
+    return {
+        "path": path,
+        "size": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "modified_at": modified_at,
+    }
+
+
+def files_payload() -> dict[str, Any]:
+    return {
+        "run_id": RUN_ID,
+        "root": f"/workspace/runs/{RUN_ID}/output",
+        "files": [
+            listed("checkpoints/step 1.safetensors", STEP1, "2026-10-10T19:40:00Z"),
+            listed("checkpoints/step 2.safetensors", STEP2, "2026-10-10T19:45:00Z"),
+            listed("samples/a.png", SAMPLE, "2026-10-10T19:45:01Z"),
+        ],
+    }
+
+
+def serve_files(agent: FakeAgent, contents: dict[str, bytes]) -> None:
+    agent.on("GET", f"/runs/{RUN_ID}/files", (200, files_payload()))
+    for path, data in contents.items():
+        agent.on(
+            "GET",
+            f"/runs/{RUN_ID}/files/{path}",
+            lambda _request, data=data: httpx.Response(
+                200, content=data, headers={"Content-Type": "application/octet-stream"}
+            ),
+        )
+
+
+def test_files_lists_the_output(agent: FakeAgent, run: Callable[..., tuple[int, str, str]]) -> None:
+    agent.on("GET", f"/runs/{RUN_ID}/files", (200, files_payload()))
+    code, out, _ = run("files", RUN_ID)
+    assert code == 0
+    lines = out.splitlines()
+    assert lines[0].split() == ["PATH", "SIZE", "SHA256", "MODIFIED"]
+    assert "checkpoints/step 2.safetensors" in out and str(len(STEP2)) in out
+
+
+def test_pull_downloads_and_verifies_everything(
+    agent: FakeAgent, run: Callable[..., tuple[int, str, str]], tmp_path: Path
+) -> None:
+    contents = {
+        "checkpoints/step 1.safetensors": STEP1,
+        "checkpoints/step 2.safetensors": STEP2,
+        "samples/a.png": SAMPLE,
+    }
+    serve_files(agent, contents)
+    code, out, _ = run("pull", RUN_ID, "--to", str(tmp_path / "lora"))
+    assert code == 0
+    for path, data in contents.items():
+        assert (tmp_path / "lora" / path).read_bytes() == data
+        assert str(tmp_path / "lora" / path) in out
+    assert not list((tmp_path / "lora").rglob("*.partial"))
+    # Segments are escaped one by one; the bearer goes with every request.
+    raw = {seen.raw_path for seen in agent.requests}
+    assert f"/runs/{RUN_ID}/files/checkpoints/step%202.safetensors" in raw
+    assert all(header == f"Bearer {TOKEN}" for header in agent.auth)
+    # A second pull verifies what is there and downloads nothing.
+    before = len(agent.requests)
+    code, _, err = run("pull", RUN_ID, "--to", str(tmp_path / "lora"))
+    assert code == 0 and err.count("already here, verified") == 3
+    assert len(agent.requests) == before + 1  # the listing only
+
+
+def test_pull_latest_takes_the_newest_safetensors(
+    agent: FakeAgent, run: Callable[..., tuple[int, str, str]], tmp_path: Path
+) -> None:
+    serve_files(agent, {"checkpoints/step 2.safetensors": STEP2})
+    code, _, _ = run("pull", RUN_ID, "--to", str(tmp_path), "--latest")
+    assert code == 0
+    assert [p.name for p in tmp_path.rglob("*") if p.is_file()] == ["step 2.safetensors"]
+
+
+def test_pull_include_filters(
+    agent: FakeAgent, run: Callable[..., tuple[int, str, str]], tmp_path: Path
+) -> None:
+    serve_files(agent, {"samples/a.png": SAMPLE})
+    code, _, _ = run("pull", RUN_ID, "--to", str(tmp_path), "--include", "samples/*")
+    assert code == 0
+    assert [p.name for p in tmp_path.rglob("*") if p.is_file()] == ["a.png"]
+    code, _, err = run("pull", RUN_ID, "--to", str(tmp_path), "--include", "*.ckpt")
+    assert code == 1 and "nothing to pull" in err
+
+
+def test_pull_refuses_a_corrupt_download(
+    agent: FakeAgent, run: Callable[..., tuple[int, str, str]], tmp_path: Path
+) -> None:
+    serve_files(agent, {"checkpoints/step 2.safetensors": STEP2[:-1] + b"X"})
+    code, _, err = run("pull", RUN_ID, "--to", str(tmp_path), "--latest")
+    assert code == 1 and "sha256" in err and "nothing was kept" in err
+    assert not [p for p in tmp_path.rglob("*") if p.is_file()]
+
+
+@pytest.mark.parametrize("bad", ["../escape.safetensors", "/etc/x.safetensors", "a//b.safetensors"])
+def test_pull_never_writes_outside_the_destination(
+    agent: FakeAgent, run: Callable[..., tuple[int, str, str]], tmp_path: Path, bad: str
+) -> None:
+    payload = {
+        "run_id": RUN_ID,
+        "root": "/x",
+        "files": [listed(bad, STEP1, "2026-10-10T00:00:00Z")],
+    }
+    agent.on("GET", f"/runs/{RUN_ID}/files", (200, payload))
+    code, _, err = run("pull", RUN_ID, "--to", str(tmp_path / "dest"))
+    assert code == 2 and "unsafe path" in err
+    assert not list(tmp_path.rglob("*.safetensors"))
+    assert len(agent.requests) == 1
+
+
+def test_pull_agent_error_is_exit_1(
+    agent: FakeAgent, run: Callable[..., tuple[int, str, str]], tmp_path: Path
+) -> None:
+    agent.on("GET", f"/runs/{RUN_ID}/files", (200, files_payload()))
+    agent.on(
+        "GET",
+        f"/runs/{RUN_ID}/files/checkpoints/step 2.safetensors",
+        (404, envelope("not_found", "no file")),
+    )
+    code, _, err = run("pull", RUN_ID, "--to", str(tmp_path), "--latest")
+    assert code == 1 and "not_found" in err
+    assert not [p for p in tmp_path.rglob("*") if p.is_file()]
+
+
+def test_tensorboard_with_bearer(
+    agent: FakeAgent, run: Callable[..., tuple[int, str, str]]
+) -> None:
+    agent.on(
+        "GET",
+        "/tensorboard/data/runs",
+        lambda _request: httpx.Response(200, json=[f"{RUN_ID}/tensorboard"]),
+    )
+    code, out, _ = run("tensorboard")
+    assert code == 0 and json.loads(out) == [f"{RUN_ID}/tensorboard"]
+    assert agent.auth == [f"Bearer {TOKEN}"]
+
+
+def test_tensorboard_session_fetches_with_the_cookie_only(
+    agent: FakeAgent, run: Callable[..., tuple[int, str, str]]
+) -> None:
+    session = {
+        "cookie": "podagent_tensorboard",
+        "value": "v1.1790043200." + "a" * 64,
+        "path": "/tensorboard",
+        "max_age_s": 43200,
+        "expires_at": "2026-10-11T12:00:00Z",
+    }
+    cookies: list[str] = []
+
+    def page(request: httpx.Request) -> httpx.Response:
+        cookies.append(request.headers.get("cookie", ""))
+        return httpx.Response(200, text="<html>tb</html>")
+
+    agent.on("POST", "/tensorboard-session", (200, session))
+    agent.on("GET", "/tensorboard/", page)
+    code, out, err = run("tensorboard", "", "--session")
+    assert code == 0 and out == "<html>tb</html>\n" and "2026-10-11T12:00:00Z" in err
+    assert agent.auth == [f"Bearer {TOKEN}", ""]  # the handshake has the bearer, the page not
+    assert cookies == [f"podagent_tensorboard={session['value']}"]
+
+
+def test_tensorboard_not_running_is_exit_1(
+    agent: FakeAgent, run: Callable[..., tuple[int, str, str]]
+) -> None:
+    agent.on(
+        "GET",
+        "/tensorboard/data/runs",
+        (409, envelope("not_running", "TensorBoard is not running")),
+    )
+    code, _, err = run("tensorboard")
+    assert code == 1 and "not_running" in err

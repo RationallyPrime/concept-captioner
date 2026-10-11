@@ -15,8 +15,8 @@ RUN pip install --no-cache-dir /opt/src/agent \
  && ln -s /usr/local/bin/python /opt/venvs/agent/bin/python
 COPY pod/images/entrypoint.sh /opt/pod/entrypoint.sh
 COPY pod/scripts/*.py /opt/pod/scripts/
-# One preprocessing validator for the API and the isolated trainer wrapper.
-COPY pod/agent/src/podagent/ltx_preprocess.py /opt/pod/agent/src/podagent/ltx_preprocess.py
+# One LTX rule file (preprocess allowlist, pinned Hub source) for the API and the isolated wrapper.
+COPY pod/agent/src/podagent/ltx_rules.py /opt/pod/agent/src/podagent/ltx_rules.py
 RUN chmod +x /opt/pod/entrypoint.sh
 # Same public ports as Dockerfile.base; TensorBoard stays internal.
 EXPOSE 8800 8000

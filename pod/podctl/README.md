@@ -1,6 +1,6 @@
 # podctl
 
-A small terminal client for the pod agent (`../agent`): one subcommand per API call plus two
+A small terminal client for the pod agent (`../agent`): one subcommand per API call plus a few
 sugars, compact tables by default, raw JSON with `--json`. The contract is `../docs/POD-SPEC.md`
 §8; the agent's endpoints and error envelope are §2.
 
@@ -17,6 +17,9 @@ podctl logs vllm --tail 50 --follow
 podctl start pull-dataset --params '{"repo_id": "you/nora7-faces"}' --wait
 podctl train aitoolkit --config run.json --gpus 1,2
 podctl events nora7-h3-001
+podctl tensorboard --session                               # the browser path: handshake, then cookie only
+podctl files nora7-h3-001
+podctl pull nora7-h3-001 --latest --to ./nora7-lora        # the final LoRA, no Hub account needed
 podctl stop vllm
 ```
 
@@ -35,6 +38,9 @@ podctl stop vllm
 | `stop NAME [--timeout 30]` | `POST /services/NAME/stop` | `--timeout` 1–90 s between SIGTERM and SIGKILL (the call blocks for the wait; the proxy cuts at 100 s) |
 | `logs NAME [--tail N] [--follow]` | `GET /services/NAME/logs` | plain lines, no decoration; `--tail` 1–5000 (default 200) |
 | `events RUN_ID` | `GET /runs/RUN_ID/events` | header, then `TAG STEP VALUE COUNT WALL_TIME` sorted by tag |
+| `files RUN_ID` | `GET /runs/RUN_ID/files` | `PATH SIZE SHA256 MODIFIED` for every regular file under the run's `output/` |
+| `pull RUN_ID [--to DIR] [--latest \| --include GLOB …]` | `GET /runs/RUN_ID/files`, then `GET /runs/RUN_ID/files/PATH` per file | default DIR `./RUN_ID`; files keep their listed relative paths. `--latest`: only the newest `*.safetensors` (push-lora's rule for the final LoRA); `--include` (repeatable, `fnmatch`): only matching paths. Each file streams to `<name>.partial` and is renamed only when its size and SHA-256 match the listing; a file already present with the listed digest is not downloaded again. A listed path with `..`, a leading `/` or an empty segment is refused (exit 2) before anything is written. Prints each local path (`--json`: one document with `local_path` added per file) |
+| `tensorboard [PATH] [--session]` | `GET /tensorboard/PATH` (default `data/runs`) | prints TensorBoard's body as-is. `--session` first calls `POST /tensorboard-session`, then sends only the session cookie, no bearer: the request a browser makes |
 | `train aitoolkit\|ltx --config run.json --gpus 1,2 [--wait]` | `POST /services/trainer-<x>/start` | the file (POD-SPEC §4.1) is the params, verbatim; the agent validates it |
 | `caption-up MODEL [--gpus 0] [--params JSON \| --params-file F]` | `POST /services/vllm/start` | params `{"model": MODEL}`; extra vLLM params merge under it |
 
@@ -65,9 +71,9 @@ Errors and progress notes go to stderr.
 | exit | meaning |
 | --- | --- |
 | 0 | success |
-| 1 | the agent answered with its error envelope (printed on stderr: `podctl: error CODE (STATUS): message`, with `invalid_params` details listed per field; the raw envelope with `--json`); also a `--wait` that ends in `failed` |
+| 1 | the agent answered with its error envelope (printed on stderr: `podctl: error CODE (STATUS): message`, with `invalid_params` details listed per field; the raw envelope with `--json`); also a `--wait` that ends in `failed`, a pulled file whose size or SHA-256 does not match the listing (nothing is kept), and `pull --latest`/`--include` that selects nothing |
 | 2 | usage: missing URL/token, bad JSON, bad `--gpus`, a value outside its documented range |
-| 3 | cannot reach the agent: transport error, or a 502/503/504 that is not the agent's envelope (the RunPod proxy while the pod boots) |
+| 3 | cannot reach the agent: transport error, or a 502/503/504/520–526 that is not the agent's envelope (the RunPod proxy while the pod boots) |
 | 130 | interrupted with Ctrl-C during `--wait`/`--follow` |
 
 ## Testing

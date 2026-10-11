@@ -12,6 +12,9 @@ What a client can observe is decided here and in ``errors.py``:
 - FastAPI answers two things before that dependency runs (an unmatched path or method, and a
   body that is not JSON); ``_install_edge_handlers`` folds both into the error envelope and
   checks the bearer first, so an unauthenticated client never sees anything but ``401``;
+- ``/tensorboard`` proxies the catalog's fixed loopback TensorBoard port; a browser reaches it
+  with the derived session cookie that ``POST /tensorboard-session`` issues (``auth.py``);
+- ``/runs/{id}/files`` serves the run's output directory and nothing else (``artifacts.py``);
 - the lifespan's exit stops every running child: the agent is PID 1, so its shutdown is the
   container's.
 """
@@ -30,14 +33,22 @@ import httpx
 from fastapi import Depends, FastAPI, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import __version__
-from .auth import TENSORBOARD_COOKIE, TENSORBOARD_PREFIX, check_request_auth, require_bearer
+from .artifacts import RunFiles, list_run_files, resolve_run_file
+from .auth import (
+    TENSORBOARD_COOKIE,
+    TENSORBOARD_PREFIX,
+    TENSORBOARD_SESSION_PATH,
+    Authenticator,
+    require_bearer,
+)
+from .catalog import CATALOG
 from .errors import (
     AgentError,
     BadRequest,
@@ -100,12 +111,10 @@ def _envelope(error: AgentError) -> JSONResponse:
     return JSONResponse(status_code=error.status, content=error.envelope())
 
 
-def _denied(request: Request, token: str) -> JSONResponse | None:
-    """The ``401`` envelope when ``request`` carries no valid bearer, else ``None``."""
+def _denied(request: Request, auth: Authenticator) -> JSONResponse | None:
+    """The ``401`` envelope when ``request`` carries no valid credential, else ``None``."""
     try:
-        check_request_auth(
-            request.url.path, request.headers.get("authorization"), request.cookies, token
-        )
+        auth.check(request.url.path, request.headers.get("authorization"), request.cookies)
     except Unauthorized as error:
         return _envelope(error)
     return None
@@ -123,9 +132,11 @@ class EdgeGuard:
     bare 400, so the error is also filed on the scope for ``_router_error`` to answer as 413.
     """
 
-    def __init__(self, app: ASGIApp, *, token: str, max_body_bytes: int = MAX_BODY_BYTES) -> None:
+    def __init__(
+        self, app: ASGIApp, *, auth: Authenticator, max_body_bytes: int = MAX_BODY_BYTES
+    ) -> None:
         self.app = app
-        self.token = token
+        self.auth = auth
         self.max_body_bytes = max_body_bytes
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -145,7 +156,7 @@ class EdgeGuard:
     ) -> AgentError | None:
         """The error this request earns from its headers, or ``None`` to let it through."""
         try:
-            check_request_auth(path, headers.get("authorization"), cookies or {}, self.token)
+            self.auth.check(path, headers.get("authorization"), cookies or {})
         except Unauthorized as error:
             return error
         if "chunked" in headers.get("transfer-encoding", "").lower():
@@ -189,7 +200,7 @@ class EdgeGuard:
         return counted
 
 
-def _install_edge_handlers(app: FastAPI, token: str) -> None:
+def _install_edge_handlers(app: FastAPI, auth: Authenticator) -> None:
     """Envelope and bearer check for the answers FastAPI gives before route dependencies run.
 
     ``install_handlers`` (errors.py) owns the envelope for agent errors and for validation
@@ -201,7 +212,7 @@ def _install_edge_handlers(app: FastAPI, token: str) -> None:
     @app.exception_handler(HTTPException)
     async def _router_error(request: Request, error: HTTPException) -> Response:
         # An unmatched path or method is answered by the router; no dependency ever ran.
-        if (denied := _denied(request, token)) is not None:
+        if (denied := _denied(request, auth)) is not None:
             return denied
         overflow = request.scope.get(_OVERFLOW_KEY)
         if isinstance(overflow, AgentError):
@@ -219,7 +230,7 @@ def _install_edge_handlers(app: FastAPI, token: str) -> None:
     async def _body_error(request: Request, error: RequestValidationError) -> Response:
         # The body is decoded before dependencies are solved, so a body that is not JSON
         # lands here with the bearer unchecked.
-        if (denied := _denied(request, token)) is not None:
+        if (denied := _denied(request, auth)) is not None:
             return denied
         errors = error.errors()
         if any(item.get("type") == JSON_INVALID for item in errors):
@@ -252,25 +263,55 @@ def create_app(settings: Settings | None = None, backend: GpuBackend | None = No
     app.state.settings = settings
     app.state.backend = backend
     app.state.supervisor = Supervisor(settings, backend)
+    auth = app.state.auth = Authenticator(settings.token)
     install_handlers(app)
-    _install_edge_handlers(app, settings.token)
-    app.add_middleware(EdgeGuard, token=settings.token, max_body_bytes=MAX_BODY_BYTES)
+    _install_edge_handlers(app, auth)
+    app.add_middleware(EdgeGuard, auth=auth, max_body_bytes=MAX_BODY_BYTES)
 
     def supervisor() -> Supervisor:
         return app.state.supervisor
+
+    def secure_cookie(request: Request) -> bool:
+        # RunPod terminates TLS before the agent, so a real pod is always https to the browser;
+        # only fake mode over plain http may drop the Secure flag.
+        return settings.fake_gpus is None or request.url.scheme == "https"
+
+    @app.post(TENSORBOARD_SESSION_PATH)
+    def tensorboard_session(request: Request, response: Response) -> dict[str, Any]:
+        # Bearer only: this path is outside /tensorboard, so a session cannot renew itself.
+        session = auth.issue_tensorboard_session()
+        secure = secure_cookie(request)
+        response.set_cookie(
+            TENSORBOARD_COOKIE,
+            session.value,
+            max_age=session.max_age_s,
+            path=TENSORBOARD_PREFIX,
+            httponly=True,
+            secure=secure,
+            samesite="strict",
+        )
+        return {
+            "cookie": TENSORBOARD_COOKIE,
+            "value": session.value,
+            "path": TENSORBOARD_PREFIX,
+            "max_age_s": session.max_age_s,
+            "expires_at": datetime.fromtimestamp(session.expires_at, tz=UTC).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            ),
+            "secure": secure,
+            "http_only": True,
+            "same_site": "strict",
+            "url": TENSORBOARD_PREFIX + "/",
+        }
 
     @app.api_route(TENSORBOARD_PREFIX, methods=["GET", "POST", "HEAD"])
     @app.api_route(TENSORBOARD_PREFIX + "/{path:path}", methods=["GET", "POST", "HEAD"])
     async def tensorboard(request: Request, path: str = "") -> Response:
         del path  # the route's original path and query are forwarded to the fixed local service
-        state = await run_in_threadpool(supervisor().state, "tensorboard")
-        if state.state != "running":
-            raise NotRunning("TensorBoard is not running")
-        port = (state.params or {}).get("port", 6006)
         target = httpx.URL(
             scheme="http",
             host="127.0.0.1",
-            port=port,
+            port=CATALOG["tensorboard"].port,
             path=request.url.path,
             query=request.url.query.encode(),
         )
@@ -284,9 +325,12 @@ def create_app(settings: Settings | None = None, backend: GpuBackend | None = No
                 upstream = await client.request(
                     request.method, target, headers=headers, content=await request.body()
                 )
+        except httpx.ConnectError as error:
+            # Nothing listens on the catalog port: the service is not started (or has died).
+            raise NotRunning("TensorBoard is not running") from error
         except httpx.HTTPError as error:
             raise AgentError("cannot reach local TensorBoard") from error
-        response = Response(
+        return Response(
             upstream.content,
             status_code=upstream.status_code,
             headers={
@@ -295,16 +339,6 @@ def create_app(settings: Settings | None = None, backend: GpuBackend | None = No
                 if name in {"content-type", "cache-control", "etag", "last-modified", "location"}
             },
         )
-        if request.headers.get("authorization"):
-            response.set_cookie(
-                TENSORBOARD_COOKIE,
-                settings.token,
-                path=TENSORBOARD_PREFIX,
-                httponly=True,
-                secure=settings.fake_gpus is None or request.url.scheme == "https",
-                samesite="strict",
-            )
-        return response
 
     @app.get("/health")
     def health() -> dict[str, Any]:
@@ -378,5 +412,15 @@ def create_app(settings: Settings | None = None, backend: GpuBackend | None = No
         # lifetimes, which /services/trainer-*/logs cannot reach.
         run_dir_or_404(run_id)
         return supervisor().run_log(run_id, tail).model_dump(mode="json")
+
+    @app.get("/runs/{run_id}/files", response_model=RunFiles)
+    def run_files(run_id: str) -> RunFiles:
+        # Sync route: hashing runs in the threadpool, off the event loop.
+        return list_run_files(run_id, run_dir_or_404(run_id))
+
+    @app.api_route("/runs/{run_id}/files/{path:path}", methods=["GET", "HEAD"])
+    def run_file(run_id: str, path: str) -> FileResponse:
+        real = resolve_run_file(run_id, run_dir_or_404(run_id), path)
+        return FileResponse(real, media_type="application/octet-stream", filename=real.name)
 
     return app

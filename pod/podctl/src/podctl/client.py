@@ -1,6 +1,7 @@
 """Thin HTTP client over the agent API (POD-SPEC §2).
 
-One method per endpoint, each returning the decoded JSON body. Agent errors (any status >= 400)
+One method per endpoint, each returning the decoded JSON body (the run-file download streams
+to disk and verifies size and SHA-256; TensorBoard returns the raw response). Agent errors (any status >= 400)
 become ``AgentAPIError`` carrying the error envelope; a gateway answer that is not the agent's
 envelope (the RunPod proxy's 502/503/504 or Cloudflare 520-526) becomes
 ``AgentUnreachable``; transport failures stay ``httpx`` exceptions. ``podctl.cli`` maps these
@@ -9,6 +10,9 @@ to exit codes 1 / 3 / 3.
 
 from __future__ import annotations
 
+import hashlib
+import os
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -16,6 +20,8 @@ import httpx
 
 GATEWAY_STATUSES: frozenset[int] = frozenset({502, 503, 504, *range(520, 527)})
 _MESSAGE_LIMIT = 300
+_CHUNK = 1 << 20
+TENSORBOARD_PREFIX = "/tensorboard"
 
 
 class AgentAPIError(Exception):
@@ -38,6 +44,17 @@ class AgentAPIError(Exception):
     @property
     def detail(self) -> Any:
         return self.envelope.get("error", {}).get("detail")
+
+
+class TransferMismatch(Exception):
+    """A downloaded run file does not match the size and SHA-256 the agent listed."""
+
+    def __init__(self, path: str, size: int, got_size: int, sha256: str, got_sha256: str) -> None:
+        super().__init__(
+            f"{path}: expected {size} bytes sha256 {sha256}, got {got_size} bytes sha256 "
+            f"{got_sha256}; nothing was kept"
+        )
+        self.path = path
 
 
 class AgentUnreachable(Exception):
@@ -104,13 +121,17 @@ class AgentClient:
     def __exit__(self, *_: object) -> None:
         self.close()
 
-    def _call(self, method: str, path: str, **kwargs: Any) -> Any:
-        response = self._http.request(method, path, **kwargs)
+    @staticmethod
+    def _raise_for_status(response: httpx.Response) -> None:
         if response.status_code >= 400:
             envelope = _envelope_of(response)
             if response.status_code in GATEWAY_STATUSES and envelope["error"]["code"] == "http":
                 raise AgentUnreachable(response.status_code, envelope["error"]["message"])
             raise AgentAPIError(response.status_code, envelope)
+
+    def _call(self, method: str, path: str, **kwargs: Any) -> Any:
+        response = self._http.request(method, path, **kwargs)
+        self._raise_for_status(response)
         try:
             return response.json()
         except ValueError as error:
@@ -167,3 +188,54 @@ class AgentClient:
 
     def events(self, run_id: str) -> dict[str, Any]:
         return self._call("GET", f"/runs/{self._segment(run_id)}/events")
+
+    def run_files(self, run_id: str) -> dict[str, Any]:
+        return self._call("GET", f"/runs/{self._segment(run_id)}/files")
+
+    def download_run_file(
+        self, run_id: str, path: str, dest: Path, *, sha256: str, size: int
+    ) -> None:
+        """Stream ``GET /runs/{id}/files/{path}`` to ``dest`` through ``dest.partial``; the
+        file appears under its name only once its size and SHA-256 match the listing."""
+        url = f"/runs/{self._segment(run_id)}/files/" + "/".join(
+            self._segment(part) for part in path.split("/")
+        )
+        partial = dest.with_name(dest.name + ".partial")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha256()
+        written = 0
+        with self._http.stream("GET", url) as response:
+            if response.status_code >= 400:
+                response.read()
+                self._raise_for_status(response)
+            with partial.open("wb") as handle:
+                for chunk in response.iter_bytes(_CHUNK):
+                    handle.write(chunk)
+                    digest.update(chunk)
+                    written += len(chunk)
+        if written != size or digest.hexdigest() != sha256:
+            partial.unlink(missing_ok=True)
+            raise TransferMismatch(path, size, written, sha256, digest.hexdigest())
+        os.replace(partial, dest)
+
+    # --- TensorBoard (POD-SPEC §2.1): the session handshake and the proxied route -----------
+
+    def tensorboard_session(self) -> dict[str, Any]:
+        return self._call("POST", "/tensorboard-session")
+
+    def tensorboard(
+        self, path: str = "", *, session: dict[str, Any] | None = None
+    ) -> httpx.Response:
+        """``GET /tensorboard/<path>``. With ``session`` (from ``tensorboard_session``) the
+        request carries only the session cookie, no bearer: what a browser sends."""
+        url = TENSORBOARD_PREFIX + "/" + path.lstrip("/")
+        if session is None:
+            response = self._http.get(url)
+        else:
+            request = self._http.build_request(
+                "GET", url, headers={"Cookie": f"{session['cookie']}={session['value']}"}
+            )
+            del request.headers["authorization"]
+            response = self._http.send(request)
+        self._raise_for_status(response)
+        return response

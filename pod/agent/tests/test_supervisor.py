@@ -36,6 +36,8 @@ from podagent.gpus import FakeBackend, InventoryUnavailable
 from podagent.settings import Settings
 from podagent.supervisor import ServiceState, Supervisor, tail_file
 
+pytestmark = pytest.mark.usefixtures("tensorboard_port")
+
 WAIT_S = 10.0
 POLL_S = 0.02
 
@@ -193,11 +195,13 @@ def test_vllm_start_status_logs_stop(sup: Supervisor, settings: Settings) -> Non
     assert any("exiting 0" in line for line in sup.logs("vllm").lines)
 
 
-def test_zero_gpu_service_sees_no_gpu(sup: Supervisor, settings: Settings) -> None:
-    port = free_port()
-    state = sup.start("tensorboard", [], {"port": port})
+def test_zero_gpu_service_sees_no_gpu(
+    sup: Supervisor, settings: Settings, tensorboard_port: int
+) -> None:
+    port = tensorboard_port
+    state = sup.start("tensorboard", [], {})
     assert state.gpus == [] and state.port == port
-    assert state.params == {"logdir": None, "port": port}
+    assert state.params == {"logdir": None}
     text = wait_for_log(state.log_path, "listening on")
     assert "CUDA_VISIBLE_DEVICES=''" in text  # set to the empty string, not unset
     assert http_get(port, "/")[0] == 200
@@ -325,9 +329,9 @@ def test_double_booking_refused(sup: Supervisor, settings: Settings) -> None:
         sup.start("vllm", [0], vllm_params())
     assert excinfo.value.detail["service"] == "vllm"
     # ... and "already running" is what a 0-GPU service reports.
-    sup.start("tensorboard", [], {"port": free_port()})
+    sup.start("tensorboard", [], {})
     with pytest.raises(AlreadyRunning):
-        sup.start("tensorboard", [], {"port": free_port()})
+        sup.start("tensorboard", [], {})
 
     sup.stop("vllm")
     assert sup.inventory()[0]["in_use_by"] is None
@@ -417,7 +421,7 @@ def test_stop_escalates_to_sigkill(sup: Supervisor) -> None:
 
 def test_stop_signals_the_whole_process_group(sup: Supervisor, settings: Settings) -> None:
     """The child is its own session leader (``start_new_session``): pgid == pid."""
-    state = sup.start("tensorboard", [], {"port": free_port()})
+    state = sup.start("tensorboard", [], {})
     assert state.pid is not None
     assert os.getpgid(state.pid) == state.pid
     sup.stop("tensorboard")
@@ -426,7 +430,7 @@ def test_stop_signals_the_whole_process_group(sup: Supervisor, settings: Setting
 def test_shutdown_stops_everything(sup: Supervisor, settings: Settings) -> None:
     sup.start("vllm", [0], vllm_params())
     sup.start("trainer-ltx", [1], run_config(settings))
-    sup.start("tensorboard", [], {"port": free_port()})
+    sup.start("tensorboard", [], {})
     sup.shutdown()
     states = {s.name: s for s in sup.states()}
     for name in ("vllm", "trainer-ltx", "tensorboard"):
@@ -441,7 +445,7 @@ def test_stop_finalizes_its_own_incarnation(
     sup: Supervisor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A restart that lands while ``stop()`` waits outside the lock is not mistaken for the old child."""
-    first = sup.start("tensorboard", [], {"port": free_port()})
+    first = sup.start("tensorboard", [], {})
     wait_for_log(first.log_path, "listening on")
     proc = sup._runs["tensorboard"].proc  # white-box: the Popen of the first incarnation
     assert proc is not None
@@ -453,7 +457,7 @@ def test_stop_finalizes_its_own_incarnation(
         # The old child is gone: a status poll reaps it, and a new start lands before stop()
         # re-acquires the lock.
         assert sup.state("tensorboard").state == "stopped"
-        restarted.append(sup.start("tensorboard", [], {"port": free_port()}))
+        restarted.append(sup.start("tensorboard", [], {}))
         return code
 
     monkeypatch.setattr(proc, "wait", wait_then_restart)
@@ -464,9 +468,9 @@ def test_stop_finalizes_its_own_incarnation(
     assert current.state == "running" and current.pid == restarted[0].pid != first.pid
 
 
-def test_fake_bind_failure_is_a_failed_exit(sup: Supervisor) -> None:
-    port = free_port()
-    first = sup.start("tensorboard", [], {"port": port})
+def test_fake_bind_failure_is_a_failed_exit(sup: Supervisor, tensorboard_port: int) -> None:
+    port = tensorboard_port
+    first = sup.start("tensorboard", [], {})
     wait_for_log(first.log_path, "listening on")
     sup.start("vllm", [0], vllm_params(port=port))  # same port: the fake cannot bind
     state = wait_for_exit(sup, "vllm")
@@ -493,13 +497,12 @@ def test_fakeservice_usage_errors(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_log_is_truncated_at_every_start(sup: Supervisor) -> None:
-    port = free_port()
-    first = sup.start("tensorboard", [], {"port": port})
+    first = sup.start("tensorboard", [], {})
     wait_for_log(first.log_path, "listening on")
     sup.stop("tensorboard")
     assert Path(first.log_path).read_text().count("fakeservice: name=tensorboard") == 1
 
-    second = sup.start("tensorboard", [], {"port": port})
+    second = sup.start("tensorboard", [], {})
     assert second.log_path == first.log_path
     wait_for_log(second.log_path, "listening on")
     text = Path(second.log_path).read_text()
@@ -508,7 +511,7 @@ def test_log_is_truncated_at_every_start(sup: Supervisor) -> None:
 
 
 def test_logs_404_when_file_vanished(sup: Supervisor) -> None:
-    state = sup.start("tensorboard", [], {"port": free_port()})
+    state = sup.start("tensorboard", [], {})
     wait_for_log(state.log_path, "listening on")
     sup.stop("tensorboard")
     Path(state.log_path).unlink()
@@ -560,7 +563,7 @@ def test_spawn_failure_is_reported_not_swallowed(settings: Settings) -> None:
     sup = Supervisor(real, FakeBackend(2))
     assert CATALOG["tensorboard"].argv  # sanity: the real builder is what will be used
     with pytest.raises(AgentError) as excinfo:
-        sup.start("tensorboard", [], {"port": free_port()})
+        sup.start("tensorboard", [], {})
     assert excinfo.value.code == "internal"
     assert "could not spawn tensorboard" in excinfo.value.message
     state = sup.state("tensorboard")
@@ -570,7 +573,7 @@ def test_spawn_failure_is_reported_not_swallowed(settings: Settings) -> None:
     assert all(g["in_use_by"] is None for g in sup.inventory())
     # The failed attempt does not block a later one.
     with pytest.raises(AgentError):
-        sup.start("tensorboard", [], {"port": free_port()})
+        sup.start("tensorboard", [], {})
     sup.shutdown()
 
 
@@ -585,7 +588,7 @@ def test_child_env_drops_control_plane_secrets(
     monkeypatch.setenv("VLLM_API_KEY", "agent-env-vllm-key-000")
     monkeypatch.setenv("HF_TOKEN", "hf_agent_env_token")
 
-    tb = sup.start("tensorboard", [], {"port": free_port()})
+    tb = sup.start("tensorboard", [], {})
     text = wait_for_log(tb.log_path, "listening on")
     assert "PODAGENT_TOKEN=unset" in text
     assert "VLLM_API_KEY=unset" in text
@@ -765,7 +768,7 @@ def test_stuck_child_that_dies_later_is_filed_by_a_poll(
     monkeypatch.setattr("podagent.supervisor.SIGKILL_WAIT_S", 0.2)
     swallow = _Swallow()
     monkeypatch.setattr(Supervisor, "_killpg", staticmethod(swallow))
-    started = sup.start("tensorboard", [], {"port": free_port()})
+    started = sup.start("tensorboard", [], {})
     wait_for_log(started.log_path, "listening on")
     # The fake honours SIGTERM, so make the stop's SIGTERM disappear as well.
     swallow.active = True
@@ -789,7 +792,7 @@ def test_shutdown_signals_everything_at_once_within_one_deadline(
 
     vllm = sup.start("vllm", [0], vllm_params(extra_args=["--ignore-sigterm"]))
     trainer = sup.start("trainer-ltx", [1], run_config(settings))
-    tb = sup.start("tensorboard", [], {"port": free_port()})
+    tb = sup.start("tensorboard", [], {})
     for state in (vllm, trainer, tb):
         wait_for_log(state.log_path, "SIGTERM")  # "sleeping until SIGTERM" / "listening on"
     wait_for_log(tb.log_path, "listening on")
@@ -876,7 +879,7 @@ def test_inventory_unavailable_is_503_not_an_empty_pod(settings: Settings) -> No
         sup.gpu_count()
     assert sup.state("vllm").state == "idle"  # nothing was started
     # 0-GPU services do not need the inventory at all.
-    assert sup.start("tensorboard", [], {"port": free_port()}).state == "running"
+    assert sup.start("tensorboard", [], {}).state == "running"
 
     backend.fail = False
     assert sup.gpu_count() == 2

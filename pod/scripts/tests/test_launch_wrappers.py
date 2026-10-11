@@ -999,6 +999,51 @@ def test_ltx_hub_download_uses_controlled_destination(
     assert calls[0]["repo_id"] == "Lightricks/LTX-2"
     assert calls[0]["local_dir"] == str(workspace / "models" / "ltx-2")
     assert calls[0]["allow_patterns"] == list(ltx.LTX_HUB_FILES)
+    # Pinned: the weights never float on the Hub repo's main branch.
+    assert calls[0]["revision"] == ltx.LTX_HUB_REVISION
+    assert re.fullmatch(r"[0-9a-f]{40}", ltx.LTX_HUB_REVISION)
+
+
+def test_ltx_hub_source_comes_from_the_shared_rule_file() -> None:
+    rules: dict[str, Any] = {}
+    exec(ltx.SHARED_RULES.read_text(encoding="utf-8"), rules)
+    assert ltx.SHARED_RULES.name == "ltx_rules.py" and ltx.SHARED_RULES.is_file()
+    assert (
+        rules["LTX_HUB_MODEL"],
+        rules["LTX_HUB_REVISION"],
+    ) == (ltx.LTX_HUB_MODEL, ltx.LTX_HUB_REVISION)
+    assert tuple(rules["LTX_HUB_FILES"]) == ltx.LTX_HUB_FILES
+
+
+def test_ltx_failed_model_preparation_writes_nothing_and_exits_69(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import huggingface_hub
+
+    class GatedRepo(Exception):
+        def __init__(self) -> None:
+            super().__init__("403 Client Error: access to model Lightricks/LTX-2 is restricted")
+            self.response = type("R", (), {"status_code": 403})()
+
+    def refuse(**_kwargs: Any) -> None:
+        raise GatedRepo()
+
+    def no_trainer(*_args: Any, **_kwargs: Any) -> int:
+        pytest.fail("a child was started after model preparation failed")
+
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", refuse)
+    monkeypatch.setattr(ltx, "tee", no_trainer)
+    monkeypatch.setattr(ltx, "run_trainer", no_trainer)
+    cfg = ltx_run_config(workspace, base_model="Lightricks/LTX-2")
+    cfg["extra"].pop("model", None)
+    run_json = write_run_json(workspace, cfg)
+    assert ltx.main(["--config", str(run_json)]) == ltx.EXIT_MODEL_PREPARATION == 69
+    out = capsys.readouterr().out
+    assert "model preparation failed" in out and "GatedRepo (HTTP 403)" in out
+    assert "restricted" in out
+    run = run_json.parent
+    assert not (run / "config.yaml").exists() and not (run / "dataset.json").exists()
+    assert not (run / "preprocessed").exists()
 
 
 def test_ltx_refuses_unknown_hub_source(

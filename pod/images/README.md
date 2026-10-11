@@ -9,9 +9,9 @@ available on the development Mac, so builds use the existing build host.
 
 | file | purpose |
 | --- | --- |
-| `Dockerfile.base` | CUDA 12.8 runtime + CPython 3.12 + uv; `/opt/venvs/vllm` (vLLM and its torch), `/opt/venvs/agent` (podagent[pod], concept-captioner[hf], tensorboard, huggingface_hub, datasets, Pillow); `/opt/pod/scripts/*.py`; entrypoint |
+| `Dockerfile.base` | CUDA 12.8 runtime + CPython 3.12 + uv; `/opt/venvs/vllm` (vLLM and its torch), `/opt/venvs/agent` (podagent[pod], concept-captioner[hf], tensorboard, huggingface_hub, datasets, Pillow); `/opt/pod/scripts/*.py` plus `ltx_rules.py`; entrypoint. The build fails if a flag in the agent's vLLM allowlist is absent from the installed vLLM (`check_vllm_flags.py`) |
 | `Dockerfile.aitoolkit` | base + `ostris/ai-toolkit` at a pinned commit in `/opt/ai-toolkit`, venv `/opt/venvs/aitoolkit` with upstream's own torch/flash-attn/NATTEN stack |
-| `Dockerfile.ltx` | base + `Lightricks/LTX-2` at a pinned commit in `/opt/ltx-2` (uv workspace), venv `/opt/venvs/ltx` |
+| `Dockerfile.ltx` | base + `Lightricks/LTX-2` at a pinned commit in `/opt/ltx-2` (uv workspace), venv `/opt/venvs/ltx` plus TensorBoard 2.21.0 (pinned, with an event write/read check) |
 | `Dockerfile.fake` | `python:3.12-slim` + podagent only, for `compose.fake.yaml` (no CUDA, no trainers) |
 | `entrypoint.sh` | creates `/workspace/{datasets,runs,models/hf-cache,logs}`, exports `HF_HOME`, execs `tini -s -- python -m podagent --host 0.0.0.0 --port 8800`; nothing else |
 | `compose.fake.yaml` | local fake-GPU agent: `PODAGENT_FAKE_GPUS=2`, `PODAGENT_FAKE_HOST=0.0.0.0`, bind mount `./workspace:/workspace`, ports 8800 (agent), 8000 (fake vLLM); fake TensorBoard stays on loopback |
