@@ -1,3 +1,4 @@
+import ConceptCore
 import SwiftUI
 
 struct StudioRootView: View {
@@ -30,7 +31,7 @@ struct StudioRootView: View {
                         .lineLimit(2).help(session.project?.directory.path ?? "")
                 }.padding(20)
                 List(selection: $session.step) {
-                    Section("Prepare photos") { steps(StudioStep.allCases.prefix(3)) }
+                    Section("Prepare training data") { steps(StudioStep.allCases.prefix(3)) }
                     Section("Write captions") { steps(StudioStep.allCases.dropFirst(3).prefix(3)) }
                     Section("Train your model") { steps(StudioStep.allCases.suffix(3)) }
                 }
@@ -162,9 +163,7 @@ extension StudioSession {
     /// changes); later visits only refresh the project-derived training defaults.
     func prepareGPUStep() {
         guard gpuKeysLoadedFor !== gpu else {
-            gpu.triggerWords = project?.job.triggers.joined(separator: ",") ?? ""
-            gpu.profile = project?.job.profile ?? "flux-image"
-            if !gpu.hasRunningPod { gpu.trainer = gpu.profile == "ltx-image" ? "ltx" : "aitoolkit" }
+            updateTrainingProjectDefaults()
             return
         }
         configureGPU()
@@ -191,7 +190,7 @@ struct StudioFailureAlert: ViewModifier {
 
     func body(content: Content) -> some View {
         content.alert(
-            session.chatGPTUsageLimitReached ? "ChatGPT usage limit reached" : "Something needs your attention",
+            session.chatGPTUsageLimitReached ? "ChatGPT usage limit reached" : "Could not complete the operation",
             isPresented: Binding(
                 get: { session.errorMessage != nil },
                 set: { if !$0 { session.errorMessage = nil; session.chatGPTUsageLimitReached = false } }

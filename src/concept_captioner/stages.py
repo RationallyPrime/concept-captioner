@@ -17,6 +17,7 @@ from pydantic_ai.messages import ModelMessage
 from .images import provider_image
 from .models import Resolved
 from .schemas import Caption, Critique
+from .sources.local import VIDEO_SAMPLING_FPS, VIDEO_SUFFIXES
 from .types import Sample
 
 
@@ -59,6 +60,11 @@ def trigger_problems(caption: str, deps: CaptionDeps) -> list[str]:
 
 
 def image_content(sample: Sample) -> BinaryContent:
+    if sample.suffix.lower() in VIDEO_SUFFIXES:
+        media_type = "video/quicktime" if sample.suffix.lower() == ".mov" else "video/mp4"
+        return BinaryContent(
+            data=sample.data, media_type=media_type, vendor_metadata={"fps": VIDEO_SAMPLING_FPS}
+        )
     data, media_type = provider_image(sample.data, suffix=sample.suffix)
     return BinaryContent(data=data, media_type=media_type)
 

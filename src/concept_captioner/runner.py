@@ -22,6 +22,7 @@ from .models import Resolved
 from .prompt import USER_TURN, captioner_instructions, critic_instructions, critic_user_turn
 from .skills import Skill
 from .sources.base import CaptionSink, ImageSource
+from .sources.local import VIDEO_SUFFIXES
 from .stages import CaptionDeps, build_captioner, build_critic, image_content, served_model
 from .types import Sample
 
@@ -130,7 +131,13 @@ class Runner:
         record = self._base_record(sample, "rejected")
         image = image_content(sample)
         deps = CaptionDeps(mapping=mapping, triggers=tuple(self.job.triggers))
-        instructions = captioner_instructions(self.skill, self.profile_text, self.job, mapping)
+        instructions = captioner_instructions(
+            self.skill,
+            self.profile_text,
+            self.job,
+            mapping,
+            is_video=sample.suffix.lower() in VIDEO_SUFFIXES,
+        )
 
         run = await self.captioner.run([USER_TURN, image], instructions=instructions, deps=deps)
         record["attempts"] = 1
@@ -146,7 +153,11 @@ class Runner:
         notes: list[str] = []
         if self.critic is not None:
             review_instructions = critic_instructions(
-                self.skill, self.profile_text, self.job, mapping
+                self.skill,
+                self.profile_text,
+                self.job,
+                mapping,
+                is_video=sample.suffix.lower() in VIDEO_SUFFIXES,
             )
             verdict = await self._review(run.output.caption, image, review_instructions, record)
             if not verdict.approved:

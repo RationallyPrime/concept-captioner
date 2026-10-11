@@ -27,6 +27,30 @@ private struct PublishedDatasetTransport: HTTPTransport {
 
 @Suite("published imagefolder contract")
 struct ProjectPublisherTests {
+    @Test func republishingDeletesOnlyPreviouslyListedExcludedTargets() async throws {
+        var project = try await makeDemoProject()
+        defer { try? FileManager.default.removeItem(at: project.directory) }
+        let previousRows = project.images.map { MetadataRow(fileName: $0.id) }
+        project.images.removeAll { $0.id == "garden.png" }
+        let remotePaths: Set = [
+            "garden.png", "garden.txt", "garden.json", "studio.png", "window.png", "unrelated.jpg", "README.md",
+        ]
+        let operations = try await ProjectPublisher.operations(
+            for: project, previousRows: previousRows, remotePaths: remotePaths
+        )
+        let deleted = operations.compactMap { operation -> String? in
+            if case let .delete(path) = operation { return path }
+            return nil
+        }
+        #expect(Set(deleted) == ["garden.png", "garden.txt", "garden.json"])
+        #expect(!operations.contains { $0.path == "unrelated.jpg" || $0.path == "README.md" })
+        let metadata = try #require(operations.compactMap { operation -> Data? in
+            if case let .add(path, data) = operation, path == ImageFolderMetadata.fileName { return data }
+            return nil
+        }.first)
+        #expect(try ImageFolderMetadata.parse(metadata).map(\.fileName) == ["studio.png", "window.png"])
+    }
+
     @Test func publishedDatasetReplaysThroughHubAndRunner() async throws {
         var project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }

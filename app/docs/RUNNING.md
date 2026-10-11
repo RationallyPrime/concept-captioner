@@ -13,35 +13,38 @@ The demo uses three synthetic portraits and fake captioning, GPU and training se
 does not read Keychain credentials or send network requests. Photos import is disabled in the
 demo so an iCloud Photos download cannot be triggered there.
 
-1. **Images:** inspect the bundled illustrations and their warnings; ask for dataset advice.
-2. **Concepts:** inspect the learning word and reference image. Edit the boundary or draft it
-   from an intended result; check the draft before saving.
-3. **Mapping:** ask for model proposals, fill a suggestion and confirm each photo. You can
-   also type a locator. The demo starts with confirmed mappings so you can proceed immediately.
-4. **Captioning:** choose Start captioning. Try Unusable, Failed, or Rejected to see recovery;
-   Rejected needs the reviewer enabled. Return to Success to continue. Re-caption existing
-   model captions when repeating a run.
-5. **Review:** edit a caption and save it as Final. Model runs skip it. Compare another model
-   without replacing the saved caption, or re-caption one or several unprotected photos.
-6. **Publish:** try publishing. This prepares the shared project files locally and uploads
-   nothing. The demo dataset name is filled in for the training simulation.
-7. **GPU pods:** refresh offers, choose one or two GPUs, review the hourly price and spending
-   limit, then rent a simulated computer.
-8. **Training:** read the GPU plan and start. One GPU is sequential; multiple GPUs keep
-   captioning on GPU 0 and train on the others.
-9. **Monitor:** refresh to advance the simulated curves, publish the fake result, and Stop
-   everything. No real computer or charges exist in this mode.
+1. **Images:** read the training explanation; inspect the three synthetic photographs. Exclude a
+   sample and use Undo curation to restore it. Open Inspect and crop, then Cancel to keep the
+   prepared demo captions applicable. Dataset advice is clearly marked as prepared advice.
+2. **Concepts:** inspect the fictional person's concept and its trigger, NORA7. Edit concept
+   opens that existing definition. The ordinary flow uses one concept; multiple concepts and
+   detailed caption overrides are under Advanced settings.
+3. **Mapping:** inspect or edit the prepared assignments and confirm a sample. Model requests
+   are simulated. A sole style concept applies to the whole image or clip without face mapping.
+4. **Captioning:** choose Start captioning to load captions prepared for these exact photographs.
+   Try Unusable, Failed, or Rejected to see recovery; Rejected needs the reviewer enabled.
+   Return to Success and enable overwriting existing model captions to repeat a batch.
+5. **Review:** edit a caption, mark it Final and save. Subsequent model runs skip it. Compare
+   captions or re-caption one or several unprotected samples.
+6. **Publish:** Simulate dataset upload prepares the shared project files locally. Nothing is
+   uploaded. The filled demo dataset name supplies the later training simulation.
+7. **GPU pods:** refresh offers, inspect the hourly price and budget, and rent a simulated
+   computer. No paid resource is created.
+8. **Training:** inspect the model, training settings and GPU plan, then Start training.
+9. **Monitor:** inspect simulated loss, logs and saved settings. Load settings for repeat
+   returns to Training. Generated results explains that the demo has no real trained weights
+   or generated comparisons. Stop everything stops the simulation.
 
 Close the project to return to Welcome. Open or create a project to leave demo mode.
 
 ## A real project
 
-Create a project in a folder you choose. Photos are copied to `images/`; `job.yaml` and caption
+Create a project in a folder you choose. Images and clips are copied to `images/`; `job.yaml` and caption
 `.txt` / response `.json` sidecars use ConceptCore's shared CLI formats. Final captions have
 `source: human` in the response record. Reference images live in `references/`. No keys go into
 these files. Recent project folders and custom skill folders use security-scoped bookmarks.
 
-Settings offers **Log in with ChatGPT** and account keys. For key-based access, one gateway key
+Settings offers **Log in with ChatGPT**, **Connect OpenRouter** and manual account keys. For key-based access, one gateway key
 is enough: OpenRouter, Vercel AI Gateway or Pydantic AI Gateway. Direct model providers,
 a Hugging Face write token and a RunPod key are also available. Secrets are saved in the Mac
 Keychain. The captioning connection test uses the model selected on Captioning and consumes
@@ -56,7 +59,7 @@ Eligible accounts can authorize use of their ChatGPT plan without an API key. Co
 shows a one-time explanation before you continue. On Captioning, choose **OpenAI**, select
 **ChatGPT plan** and pick a model from your account's current catalog. **Manage usage** opens
 [ChatGPT usage settings](https://chatgpt.com/settings/usage) to review allowance and app limits.
-Image support depends on the chosen model. ConceptStudio itself sells no credits.
+Image support depends on the chosen model.
 
 This choice applies to all OpenAI requests in the app: captioning, the optional caption
 reviewer, model comparisons and photo/concept assistance. **OpenAI API credits** uses the
@@ -82,12 +85,45 @@ continues using its separately configured OpenAI API credentials.
 Implementation follows OpenAI's [open-source sign-in flow](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
 and [preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
 
+### Connect OpenRouter
+
+In a real project, open Accounts & settings and choose **Connect OpenRouter**. The app opens
+OpenRouter's consent page in your browser. After approval, it exchanges the returned code
+using PKCE and saves the new API key in Keychain. Caption requests then go directly to
+OpenRouter; the browser is only for authorization. Cancel leaves any previously saved key in
+place. Account status reports the service's available usage and allowance information; a
+missing balance is not treated as unlimited credit. Live owner consent remains a separate
+verification step. See [OpenRouter's authorization documentation](https://openrouter.ai/docs/guides/overview/auth/oauth).
+
 ### Prepare and train
 
-Use folder, selected-file, Apple Photos or Hub imagefolder import. Check warnings, define the
-learning boundary and confirm subject mappings. On-device face matches and model proposals
-are suggestions; they never confirm identity automatically. Parquet-only Hub datasets are not
-supported by the current Swift core.
+Use folder, selected-file, Apple Photos or Hub imagefolder import. HEIC and TIFF images are
+normalized to oriented PNG training targets. Inspect duplicate candidates; Include in training
+controls which samples are captioned and published. Undo curation restores the previous
+selection or approved edit during the current session. Excluded media remains in the project,
+outside the training set.
+
+Define one concept and confirm its assignments. Person and object/character concepts can use
+reference images. A sole style concept is assigned to the entire image or clip automatically.
+On-device face matches and model proposals remain suggestions until confirmed. Parquet-only
+Hub datasets are not supported by the Swift app.
+
+Inspect and crop shows the actual crop before approval. Approval replaces the training target
+and clears its old caption and subject assignment so they can be reviewed again. A sole style
+concept is reassigned automatically. For video, choose Start time and Duration, then preview
+the segment. Advanced: Exact frames and size exposes frame indices, supported frame counts
+(9–257, in steps of eight) and maximum width or height. Approval preserves the selected frame
+timing and full visible scene, fits dimensions to the trainer's alignment, and writes the exact
+MP4 that captioning and training consume. Inspect the frames or play the approved clip.
+
+Selected portions with variable frame timing are refused for LTX training because the current
+trainer would discard that timing. Choose a constant-frame-rate portion; the app does not retime
+it silently. Direct Gemini and Pydantic AI Gateway's Google route support native video captions.
+Other native transports, including OpenRouter and Vercel AI Gateway, report video as unsupported.
+Gemini receives the complete clip with sampling set to 24 frames per second; this does not mean
+that every source frame above 24 fps is observed. Select the LTX video caption format for clip
+training. LTX derives preprocessing buckets from the approved targets; it does not silently
+shorten the chosen segment or crop it to a different aspect ratio.
 
 Hosted captioning requires no GPU rental. To caption with a local model, choose **Rent or
 choose a captioning computer** on Captioning, rent one on GPU pods, then return and choose
@@ -105,9 +141,9 @@ rank-16 LTX run succeeded on one 32 GB GPU with a 125 GB host; a smaller 256-pix
 succeeded with a 62 GB host. Those checks establish execution, not training quality or a
 universal memory guarantee for other models and datasets.
 
-Publishing sends training photos and sidecars at the dataset root, imagefolder metadata, and
+Publishing sends included training targets and saved sidecars at the dataset root, imagefolder metadata, and
 `concept-captioner/job.yaml` in one Hub commit. The image names remain the shared sample IDs.
-Reference faces stay local so the Hub and pod readers cannot mistake them for training photos.
+Reference images stay local so the Hub and pod readers cannot mistake them for training targets.
 Private dataset is the default. GPU rental displays
 prices and a budget before creation. Stop everything cancels local work, waits for it to
 settle and stops the rented computer. Close and quit warn while work or a computer is active;
@@ -118,10 +154,25 @@ billed. Explicitly Remove the stopped computer before renting another. See
 If the app reopens with a saved running computer, Welcome exposes its cost and stop controls
 before you open a project. Missing credentials do not hide that retained computer.
 
-Caption edits remain in the open project while moving between photos or screens. Save caption
+Caption edits remain in the open project while moving between samples or screens. Save caption
 (or Command-S while Review is active) writes the selected draft; Discard edits restores the
 saved caption. Closing, quitting or switching projects warns before discarding unsaved drafts.
 Publishing uploads saved captions and warns when drafts still need saving.
+
+### Try a trained result and reuse a run
+
+Monitor → Generated results can generate a matched base-versus-LoRA comparison for the
+supported FLUX.1-dev and LTX-2 routes. Select an available checkpoint, enter prompts and seeds,
+and generate. Both sides use the same inputs; the LoRA is the changed variable. Results are
+saved in the project gallery. Unsupported model/trainer combinations show an explanation.
+Save trained model to this Mac retrieves the actual model files.
+
+Saved training runs retain the dataset revision reported by the agent, settings, available
+checkpoints, outputs and recorded cost information. Load settings for repeat copies the selected
+run's settings into Training; edit them before starting a new run. Resume latest checkpoint
+continues on the same saved storage when the selected trainer and checkpoint support it.
+Missing revisions or wallet information are shown as unavailable. GPU estimates exclude
+separately billed storage.
 
 ## Building and distribution
 
@@ -154,7 +205,7 @@ use the actual app for the human walkthrough. Ordinary `swift test` skips the re
 
 `app/ConceptStudio.entitlements` declares the sandbox, user-selected read/write access,
 security-scoped bookmarks, network-client access and Photos access. Network-server permission
-allows the temporary ChatGPT sign-in callback, bound only to `127.0.0.1`; it is closed when
+allows the temporary ChatGPT and OpenRouter sign-in callbacks, bound only to `127.0.0.1`; it is closed when
 sign-in finishes, is cancelled or times out. Distribution still needs
 a Developer ID signing identity, hardened-runtime signing with those entitlements, a zipped
 app or disk image submitted through `xcrun notarytool`, and a stapled notarization ticket.

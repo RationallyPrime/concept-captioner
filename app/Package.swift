@@ -23,6 +23,7 @@ let package = Package(
             dependencies: ["ConceptCore"],
             resources: [.copy("Resources/Demo"), .process("Resources/OpenAI")],
             swiftSettings: [.swiftLanguageMode(.v6)],
+            linkerSettings: [.linkedFramework("AVKit")],
         ),
         .testTarget(
             name: "ConceptCoreTests",

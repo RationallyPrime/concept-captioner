@@ -1,71 +1,52 @@
-# Handoff, 2026-10-10
+# Handoff, updated 2026-10-11
 
-Read `CLAUDE.md` and `docs/v0.2-plan.md` first. This repository is the lab notebook: commit and
-push to `main` freely and often, as-is. Curated history is a separate, deferred activity under
-the re-stage rule below, so nothing here needs to be tidy.
+Read CLAUDE.md and docs/v0.2-plan.md first. This repository is the lab notebook: ordinary
+verified commits and pushes to main are authorized. Preserve concurrent work. Curated history
+is deferred under the re-stage rule below.
 
 ## What exists
 
-| Area | Where | State |
-|---|---|---|
-| Python reference and CLI, v0.2 | `src/`, `tests/`, `README.md` | done, tests green, verified live against Gemini |
-| Swift core library | `app/` (ConceptCore), `app/docs/CORE-SPEC.md`, `CORE-STATUS.md` | built, tests green; status doc is the last thing its build writes, so if it is missing the build was interrupted |
-| Pod side | `pod/`, `pod/docs/POD-SPEC.md`, `POD-STATUS.md` | built, tests green in fake mode; images never built |
-| App | `app/docs/APP-BRIEF.md` | brief only; the app is a placeholder |
-| Pod verification | `pod/docs/POD-VERIFY-BRIEF.md` | brief only |
+The Python CLI/reference, Swift captioning core, nine-screen Mac app and pod agent exist.
+The app manages projects, captions, Hub datasets, rented computers and trained results; the demo
+works offline. Original public images and FLUX/LTX proofs predate the latest hardening.
 
-## State at handoff (both build workflows were stopped deliberately during their last fix pass)
+Claude's seven hardening lanes were fully pushed through 36617c8: Core, Python, pod, project
+contract, GPU module, interface and docs/process. That satisfied the overnight start condition. Reuse their project storage, output retrieval,
+UI and transport work. Status documents distinguish source, image and live evidence; an app
+build does not prove live success.
 
-- Swift: build and 183 tests green; `app/docs/CORE-STATUS.md` lists five confirmed review
-  findings still open. The key-safety rule (item 1 below) was carried into `Resolve.swift` by the
-  workflow; verify rather than redo.
-- Pod: all three test trees (agent 722+, podctl, scripts) and lint green; `POD-STATUS.md` is the
-  interim version written mid-run. One confirmed finding is still open: `podctl` treats the
-  RunPod proxy's Cloudflare statuses (520-526, notably 522 while a pod boots and 524 on timeout)
-  as agent errors instead of "cannot reach the agent". The vLLM extra-flags allowlist was done by
-  the workflow; check the LTX preprocess arguments were too.
+## Three standing rules
 
-## Do first
+1. Provider credentials go only to their intended origins. OpenAI uses its fixed service;
+   custom OpenAI-compatible endpoints use vLLM with a separately configured key. Downloaded
+   job data cannot redirect stored credentials or supply authorization headers.
+2. Gateways have fixed service origins and separate credentials. Browser authorization uses
+   documented consent flows and Keychain storage. Never borrow another application's tokens
+   or silently substitute separately billed API access for a subscription.
+3. The pod runs only validated commands from its fixed catalog. Client parameters cannot
+   become arbitrary command arguments, filesystem destinations or network/authentication changes.
 
-1. The Swift model resolver must enforce the same key-safety rule as the Python one: the
-   OpenAI kind never takes a custom base URL; custom OpenAI-compatible servers are the vLLM kind
-   with their own key; a custom base URL is https, or plain http only to local or private hosts.
-   A job file is data that may have been downloaded; it must never be able to redirect a stored key.
-   Tightening requested by review after the push, for both languages: the vLLM key is attached
-   only when the job's host equals the user-configured vLLM host; otherwise no key is sent; and
-   authorization-style headers in a job file's extra settings are rejected.
-2. The Swift resolver must support the three gateways the Python package already does
-   (OpenRouter, Vercel AI Gateway, Pydantic AI Gateway), each with a fixed host and its own key,
-   because one gateway key is the default path for the app's users.
-3. The two free-form argument lists on the pod side must become allowlists (first item of the
-   pod brief).
+## Two parallel streams
 
-## Then
+**Mac application:** implement the owner-approved introduction and single-concept flow, review
+all UI surfaces as operating software, and integrate curation/video, saved runs, result generation
+and OpenRouter. Keep the ordinary workflow accessible without programming or ML knowledge,
+while retaining direct controls for repeat users.
 
-Two independent streams, in parallel if two seats are available: the app, per its brief, on this
-Mac; the pod verification, per its brief, on cx53 and real pods. They meet at the control agent's
-HTTP API, which both briefs point at.
+**Pod services:** implement and verify exact dataset pulls, supported training/resume and actual
+base-versus-LoRA generation. Rebuild published images when their code changes. Meet the app at
+the existing authenticated HTTP API and shared project/training contracts. Secure outputs and
+stop paid pods as soon as useful work ends.
 
 ## Conventions
 
-Python: `uv`, `pytest`, `ruff`. Swift: Swift 6, macOS 15, SwiftPM only, Yams the only
-dependency, Swift Testing, no network in tests. Keys come from the environment or the Keychain,
-never from config, never printed. Private material (market notes, outreach drafts) lives outside
-the repo. Orchestration: use Codex agents. Default to Sol for anything nontrivial, including
-implementation and independent review; use Luna for mechanical grunt work.
+Use uv/pytest/Ruff and Swift 6/SwiftPM/Yams/Swift Testing. Tests make no external network requests.
+Keep credentials out of output/configuration and private evidence outside this public repository. Use Codex agents: Sol for nontrivial
+implementation and independent review, Luna for mechanical work. Resolve routine decisions and
+continue autonomously; report concrete blockers rather than declaring unfinished work complete.
 
-## Working style
-
-Work down this file item by item and keep going. When one stream is blocked (waiting on a pod,
-a build, a credential), switch to the other and come back. Do not stop to ask whether to
-continue; stop only for something irreversible or something only Hákon can decide, note it, and
-carry on with the rest.
-
-## Then keep going: the experiment
-
-When both streams work, run the end-to-end experiment yourself: the same images captioned
-trigger-only and concept-boundary, two LoRAs, an inference grid that shows the difference, and
-write it up.
+The real user training run belongs to the next human walkthrough. The caption-policy comparison
+experiment remains deferred until the owner starts it with an appropriately sized dataset.
 
 ## Re-stage rule (owner instruction, 2026-10-11)
 

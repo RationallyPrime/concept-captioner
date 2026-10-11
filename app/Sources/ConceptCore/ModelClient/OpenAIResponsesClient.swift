@@ -31,7 +31,7 @@ public struct OpenAIResponsesClient: ModelClient {
     ) async throws -> ModelReply {
         var headers = ["Authorization": "Bearer \(apiKey)"]
         settings.mergeExtraHeaders(into: &headers)
-        let body = Self.body(
+        let body = try Self.body(
             model: requestedModel, instructions: instructions, messages: messages, output: output, settings: settings
         )
         let envelope: JSONValue
@@ -57,9 +57,9 @@ public struct OpenAIResponsesClient: ModelClient {
         messages: [ChatMessage],
         output: OutputRequest,
         settings: RequestSettings
-    ) -> JSONObject {
+    ) throws -> JSONObject {
         let system = output.instructions(instructions)
-        var input = messages.map(encode)
+        var input = try messages.map(encode)
         var body: JSONObject = ["model": .string(model)]
         if output.mode == .prompted {
             input.insert(.object(["role": .string("system"), "content": .string(system)]), at: 0)
@@ -106,12 +106,14 @@ public struct OpenAIResponsesClient: ModelClient {
         return .object(["effort": .string(effort)])
     }
 
-    static func encode(_ message: ChatMessage) -> JSONValue {
+    static func encode(_ message: ChatMessage) throws -> JSONValue {
         if message.role == .assistant {
             return .object(["role": .string("assistant"), "content": .string(message.text)])
         }
-        let content: [JSONValue] = message.content.map { part in
+        let content: [JSONValue] = try message.content.map { part in
             switch part {
+            case .video:
+                throw MediaInput.unsupportedVideo()
             case let .text(text):
                 .object(["type": .string("input_text"), "text": .string(text)])
             case let .image(data, mediaType):

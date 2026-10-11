@@ -26,7 +26,7 @@ cat > "$bundle/Contents/Info.plist" <<'PLIST'
 <key>CFBundleVersion</key><string>1</string>
 <key>LSMinimumSystemVersion</key><string>15.0</string>
 <key>NSHighResolutionCapable</key><true/>
-<key>NSPhotoLibraryUsageDescription</key><string>Choose photos for your training project.</string>
+<key>NSPhotoLibraryUsageDescription</key><string>Choose images and video clips for your training project.</string>
 </dict></plist>
 PLIST
 echo "$bundle"

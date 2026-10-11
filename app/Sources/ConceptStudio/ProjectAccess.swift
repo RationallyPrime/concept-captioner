@@ -22,6 +22,13 @@ enum ProjectAccess {
         panel.allowsMultipleSelection = multiple
         return panel.runModal() == .OK ? panel.urls : []
     }
+
+    static func chooseMedia() -> [URL] {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image, .movie]
+        panel.allowsMultipleSelection = true
+        return panel.runModal() == .OK ? panel.urls : []
+    }
 }
 
 /// Recently opened projects: most recent first, at most `limit`, each with the security-scoped

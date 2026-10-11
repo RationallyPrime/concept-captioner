@@ -13,7 +13,7 @@ def test_default_skill_loads_with_profiles():
     skill = skills.load()
     assert skill.name == "diffusion-training-captioner"
     assert "# Core Caption Policy" in skill.instructions()
-    assert skill.profiles() == ["flux-image", "h3-still", "ltx-image", "plain"]
+    assert skill.profiles() == ["flux-image", "h3-still", "ltx-image", "ltx-video", "plain"]
     assert "[Shot 1]" in skill.profile("h3-still")
     with pytest.raises(ConfigurationError):
         skill.profile("nope")
@@ -64,3 +64,47 @@ def test_prompt_assembly(job):
     assert '"NORA7"' in job_view and "IVAN9" not in job_view
     review = critic_instructions(skill, profile, job, {"NORA7": "x"})
     assert "REVIEW TASK" in review and "RESPONSE\n" not in review
+
+
+def test_style_defaults_do_not_request_identity_traits():
+    from concept_captioner.job import Concept, Job
+
+    concept = Concept(trigger="INKSTYLE", target_concept="style")
+    assert concept.class_noun == "style"
+    job = Job(concepts=[concept])
+    assert concept.traits_to_learn == [
+        "the visual style, including its rendering, texture and palette"
+    ]
+    assert "subject matter" in concept.attributes_to_describe
+    text = captioner_instructions(
+        skills.load(), "Plain prose", job, {"INKSTYLE": "the entire image"}
+    )
+    assert "For style, apply it to the declared whole target" in text
+    assert "cannot be bound to one visible person" not in text
+    review = critic_instructions(
+        skills.load(), "Plain prose", job, {"INKSTYLE": "the entire image"}
+    )
+    assert "A whole-image style does not require a" in review
+
+
+def test_explicit_category_boundary_remains_the_users_choice():
+    from concept_captioner.job import Concept
+
+    concept = Concept(
+        trigger="INKSTYLE",
+        target_concept="style",
+        traits_to_learn=["line work only"],
+        attributes_to_describe=["palette"],
+    )
+    assert concept.traits_to_learn == ["line work only"]
+    assert concept.attributes_to_describe == ["palette"]
+
+
+@pytest.mark.parametrize("category", [[], {}])
+def test_malformed_category_uses_normal_configuration_error(category):
+    from pydantic import ValidationError
+
+    from concept_captioner.job import Job
+
+    with pytest.raises(ValidationError):
+        Job.model_validate({"concepts": [{"trigger": "BAD", "target_concept": category}]})

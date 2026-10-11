@@ -58,7 +58,7 @@ struct GPUWorkflowTests {
                 .string("--load-text-encoder-in-8bit"), .string("--vae-tiling"), .string("--skip-audio"),
             ])]))
         } else {
-            #expect(params["extra"] == nil)
+            #expect(params["extra"] == .object(["training_seed": .int(42)]))
         }
         #expect(workspace.trainingState == "running")
         #expect(workspace.result?.state == .training)
@@ -252,6 +252,10 @@ struct GPUWorkflowTests {
         #expect(!workspace.points.isEmpty)
         #expect(workspace.trainingState == "exited")
         #expect(workspace.result?.state == .pushed(repo: "demo/result"))
+        #expect(workspace.runHistory.last?.datasetRepo == "demo/images")
+        #expect(workspace.runHistory.last?.params["seed"] == .int(42))
+        workspace.projectFolder = nil // the view's initial destination hook also assigns nil in the demo
+        #expect(workspace.runHistory.count == 1)
         await workspace.publishResult()
         #expect(workspace.message.contains("uploaded"))
         await workspace.stopEverything()

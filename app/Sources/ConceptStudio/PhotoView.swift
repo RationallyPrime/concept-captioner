@@ -1,4 +1,6 @@
 import AppKit
+import AVFoundation
+import ConceptCore
 import ImageIO
 import SwiftUI
 
@@ -37,7 +39,12 @@ enum PhotoThumbnails {
         if let image = cached(key) { return image }
         let url = key.url
         let pixels = key.pixels
-        let decoded = await Task.detached(priority: .userInitiated) { decode(url, maxPixels: pixels) }.value
+        let decoded = await Task.detached(priority: .userInitiated) {
+            if Sources.isVideo(Sources.suffix(of: url.lastPathComponent)) {
+                return try? await MediaEditor.frame(url: url, seconds: 0, pixels: pixels).image
+            }
+            return decode(url, maxPixels: pixels)
+        }.value
         guard let decoded else { return nil }
         let image = NSImage(cgImage: decoded, size: NSSize(width: decoded.width, height: decoded.height))
         cache.setObject(image, forKey: cacheKey(key), cost: decoded.bytesPerRow * decoded.height)

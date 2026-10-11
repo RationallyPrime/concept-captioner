@@ -207,22 +207,25 @@ public struct Runner: Sendable {
         let sampleID: String
         let mapping: Job.Mapping
         let image: UserContent
+        let isVideo: Bool
         let instructions: String
         let validate: @Sendable (Caption) -> [String]
     }
 
     private func context(for sample: Sample, mapping: Job.Mapping) throws -> SampleContext {
-        let encoded = try Images.providerImage(sample.data, suffix: sample.suffix)
+        let media = try MediaInput.content(data: sample.data, suffix: sample.suffix)
         let deps = CaptionDeps(mapping: mapping, triggers: job.triggers)
         return try SampleContext(
             sampleID: sample.sampleID,
             mapping: mapping,
-            image: .image(data: encoded.data, mediaType: encoded.mediaType),
+            image: media,
+            isVideo: Sources.isVideo(sample.suffix),
             instructions: Prompt.captionerInstructions(
                 skill: skill,
                 profileText: profileText,
                 job: job,
-                mapping: mapping
+                mapping: mapping,
+                isVideo: Sources.isVideo(sample.suffix)
             ),
             validate: { caption in
                 caption.usable ? Triggers.triggerProblems(caption: caption.caption, deps: deps) : []
@@ -341,7 +344,8 @@ public struct Runner: Sendable {
             skill: skill,
             profileText: profileText,
             job: job,
-            mapping: context.mapping
+            mapping: context.mapping,
+            isVideo: context.isVideo
         )
         var verdict = try await critique(
             run.output.caption,

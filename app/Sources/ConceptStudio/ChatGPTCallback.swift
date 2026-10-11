@@ -9,6 +9,7 @@ protocol ChatGPTCallback: Sendable {
 
 /// A temporary HTTP listener bound only to IPv4 loopback. It never serves app content.
 actor ChatGPTLoopbackCallback: ChatGPTCallback {
+    private let providerName: String
     private var listener: NWListener?
     private var connections: [NWConnection] = []
     private var ready: CheckedContinuation<URL, any Error>?
@@ -16,6 +17,10 @@ actor ChatGPTLoopbackCallback: ChatGPTCallback {
     private var result: Result<URL, any Error>?
     private var redirectURI: URL?
     private var timeout: Task<Void, Never>?
+
+    init(providerName: String = "ChatGPT") {
+        self.providerName = providerName
+    }
 
     func start() async throws -> URL {
         try Task.checkCancellation()
@@ -31,7 +36,7 @@ actor ChatGPTLoopbackCallback: ChatGPTCallback {
                 listener.start(queue: .global(qos: .userInitiated))
                 timeout = Task {
                     do { try await Task.sleep(for: .seconds(600)) } catch { return }
-                    finish(.failure(ChatGPTAuthError("ChatGPT sign-in timed out. Start a new sign-in.")))
+                    finish(.failure(ChatGPTAuthError("\(providerName) sign-in timed out. Start a new sign-in.")))
                 }
             }
         } onCancel: {
@@ -90,7 +95,7 @@ actor ChatGPTLoopbackCallback: ChatGPTCallback {
             return
         }
         guard let redirectURI, let target = Self.callbackTarget(header, redirectURI: redirectURI) else {
-            reply(connection, status: "404 Not Found", text: "This address is only for ChatGPT sign-in.")
+            reply(connection, status: "404 Not Found", text: "This address is only for \(providerName) sign-in.")
             return
         }
         reply(connection, status: "200 OK", text: "You can return to ConceptStudio to finish signing in.")

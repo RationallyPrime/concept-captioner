@@ -77,7 +77,7 @@ public struct AnthropicClient: ModelClient {
             system += "\n\nCall the tool `\(output.name)` exactly once with your answer."
         }
 
-        var body: JSONObject = [
+        var body: JSONObject = try [
             "model": .string(requestedModel),
             "max_tokens": .int(settings.maxTokens ?? Self.defaultMaxTokens),
             "system": .string(system),
@@ -166,16 +166,18 @@ public struct AnthropicClient: ModelClient {
         }
     }
 
-    private static func encode(_ message: ChatMessage) -> JSONValue {
+    private static func encode(_ message: ChatMessage) throws -> JSONValue {
         let blocks: [JSONValue] = switch message.role {
         case .assistant: [.object(["type": .string("text"), "text": .string(message.text)])]
-        case .user: message.content.map(block)
+        case .user: try message.content.map(block)
         }
         return .object(["role": .string(message.role.rawValue), "content": .array(blocks)])
     }
 
-    private static func block(_ content: UserContent) -> JSONValue {
+    private static func block(_ content: UserContent) throws -> JSONValue {
         switch content {
+        case .video:
+            throw MediaInput.unsupportedVideo()
         case let .text(text):
             .object(["type": .string("text"), "text": .string(text)])
         case let .image(data, mediaType):

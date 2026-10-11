@@ -9,7 +9,7 @@ public struct HubFolderSource: ImageSource {
     public let repo: RepoID
     public let revision: String
     public let captionColumn: String
-    /// Image files only, sorted by path.
+    /// Image and video targets, sorted by path.
     public let files: [HubFile]
     /// Existing metadata.jsonl rows ([] when absent).
     public let rows: [MetadataRow]
@@ -30,7 +30,7 @@ public struct HubFolderSource: ImageSource {
         self.rows = rows
     }
 
-    /// Lists the repo once and reads the root metadata.jsonl when present. Image files anywhere
+    /// Lists the repo once and reads the root metadata.jsonl when present. Media files anywhere
     /// in the tree count (their `file_name` is the path from the repo root); a repo whose only
     /// data lives in parquet shards is rejected.
     public static func open(
@@ -40,7 +40,7 @@ public struct HubFolderSource: ImageSource {
         captionColumn: String = "caption"
     ) async throws -> HubFolderSource {
         let tree = try await client.listFiles(repo: repo, revision: revision)
-        let images = tree.filter { HubFolderSource.isImage($0.path) }
+        let images = tree.filter { HubFolderSource.isMedia($0.path) }
             .sorted { $0.path.utf8.lexicographicallyPrecedes($1.path.utf8) }
         if images.isEmpty, tree.contains(where: { Sources.suffix(of: $0.path).lowercased() == ".parquet" }) {
             throw HubError.unsupported(
@@ -70,7 +70,7 @@ public struct HubFolderSource: ImageSource {
         files.count
     }
 
-    /// Downloads each image when the consumer asks for it (a pull stream, like the Python async
+    /// Downloads each target when the consumer asks for it (a pull stream, like the Python async
     /// generator). A failed download ends the stream with that error.
     public func samples() -> AsyncThrowingStream<Sample, any Error> {
         samples(only: nil)
@@ -83,9 +83,9 @@ public struct HubFolderSource: ImageSource {
         return AsyncThrowingStream(unfolding: { try await cursor.next() })
     }
 
-    static func isImage(_ path: String) -> Bool {
+    static func isMedia(_ path: String) -> Bool {
         let lastComponent = path.split(separator: "/").last.map(String.init) ?? path
-        return Sources.imageSuffixes.contains(Sources.suffix(of: lastComponent).lowercased())
+        return Sources.mediaSuffixes.contains(Sources.suffix(of: lastComponent).lowercased())
     }
 
     /// Walks the file list; an actor so the pull closure stays `Sendable` without a lock.

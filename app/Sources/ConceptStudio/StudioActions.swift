@@ -40,7 +40,7 @@ extension StudioSession {
                       using: .png,
                       properties: [:]
                   )
-            else { throw StudioError.message("Choose a clear photo containing the reference face.") }
+            else { throw StudioError.message("Choose a readable image showing the person, object or character.") }
             let target = project.referenceURL(for: trigger)
             try FileManager.default.createDirectory(
                 at: target.deletingLastPathComponent(),
@@ -61,7 +61,9 @@ extension StudioSession {
             for item in items {
                 try Task.checkCancellation()
                 guard let picked = try await item.loadTransferable(type: PickedPhoto.self) else { continue }
-                let (data, suffix) = try PhotoImportName.readable(picked.data)
+                let pickedSuffix = picked.suggestedName.map(Sources.suffix(of:)) ?? ""
+                let (data, suffix) = try Sources.isVideo(pickedSuffix)
+                    ? (picked.data, String(pickedSuffix.dropFirst())) : PhotoImportName.readable(picked.data)
                 let name = PhotoImportName.make(
                     suggested: picked.suggestedName,
                     captured: PhotoImportName.captureDate(data),
@@ -78,7 +80,7 @@ extension StudioSession {
             }
             self.selectedImageID = self.project?.images.first?.id
             self.startImageAnalysis()
-            self.message = "\(added) photos imported. Originals in Photos are unchanged."
+            self.message = "\(added) images or clips imported."
                 + (already > 0 ? " \(already) were already in this project and were skipped." : "")
         }
     }
@@ -157,11 +159,11 @@ extension StudioSession {
     }
 
     func datasetCritique() {
-        perform("Reviewing your image set…") {
+        perform("Reviewing the training data…") {
             guard let project = self.project else { return }
             let assistant = try StudioAssistant(endpoint: self.endpoint(), demo: self.demoMode)
             self.datasetAdvice = try await assistant.critique(project, warnings: self.analyses) { done, total in
-                self.message = "Reviewing your image set… \(done) of \(total) photos"
+                self.message = "Reviewing the training data… \(done) of \(total) photos"
             }
             self.message = "Dataset advice ready. Review it before spending on training."
         }
@@ -177,6 +179,7 @@ extension StudioSession {
 
     func saveConcept(_ concept: Concept, replacing oldTrigger: String?) throws {
         guard var project else { return }
+        let oldConcept = oldTrigger.flatMap { project.job.concept(for: $0) }
         if let oldTrigger, let index = project.job.concepts.firstIndex(where: { $0.trigger == oldTrigger }) {
             project.job.concepts[index] = concept
             if oldTrigger != concept.trigger {
@@ -193,10 +196,27 @@ extension StudioSession {
                 }
             }
         } else { project.job.concepts.append(concept) }
+        if let mapping = project.job.wholeImageStyleMapping {
+            for image in project.images {
+                try project.job.setMapping(mapping, for: image.id)
+            }
+        } else if let oldConcept, oldConcept.targetConcept != concept.targetConcept {
+            for image in project.allMedia {
+                guard var mapping = project.job.mapping(for: image.id) else { continue }
+                mapping[concept.trigger] = nil
+                try project.job.setMapping(mapping.isEmpty ? nil : mapping, for: image.id)
+            }
+        }
         project.job = try Job(json: project.job.jsonValue)
         try project.save()
         self.project = project
-        message = "Concept saved. The learning word holds only the traits you chose."
+        if oldConcept != concept { mappingProposals = [:] }
+        message = project.job.wholeImageStyleMapping == nil
+            ? "Concept saved. Review its assignments on Mapping before captioning."
+            : "Style saved and assigned to every included image or clip."
+        if oldConcept != nil, oldConcept != concept, project.images.contains(where: { !$0.caption.isEmpty }) {
+            message += " Existing captions retain their text; review or re-caption them for the changed concept."
+        }
     }
 
     func confirmMapping(id: String, mapping: Job.Mapping) {
@@ -209,32 +229,43 @@ extension StudioSession {
     }
 
     func proposeMappings(useModel: Bool) {
-        perform(useModel ? "Asking for reference-based mapping proposals…" : "Comparing faces on your Mac…") {
+        perform(useModel ? "Requesting concept assignments…" : "Comparing reference faces on this Mac…") {
             guard let project = self.project else { return }
-            var references = self.references
-            if self.demoMode, references.isEmpty, let first = project.images.first {
-                references = [project.job.concepts[0].trigger: first.url]
+            if let mapping = project.job.wholeImageStyleMapping {
+                for image in project.images {
+                    self.confirmMapping(id: image.id, mapping: mapping)
+                }
+                self.message = "The style is assigned to every included image and clip."
+                return
             }
-            guard !references.isEmpty else {
-                throw StudioError.message("Add a reference face in Concepts, then ask for suggestions.")
-            }
-            if useModel {
+            let references = self.references
+            let personConcepts = project.job.concepts.filter(\.targetConcept.isPersonIdentity)
+            if !useModel {
+                guard personConcepts.count == project.job.concepts.count else {
+                    throw StudioError.message("On-device face comparison supports person concepts. "
+                        + "Use the selected model or enter a location for objects, characters and motion.")
+                }
+                guard personConcepts.allSatisfy({ references[$0.trigger] != nil }) else {
+                    throw StudioError.message("Choose a reference photo for each person in Concepts first.")
+                }
+                self.mappingProposals = try await self.inspector.proposals(
+                    images: project.images.filter { !Sources.isVideo(Sources.suffix(of: $0.id)) }.map(\.url),
+                    references: references
+                )
+            } else {
+                guard personConcepts.allSatisfy({ references[$0.trigger] != nil }) else {
+                    throw StudioError.message("Choose a reference photo for each person in Concepts first.")
+                }
                 let assistant = try StudioAssistant(endpoint: self.endpoint(), demo: self.demoMode)
                 for image in project.images {
                     try Task.checkCancellation()
                     self.mappingProposals[image.id] = try await assistant.proposeMapping(
-                        image: image.url,
-                        references: references
+                        image: image.url, references: references, concepts: project.job.concepts
                     )
                     self.completed += 1
                 }
-            } else {
-                self.mappingProposals = try await self.inspector.proposals(
-                    images: project.images.map(\.url),
-                    references: references
-                )
             }
-            self.message = "Suggestions ready. Check each photo and confirm; no mapping was changed automatically."
+            self.message = "Review each suggested assignment, then confirm it."
         }
     }
 
@@ -268,7 +299,7 @@ extension StudioSession {
             _ = try await runner.run(source: source, sink: sink, only: only) { outcome in
                 await self.receive(outcome)
             }
-            self.message = "Captioning finished. Review each result beside its photo."
+            self.message = "Captioning finished. Review each caption against its image or clip."
         }
         // Set before the run starts, so an edit made right after starting already waits for its photo.
         if started { runPendingIDs = pending }
@@ -279,7 +310,7 @@ extension StudioSession {
         runPendingIDs.remove(outcome.sampleID)
         project?.apply(outcome)
         completed += 1
-        message = "\(completed) photos processed · \(outcome.sampleID): \(outcome.status.rawValue)"
+        message = "\(completed) samples processed · \(outcome.sampleID): \(outcome.status.rawValue)"
     }
 
     /// Save a caption edit. Uses the edit gate, so it works while a caption run is in progress,
@@ -306,7 +337,7 @@ extension StudioSession {
     }
 
     func compare(id: String, model: String, kind: String) {
-        perform("Comparing another model without changing your saved caption…") {
+        perform("Requesting a comparison caption…") {
             guard let project = self.project else { return }
             let runner = try Runner(
                 job: project.job,
@@ -331,8 +362,8 @@ extension StudioSession {
                 throw StudioError.message("Import photos before publishing your dataset.")
             }
             try project.save()
-            let operations = try await ProjectPublisher.operations(for: project)
             if self.demoMode {
+                let operations = try await ProjectPublisher.operations(for: project)
                 for index in operations.indices {
                     try await Task.sleep(for: .milliseconds(50))
                     self.completed = index + 1
@@ -346,6 +377,12 @@ extension StudioSession {
                 }
                 let repo = try RepoID(self.repoID)
                 try await client.createRepo(repo, private: self.privateDataset)
+                let remotePaths = try await Set(client.listFiles(repo: repo).map(\.path))
+                let previousRows = try await remotePaths.contains(ImageFolderMetadata.fileName)
+                    ? ImageFolderMetadata.parse(client.download(repo: repo, path: ImageFolderMetadata.fileName)) : []
+                let operations = try await ProjectPublisher.operations(
+                    for: project, previousRows: previousRows, remotePaths: remotePaths
+                )
                 let commit = try await client.commit(
                     repo: repo,
                     operations: operations,
@@ -354,6 +391,8 @@ extension StudioSession {
                     Task { @MainActor in self.message = "\(progress.phase.rawValue): \(progress.path ?? "dataset")" }
                 }
                 self.message = "Dataset published. " + commit.commitURL
+                self.gpu.datasetRevision = commit.commitOID
+                self.updateProjectState { $0.datasetRevision = commit.commitOID }
             }
             self.rememberChoices()
         }
@@ -384,6 +423,9 @@ struct PickedPhoto: Transferable {
     let suggestedName: String?
 
     static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(importedContentType: .movie) { received in
+            try PickedPhoto(data: Data(contentsOf: received.file), suggestedName: received.file.lastPathComponent)
+        }
         FileRepresentation(importedContentType: .image) { received in
             try PickedPhoto(data: Data(contentsOf: received.file), suggestedName: received.file.lastPathComponent)
         }

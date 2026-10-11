@@ -3,88 +3,88 @@ import SwiftUI
 
 struct ConceptsView: View {
     @Bindable var session: StudioSession
-    @State private var editing: Concept?
-    @State private var showEditor = false
+    @State private var editor: EditorSelection?
+    @State private var multipleConcepts = false
+
+    private var concepts: [Concept] {
+        session.project?.job.concepts ?? []
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: StudioStyle.contentSpacing) {
-                StudioNotice(
-                    "A learning word (trigger) represents the traits your model should hold. "
-                        + "Captions describe everything you want to change later."
-                )
-                ForEach(session.project?.job.concepts ?? [], id: \.trigger) { concept in
+                Text("Choose the concept this LoRA will learn")
+                    .font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                Text("A concept can be a person, an object, a character, a visual style or a movement. "
+                    + "Start with one concept. The captions describe everything else in your training data, "
+                    + "while a trigger names the concept itself.")
+                    .fixedSize(horizontal: false, vertical: true)
+                if session.demoMode {
+                    StudioNotice("The demo starts with the facial identity of one fictional adult. "
+                        + "Its original trigger is NORA7. The three synthetic photos vary the clothes, "
+                        + "pose, setting and light.")
+                }
+                ForEach(concepts, id: \.trigger) { concept in
                     conceptSummary(concept)
                     Divider()
                 }
-                Button("Add another concept", systemImage: "plus") { editing = nil; showEditor = true }
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .help("Add a concept (⌘↩)")
-                    .disabled(session.busy)
-                Text(
-                    "Use one clear reference face per person for mapping suggestions. "
-                        + "Suggestions need your confirmation."
-                )
-                .font(.callout).foregroundStyle(StudioStyle.supportingText)
-            }
+                DisclosureGroup("Advanced settings") {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Toggle("Configure multiple concepts in one LoRA", isOn: $multipleConcepts)
+                            .disabled(concepts.count > 1)
+                        Text("Each concept needs its own trigger and a confirmed assignment in every relevant sample. "
+                            + "Use this only when you intend to train the concepts together.")
+                            .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                        if multipleConcepts || concepts.count > 1 {
+                            Button("Add concept…", systemImage: "plus") { editor = EditorSelection(existing: nil) }
+                                .disabled(session.busy || session.editing)
+                        }
+                    }.padding(.top, 10)
+                }
+            }.frame(maxWidth: 820, alignment: .leading)
         }
-        .sheet(isPresented: $showEditor) { ConceptEditor(session: session, existing: editing) }
+        .sheet(item: $editor) { ConceptEditor(session: session, existing: $0.existing) }
+        .onAppear { multipleConcepts = concepts.count > 1 }
+    }
+
+    private struct EditorSelection: Identifiable {
+        let id = UUID()
+        let existing: Concept?
     }
 
     private func conceptSummary(_ concept: Concept) -> some View {
-        StudioSection(title: "\(concept.trigger) · \(concept.classNoun)") {
-            HStack(alignment: .top, spacing: 28) {
-                VStack(alignment: .leading, spacing: 10) {
-                    if let reference = session.references[concept.trigger] {
-                        PhotoView(url: reference).frame(width: 150, height: 170)
-                    } else {
-                        Image(systemName: "person.crop.square")
-                            .font(.system(size: 56)).foregroundStyle(StudioStyle.supportingText)
-                            .frame(width: 150, height: 170)
-                            .background(StudioStyle.surface)
-                    }
-                    Text("Reference photo").font(.callout).foregroundStyle(StudioStyle.supportingText)
+        StudioSection(title: concept.targetConcept.title) {
+            Text(concept.traitsToLearn.joined(separator: "; "))
+                .font(.title3).textSelection(.enabled)
+            LabeledContent("Trigger", value: concept.trigger)
+            LabeledContent("Class noun", value: concept.classNoun)
+            Text(concept.targetConcept.captionExplanation)
+                .foregroundStyle(StudioStyle.supportingText).fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .top, spacing: 20) {
+                if concept.targetConcept != .style, concept.targetConcept != .motion,
+                   let reference = session.references[concept.trigger] {
+                    PhotoView(url: reference).frame(width: 110, height: 120)
+                        .accessibilityLabel("Reference for \(concept.trigger)")
                 }
-                VStack(alignment: .leading, spacing: 20) {
-                    HStack(alignment: .top, spacing: 28) {
-                        traits("Learn", subtitle: "Keep recognizable", values: concept.traitsToLearn)
-                        traits("Describe", subtitle: "Keep changeable", values: concept.attributesToDescribe)
+                VStack(alignment: .leading, spacing: 12) {
+                    Button("Edit concept…", systemImage: "pencil") { editor = EditorSelection(existing: concept) }
+                        .disabled(session.busy || session.editing)
+                    if concept.targetConcept != .style, concept.targetConcept != .motion {
+                        Button(concept.targetConcept
+                            .isPersonIdentity ? "Choose reference photo…" : "Choose reference image…") {
+                                if let url = ProjectAccess.chooseImages(multiple: false).first {
+                                    session.chooseReference(trigger: concept.trigger, from: url)
+                                }
+                            }.disabled(session.busy || session.editing)
+                        Text(concept.targetConcept.isPersonIdentity
+                            ? "Use a clear reference to help identify the same person in each sample."
+                            :
+                            "A reference helps the model locate this object or character in each sample.")
+                            .font(.callout).foregroundStyle(StudioStyle.supportingText)
                     }
-                    if !concept.explicitBoundaryDecisions.isEmpty {
-                        DisclosureGroup("Specific boundary decisions") {
-                            ForEach(concept.explicitBoundaryDecisions.keys, id: \.self) { key in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(key).fontWeight(.medium)
-                                    Text(concept.explicitBoundaryDecisions[key] ?? "")
-                                        .foregroundStyle(StudioStyle.supportingText)
-                                }.padding(.vertical, 4)
-                            }
-                        }
-                    }
-                    HStack(spacing: 10) {
-                        Button("Edit boundary", systemImage: "slider.horizontal.3") {
-                            editing = concept; showEditor = true
-                        }
-                        Button("Choose reference face…") {
-                            if let url = ProjectAccess.chooseImages(multiple: false).first {
-                                session.chooseReference(trigger: concept.trigger, from: url)
-                            }
-                        }
-                    }
-                }.frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
-    }
-
-    private func traits(_ title: String, subtitle: String, values: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.headline).accessibilityAddTraits(.isHeader)
-            Text(subtitle).font(.callout).foregroundStyle(StudioStyle.supportingText)
-            ForEach(Array(values.enumerated()), id: \.offset) { _, value in
-                Text(value).fixedSize(horizontal: false, vertical: true)
-            }
-            if values.isEmpty { Text("No traits added yet").foregroundStyle(StudioStyle.supportingText) }
-        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -95,112 +95,92 @@ struct ConceptEditor: View {
     @State private var trigger = ""
     @State private var classNoun = "person"
     @State private var target = TargetConcept.facialIdentity
-    @State private var learn = "distinctive facial identity"
-    @State private var describe = Concept.defaultAttributesToDescribe.joined(separator: "\n")
-    @State private var decisions = ""
     @State private var intent = ""
+    @State private var describe = ""
+    @State private var decisions = ""
     @State private var error = ""
-    @State private var draftTask: Task<Void, Never>?
-    @State private var editorActive = false
+
+    init(session: StudioSession, existing: Concept?) {
+        self.session = session
+        self.existing = existing
+        let category = existing?.targetConcept ?? .facialIdentity
+        _trigger = State(initialValue: existing?.trigger ?? "CONCEPT\((session.project?.job.concepts.count ?? 0) + 1)")
+        _classNoun = State(initialValue: existing?.classNoun ?? category.defaultClassNoun)
+        _target = State(initialValue: category)
+        _intent = State(initialValue: existing?.traitsToLearn.joined(separator: "; ") ?? "")
+        _describe = State(initialValue: (existing?.attributesToDescribe ?? category.defaultDescribedAttributes)
+            .joined(separator: "\n"))
+        _decisions = State(initialValue: existing?.explicitBoundaryDecisions
+            .map { "\($0.key): \($0.value)" }.joined(separator: "\n") ?? "")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text(existing == nil ? "Define a concept" : "Edit your learning boundary")
+            Text(existing == nil ? "Add concept" : "Edit concept")
                 .font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    intentSection
-                    Divider()
-                    identitySection
-                    Divider()
-                    StudioSection(
-                        title: "Learn these traits",
-                        subtitle: "The identity or qualities to keep recognizable. One per line."
-                    ) {
-                        TextEditor(text: $learn).frame(height: 75).border(.quaternary)
-                            .accessibilityLabel("Learn these traits")
+                    Picker("Concept category", selection: $target) {
+                        ForEach(choices, id: \.self) { Text($0.title).tag($0) }
                     }
                     StudioSection(
-                        title: "Describe these changeable details",
-                        subtitle: "Clothes, pose, light and other details you want to vary. One per line."
+                        title: target.question,
+                        subtitle: "Describe the one concept your training examples share."
                     ) {
-                        TextEditor(text: $describe).frame(height: 110).border(.quaternary)
-                            .accessibilityLabel("Describe these changeable details")
+                        TextField(target.example, text: $intent, axis: .vertical).lineLimit(2 ... 4)
+                            .accessibilityLabel(target.question)
+                        Text(target.captionExplanation).font(.callout).foregroundStyle(StudioStyle.supportingText)
                     }
-                    DisclosureGroup("Specific boundary decisions (optional)") {
-                        Text("For an ambiguous detail, write detail: decision, one per line.")
-                            .font(.callout).foregroundStyle(StudioStyle.supportingText)
-                        TextEditor(text: $decisions).frame(height: 80).border(.quaternary)
-                            .accessibilityLabel("Boundary decisions")
+                    StudioSection(title: "Trigger", subtitle: "An uncommon name for the concept, such as NORA7.") {
+                        TextField("Trigger", text: $trigger)
+                        Text(
+                            "Captions include this exact name. Use it in generation prompts to request the concept."
+                        )
+                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                    }
+                    DisclosureGroup("Advanced settings") {
+                        VStack(alignment: .leading, spacing: 14) {
+                            TextField("Class noun", text: $classNoun)
+                            Text("The ordinary noun used beside the trigger: person, dog, mug, style or motion.")
+                                .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                            Text("Caption detail overrides").font(.headline)
+                            Text("The category supplies these defaults. Change them only to refine which details "
+                                + "the captions should describe; use one per line.").font(.callout)
+                            TextEditor(text: $describe).frame(height: 100).border(.quaternary)
+                                .accessibilityLabel("Caption detail overrides")
+                            Text("Boundary exceptions").font(.headline)
+                            Text("Optional: detail: decision, one per line. For example, explain whether a "
+                                + "character's permanent costume belongs to the concept.").font(.callout)
+                            TextEditor(text: $decisions).frame(height: 75).border(.quaternary)
+                                .accessibilityLabel("Boundary exceptions")
+                            Picker("Detailed category", selection: $target) {
+                                ForEach(TargetConcept.allCases, id: \.self) { Text($0.title).tag($0) }
+                            }
+                        }.padding(.top, 10)
                     }
                 }.padding(.trailing, 8)
             }
             if !error.isEmpty { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
             Divider()
             HStack {
-                Button("Cancel") { close() }.keyboardShortcut(.cancelAction)
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Save concept") { save() }.buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
                     .keyboardShortcut(.defaultAction)
+                    .disabled(intent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || trigger.isEmpty)
             }
         }.padding(28).frame(width: 660, height: 650).tint(StudioStyle.accent)
-            .onAppear {
-                editorActive = true
-                guard let existing else { trigger = "CONCEPT\((session.project?.job.concepts.count ?? 0) + 1)"; return }
-                trigger = existing.trigger; classNoun = existing.classNoun; target = existing.targetConcept
-                learn = existing.traitsToLearn.joined(separator: "\n")
-                describe = existing.attributesToDescribe.joined(separator: "\n")
-                decisions = existing.explicitBoundaryDecisions.map { "\($0.key): \($0.value)" }.joined(separator: "\n")
+            .onChange(of: target) { old, new in
+                guard old != new else { return }
+                if classNoun == old.defaultClassNoun { classNoun = new.defaultClassNoun }
+                if intent == old.defaultLearningTarget { intent = new.defaultLearningTarget }
+                describe = new.defaultDescribedAttributes.joined(separator: "\n")
             }
-            .onDisappear { editorActive = false; draftTask?.cancel() }
     }
 
-    private var intentSection: some View {
-        StudioSection(
-            title: "Start with what you want",
-            subtitle: "Describe the subject and what should stay recognizable."
-        ) {
-            TextField("Your intended result", text: $intent, axis: .vertical).lineLimit(2 ... 4)
-            Button("Draft the boundary from my description", systemImage: "sparkles") { draft() }
-                .disabled(intent.isEmpty || session.busy)
-            Text(session.demoMode ? "The demo drafts locally, with no account or charges." :
-                "Uses your selected captioning provider and may use account credits. Review the draft before saving.")
-                .font(.callout).foregroundStyle(StudioStyle.supportingText)
-        }
-    }
-
-    private var identitySection: some View {
-        StudioSection(title: "Name your concept") {
-            TextField("Learning word", text: $trigger)
-            Text("A unique word such as NORA7. Use the same word when training and generating pictures.")
-                .font(.callout).foregroundStyle(StudioStyle.supportingText)
-            TextField("Ordinary category", text: $classNoun)
-            Text("For example: person, dog, sculpture or style.")
-                .font(.callout).foregroundStyle(StudioStyle.supportingText)
-            Picker("What should be learned?", selection: $target) {
-                ForEach(TargetConcept.allCases, id: \.self) {
-                    Text($0.rawValue.replacingOccurrences(of: "_", with: " ")).tag($0)
-                }
-            }
-        }
-    }
-
-    private func draft() {
-        guard !session.busy else { return }
-        session.draftBoundary(description: intent) { draft in
-            guard editorActive, !Task.isCancelled else { return }
-            learn = draft.learn.joined(separator: "\n")
-            describe = draft.describe.joined(separator: "\n")
-            decisions = draft.decisions.map { "\($0.detail): \($0.decision)" }.joined(separator: "\n")
-            draftTask = nil
-        }
-        draftTask = session.task
-    }
-
-    private func close() {
-        editorActive = false
-        draftTask?.cancel()
-        dismiss()
+    private var choices: [TargetConcept] {
+        TargetConcept.beginnerChoices.contains(target)
+            ? TargetConcept.beginnerChoices : TargetConcept.beginnerChoices + [target]
     }
 
     private func save() {
@@ -208,19 +188,18 @@ struct ConceptEditor: View {
             let pairs = try decisions.split(separator: "\n").map { line -> (String, String) in
                 let parts = line.split(separator: ":", maxSplits: 1)
                 guard parts.count == 2
-                else { throw StudioError.message("Use detail: decision for each boundary decision.") }
+                else { throw StudioError.message("Use detail: decision for each boundary exception.") }
                 return (parts[0].trimmingCharacters(in: .whitespaces), parts[1].trimmingCharacters(in: .whitespaces))
             }
             let concept = try Concept(
-                trigger: trigger,
-                classNoun: classNoun,
-                targetConcept: target,
-                traitsToLearn: learn.split(separator: "\n").map(String.init),
+                trigger: trigger.trimmingCharacters(in: .whitespacesAndNewlines),
+                classNoun: classNoun.trimmingCharacters(in: .whitespacesAndNewlines), targetConcept: target,
+                traitsToLearn: [intent.trimmingCharacters(in: .whitespacesAndNewlines)],
                 attributesToDescribe: describe.split(separator: "\n").map(String.init),
                 explicitBoundaryDecisions: OrderedDictionary(pairs)
             )
             try session.saveConcept(concept, replacing: existing?.trigger)
-            close()
+            dismiss()
         } catch { self.error = StudioSession.describe(error) }
     }
 }

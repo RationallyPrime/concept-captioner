@@ -101,6 +101,7 @@ final class StudioSession {
     var criticModel = ""
     var openAIUsesChatGPT = false
     var chatGPT: ChatGPTAccounts
+    var openRouter: OpenRouterConnection
     var showChatGPTPlanNotice = false
     var chatGPTUsageLimitReached = false
     @ObservationIgnored var chatGPTWorkGeneration = 0
@@ -126,6 +127,7 @@ final class StudioSession {
     init(
         preferences: UserDefaults = .standard,
         chatGPT: ChatGPTAccounts? = nil,
+        openRouter: OpenRouterConnection? = nil,
         secrets: any SecretStore = KeychainStore(),
         demoDirectory: URL = DemoProject.defaultDirectory
     ) {
@@ -133,6 +135,7 @@ final class StudioSession {
         self.secrets = secrets
         self.demoDirectory = demoDirectory
         self.chatGPT = chatGPT ?? ChatGPTAccounts(preferences: preferences)
+        self.openRouter = openRouter ?? OpenRouterConnection(secrets: secrets)
         gpu = Self.makeGPUWorkspace(demoMode: false, preferences: preferences, secrets: secrets)
         recentPaths = recents.paths
         loadSavedChoices()
@@ -164,7 +167,10 @@ final class StudioSession {
     /// The dataset repository Publish writes to; remembered per project, blank for a new project.
     var repoID: String {
         get { projectState.dataset.repo }
-        set { updateProjectState { $0.dataset.repo = newValue } }
+        set { updateProjectState {
+            if $0.dataset.repo != newValue { $0.datasetRevision = "" }
+            $0.dataset.repo = newValue
+        } }
     }
 
     var privateDataset: Bool {
@@ -209,12 +215,18 @@ final class StudioSession {
         captionDrafts[image.id] = nil
     }
 
+    func invalidateMediaDraft(id: String) {
+        captionDrafts[id] = nil
+        mappingProposals[id] = nil
+        comparison = ""
+    }
+
     func hasUnsavedCaption(for image: ProjectImage) -> Bool {
         captionDraft(for: image) != CaptionDraft(text: image.caption, isFinal: image.isFinal)
     }
 
     var unsavedCaptionCount: Int {
-        project?.images.count(where: { hasUnsavedCaption(for: $0) }) ?? 0
+        project?.allMedia.count(where: { hasUnsavedCaption(for: $0) }) ?? 0
     }
 
     var captionDiscardWarning: String? {
@@ -223,7 +235,8 @@ final class StudioSession {
     }
 
     var needsCloseConfirmation: Bool {
-        unsavedCaptionCount > 0 || busy || editing || chatGPT.isBusy || gpu.hasRunningPod || gpu.isBusy
+        unsavedCaptionCount > 0 || busy || editing || chatGPT.isBusy || openRouter.isBusy
+            || gpu.hasRunningPod || gpu.isBusy
     }
 
     func clearSavedCaptionDraft(_ draft: CaptionDraft, for id: String) {
@@ -367,7 +380,7 @@ final class StudioSession {
                 self.projectState = ProjectAppState(dataset: HubDestination(repo: "demo/concept-studio"))
                 self.selectedImageID = self.project?.images.first?.id
                 self.step = .images
-                self.message = "Demo uses synthetic illustrations, fake services, and no money."
+                self.message = "Offline demo: synthetic photos, prepared captions and simulated services."
                 self.startImageAnalysis()
             }
         }
@@ -390,7 +403,7 @@ final class StudioSession {
                 self.projectState = ProjectAppState()
                 self.rememberRecent(url)
                 self.step = .images
-                self.message = "Project saved. Import your first photos."
+                self.message = "Project created. Import the images or clips for your concept."
             }
         }
     }
@@ -423,6 +436,7 @@ final class StudioSession {
     func releaseProject() async {
         chatGPTWorkGeneration += 1
         await chatGPT.cancelAndWait()
+        await openRouter.cancelAndWait()
         stopImageAnalysis()
         editTask?.cancel()
         await editTask?.value
@@ -454,6 +468,7 @@ final class StudioSession {
     func stopEverything() async {
         chatGPTWorkGeneration += 1
         await chatGPT.cancelAndWait()
+        await openRouter.cancelAndWait()
         task?.cancel()
         editTask?.cancel()
         stopImageAnalysis()
@@ -480,7 +495,7 @@ final class StudioSession {
 
     func importImages(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
-        perform("Importing photos…") {
+        perform("Importing training data…") {
             for url in urls {
                 let accessed = url.startAccessingSecurityScopedResource()
                 defer { if accessed { url.stopAccessingSecurityScopedResource() } }
@@ -489,38 +504,19 @@ final class StudioSession {
             }
             self.selectedImageID = self.project?.images.first?.id
             self.startImageAnalysis()
-            self.message = "Photos imported. Warnings help you choose a varied, clear set."
+            self.message = "Training data imported. Review the selected images and clips before captioning."
         }
     }
 
     func importFolder(_ folder: URL) {
-        perform("Importing folder photos…") {
+        perform("Importing folder contents…") {
             let accessed = folder.startAccessingSecurityScopedResource()
             defer { if accessed { folder.stopAccessingSecurityScopedResource() } }
-            let source = try LocalFolderSource(directory: folder)
-            try self.project?.importFiles(source.files)
+            try self.project?.importFiles(MediaEditor.importableFiles(in: folder))
             self.selectedImageID = self.project?.images.first?.id
             self.startImageAnalysis()
-            self.message = "Photos imported."
+            self.message = "Training data imported."
         }
-    }
-
-    // MARK: Rented computer
-
-    func configureGPU() {
-        normalizePodImageChoice()
-        gpu.triggerWords = project?.job.triggers.joined(separator: ",") ?? ""
-        gpu.profile = project?.job.profile ?? "flux-image"
-        if !gpu.hasRunningPod { gpu.trainer = gpu.profile == "ltx-image" ? "ltx" : "aitoolkit" }
-        guard !demoMode else { return }
-        do {
-            try gpu.configure(
-                runpodKey: keyStore.read("runpod") ?? "",
-                hubToken: keyStore.read("huggingface") ?? "",
-                imageName: podImageName,
-                networkVolumeID: volumeID.isEmpty ? nil : volumeID
-            )
-        } catch { errorMessage = Self.describe(error) }
     }
 
     // MARK: - Lane ui stored state (added 2026-10-11; owned by the view layer, see AppLifetime.swift)

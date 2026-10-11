@@ -5,11 +5,11 @@ import Foundation
 public struct LocalFolderSource: ImageSource {
     public let name = "folder"
     public let directory: URL
-    /// Image files only, sorted by file name (byte order).
+    /// Image and video targets, sorted by file name (byte order).
     public let files: [URL]
 
     /// Lists the folder once. Hidden entries are considered like any other (Python's `iterdir`
-    /// does not skip them); only regular files whose suffix is in `Sources.imageSuffixes`
+    /// does not skip them); only regular files whose suffix is in `Sources.mediaSuffixes`
     /// (case-insensitively) are kept. Symlinks to files count as files, like `Path.is_file()`.
     public init(directory: URL) throws {
         let directory = directory.standardizedFileURL
@@ -25,7 +25,7 @@ public struct LocalFolderSource: ImageSource {
             throw ConfigurationError("input directory could not be listed: \(directory.path) (\(error))")
         }
         let files = entries.filter { entry in
-            guard Sources.imageSuffixes.contains(Sources.suffix(of: entry.lastPathComponent).lowercased()) else {
+            guard Sources.mediaSuffixes.contains(Sources.suffix(of: entry.lastPathComponent).lowercased()) else {
                 return false
             }
             var entryIsDirectory: ObjCBool = false

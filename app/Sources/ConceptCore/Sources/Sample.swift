@@ -17,6 +17,17 @@ public struct Sample: Sendable, Equatable {
 
 public enum Sources {
     public static let imageSuffixes: Set<String> = [".png", ".jpg", ".jpeg", ".webp"]
+    public static let videoSuffixes: Set<String> = [".mp4", ".mov", ".m4v"]
+    public static let mediaSuffixes = imageSuffixes.union(videoSuffixes)
+    public static let videoSamplingFPS = 24
+
+    public static func isVideo(_ suffix: String) -> Bool {
+        videoSuffixes.contains(suffix.lowercased())
+    }
+
+    public static func videoMediaType(_ suffix: String) -> String {
+        suffix.lowercased() == ".mov" ? "video/quicktime" : "video/mp4"
+    }
 
     /// The last extension of a file name with its dot, as Python's `Path.suffix`: `"a.b.png"` is
     /// `".png"`, while `".hidden"`, `"trailing."` and `"none"` have no suffix (`""`). Case is kept.

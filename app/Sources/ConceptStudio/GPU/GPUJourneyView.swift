@@ -6,6 +6,8 @@ enum MonitorTab: String, CaseIterable, Identifiable {
     case progress = "Progress"
     case tensorBoard = "TensorBoard"
     case log = "Training log"
+    case results = "Generated results"
+    case runs = "Saved runs"
 
     var id: Self {
         self
@@ -112,7 +114,7 @@ struct GPUJourneyView: View {
             }
             Divider()
             StudioSection(
-                title: "Keep your work",
+                title: "Persistent storage",
                 subtitle: "Network storage keeps checkpoints after stopping. "
                     + "It is billed separately, even when stopped."
             ) {
@@ -211,7 +213,19 @@ struct GPUJourneyView: View {
                 Text(workspace.plan?.explanation
                     ?? "Rent a computer first. Its control agent will tell us which GPUs each service can use.")
                     .fixedSize(horizontal: false, vertical: true)
-                LabeledContent("Dataset", value: datasetRepo.isEmpty ? "Publish your images first" : datasetRepo)
+                LabeledContent(
+                    "Published dataset",
+                    value: trainingDatasetRepo.isEmpty
+                        ? "Publish your training media first" : trainingDatasetRepo
+                )
+                LabeledContent(
+                    "Published revision",
+                    value: trainingDatasetRevision ?? "Latest revision on first download"
+                )
+                .font(.callout).textSelection(.enabled)
+                Text("Training downloads this published dataset. Publish again after changing included media, crops, "
+                    + "segments or captions on this Mac.")
+                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
                 Button("Refresh the plan") { Task { await workspace.refresh() } }
             }
             Divider()
@@ -222,7 +236,7 @@ struct GPUJourneyView: View {
                 Form {
                     trainerPicker
                     TextField("Starting model", text: $workspace.baseModel)
-                        .help("The existing model your photos will teach. Keep the included choice for your first run.")
+                        .help("Base diffusion model to train. Choose a compatible model for these images or clips.")
                     TextField(
                         "Save trained model to",
                         text: $workspace.outputRepo,
@@ -238,7 +252,8 @@ struct GPUJourneyView: View {
             Divider()
             StudioSection(
                 title: "Run settings",
-                subtitle: "More steps give more practice. Start short and review the result before spending more."
+                subtitle: "A training step updates the model using a batch of your examples. More steps take longer; "
+                    + "compare saved checkpoints to find the best result."
             ) {
                 Form {
                     Stepper("Training steps: \(workspace.steps)", value: $workspace.steps, in: 25 ... 10000, step: 25)
@@ -252,6 +267,18 @@ struct GPUJourneyView: View {
                 .help("Start training (⌘↩)")
                 .disabled(workspace.isBusy || workspace.isTraining || !workspace.hasRunningPod || datasetRepo.isEmpty)
             }
+            if !workspace.repeatSourceRunID.isEmpty {
+                StudioNotice(repeatedRun?.datasetRevision == nil
+                    ? "Saved settings are loaded. This run did not record a dataset revision; "
+                    + "the current remote dataset will be used."
+                    : "The next run repeats a saved dataset revision. Settings above remain editable.")
+                Button("Use this project's current dataset instead") {
+                    workspace.repeatSourceRunID = ""
+                    workspace.datasetRevision = session.projectState.datasetRevision
+                }
+            }
+            Divider()
+            RunHistoryView(session: session, workspace: workspace)
         }
     }
 
@@ -260,16 +287,38 @@ struct GPUJourneyView: View {
             Picker("Training resolution", selection: $workspace.resolution) {
                 ForEach(GPUWorkspace.resolutionChoices, id: \.self) { Text("\($0) px").tag($0) }
             }
-            .help("The longest side photos are scaled to while training. Higher values need more memory and time.")
+            .help("Sets photo training and generated-output resolution. Video dimensions come from approved clips.")
             Stepper("LoRA rank: \(workspace.rank)", value: $workspace.rank, in: 1 ... 128)
                 .help("How much detail the small trained add-on can hold. Higher values use more memory.")
             TextField("Learning rate", value: $workspace.learningRate, format: .number)
                 .help("How much the model changes at each step. Keep the default for your first run.")
-            TextField("Learning words (triggers)", text: $workspace.triggerWords)
+            TextField("Triggers", text: $workspace.triggerWords)
             TextField("Caption profile", text: $workspace.profile)
+            TextField("Training seed", value: $workspace.seed, format: .number)
+            if workspace.datasetContainsVideo, workspace.trainer == "ltx" {
+                Text(
+                    "Video training uses every frame at the dimensions and rate approved in Images. To change a "
+                        + "clip's dimensions or length, approve its segment again, then caption and publish it. "
+                        + "The trainer refuses hidden cropping or truncation."
+                )
+                .font(.callout).foregroundStyle(StudioStyle.supportingText)
+            }
             Toggle("Keep a caption model on GPU 0 while training", isOn: $workspace.keepCaptionServer)
             if workspace.keepCaptionServer { TextField("Caption model", text: $workspace.captionModel) }
         }.formStyle(.columns)
+    }
+
+    private var repeatedRun: TrainingRun? {
+        workspace.runHistory.first { $0.runID == workspace.repeatSourceRunID }
+    }
+
+    private var trainingDatasetRepo: String {
+        repeatedRun?.datasetRepo ?? datasetRepo
+    }
+
+    private var trainingDatasetRevision: String? {
+        if let repeatedRun { return repeatedRun.datasetRevision }
+        return workspace.datasetRevision.isEmpty ? nil : workspace.datasetRevision
     }
 
     // MARK: Monitor
@@ -278,10 +327,10 @@ struct GPUJourneyView: View {
     private var monitor: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
-                Picker("Monitor", selection: Bindable(session).monitorTab) {
-                    ForEach(MonitorTab.allCases) { Text($0.rawValue).tag($0) }
+                ViewThatFits(in: .horizontal) {
+                    monitorPicker.pickerStyle(.segmented).labelsHidden().fixedSize()
+                    monitorPicker.pickerStyle(.menu).frame(maxWidth: 240)
                 }
-                .pickerStyle(.segmented).labelsHidden().fixedSize()
                 Spacer(minLength: 0)
                 Button("Refresh progress", systemImage: "arrow.clockwise") { Task { await workspace.refresh() } }
                     .disabled(workspace.isBusy || workspace.isStopping)
@@ -291,9 +340,17 @@ struct GPUJourneyView: View {
             case .progress: ScrollView { progress.padding(.bottom, 12) }
             case .tensorBoard: tensorBoard.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             case .log: log
+            case .results: ScrollView { GenerationView(workspace: workspace).padding(.bottom, 12) }
+            case .runs: ScrollView { RunHistoryView(session: session, workspace: workspace).padding(.bottom, 12) }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var monitorPicker: some View {
+        Picker("Monitor", selection: Bindable(session).monitorTab) {
+            ForEach(MonitorTab.allCases) { Text($0.rawValue).tag($0) }
+        }
     }
 
     @ViewBuilder private var tensorBoard: some View {

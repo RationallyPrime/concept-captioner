@@ -11,9 +11,9 @@ struct PromptTests {
     // The reference hashes come from `src/concept_captioner` at the commit that wrote CORE-SPEC.md:
     // bundled skill, profile h3-still, the NORA7/IVAN9 fixture job, the solo mapping. Recompute
     // them when the skill text changes.
-    static let captionerSHA256 = "cdc285aba4c7b1ec2f33d07e4de67d502f5670e8804a36712514c564d1b6e926"
-    static let criticSHA256 = "26d8a1f3125c9f2ac334cde96f46f42ecd9319670364d130ecca8b7186323837"
-    static let captionerLength = 23257
+    static let captionerSHA256 = "83871f8c9d0db25a084864921e38578baf72c05eddc4af45c75f32c4e623fef1"
+    static let criticSHA256 = "b4ac9c6b6719629cabb6f84e413cd4594217dda221e676395db3db3894dbc4ba"
+    static let captionerLength = 23627
 
     struct Inputs {
         let skill: Skill
@@ -181,11 +181,10 @@ struct PromptTests {
     func taskTexts() {
         #expect(Prompt.captionerTask.hasPrefix("RESPONSE\nReturn one JSON object. `caption` is the training text only"))
         #expect(Prompt.captionerTask.hasSuffix("verbatim; describe it generically."))
-        #expect(Prompt.captionerTask.components(separatedBy: "\n").count == 8)
-        #expect(Prompt.criticTask.hasPrefix("REVIEW TASK (replaces the captioning task above)\nYou are reviewing"))
+        #expect(Prompt.criticTask
+            .hasPrefix("REVIEW TASK (replaces the captioning task above)\nReview the proposed caption"))
         #expect(Prompt.criticTask.hasSuffix("the captioner can act on."))
-        #expect(Prompt.criticTask.components(separatedBy: "\n").count == 7)
-        #expect(Prompt.userTurn == "Inspect this exact target image and return the configured JSON object.")
+        #expect(Prompt.userTurn == "Inspect this exact training target and return the configured JSON object.")
     }
 
     @Test("the critic user turn quotes the caption after a blank line")
@@ -193,8 +192,9 @@ struct PromptTests {
         let caption = Fixtures.h3("A photograph frames NORA7, a woman.")
         #expect(
             Prompt.criticUserTurn(caption: caption)
-                == "Review this proposed caption against the attached image:\n\n" + caption
+                == "Review this proposed caption against the attached training target:\n\n" + caption
         )
-        #expect(Prompt.criticUserTurn(caption: "") == "Review this proposed caption against the attached image:\n\n")
+        #expect(Prompt
+            .criticUserTurn(caption: "") == "Review this proposed caption against the attached training target:\n\n")
     }
 }

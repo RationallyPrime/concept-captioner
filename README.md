@@ -124,7 +124,7 @@ my-captioning-skill/
 
 `skill:` in the job (or `--skill`) points at the directory; omit it for the bundled
 `diffusion-training-captioner`. `profile:` (or `--profile`) names a file under `references/profiles/`, or is a
-path to any `.md`. The bundled profiles are `h3-still`, `flux-image`, `ltx-image` and `plain`.
+path to any `.md`. The bundled profiles are `h3-still`, `flux-image`, `ltx-image`, `ltx-video` and `plain`.
 
 The skill body is loaded in full on every call, followed by the profile, your job's `policy_overrides`, the
 job's view of the sample (only the mapped concepts and their locators) and a short response contract. `concept-
@@ -162,7 +162,8 @@ from `--id-column`, else `file_name`/`id`, else the row index; map them in `job.
 | `captioner_thinking` / `critic_thinking` | `none` … `xhigh` |
 | `policy_overrides{}` | extra instruction sections appended after the profile |
 
-Locator sentences ("the woman on the left") are how the captioner binds a trigger to a face. They are never
+Locator sentences ("the woman on the left") bind a trigger to its subject. A sole style concept
+can be assigned to the whole training target; it does not require a face locator. They are never
 guessed; an unmapped sample is `needs_mapping` and costs no model call. `--dry-run` lists them.
 
 ## Project folder
@@ -172,15 +173,15 @@ The CLI and the macOS app in `app/` (ConceptStudio) use one project layout on di
 ```
 my-project/
   job.yaml              the job file
-  images/               training images, each with its sidecars
+  images/               included training images or clips, each with its sidecars
     0001.png
     0001.txt            the caption
     0001.json           the response record (models, critic verdict, or source: human)
   skill/<name>/         optional: a custom skill, copied in; job.yaml says skill: ./skill/<name>
                         (no skill key means the bundled default)
-  references/           app only: one reference face per trigger; never published
+  references/           app only: reference images for subject concepts; never published
   results/<run-id>/     app only: a trained LoRA, when it was downloaded rather than pushed
-  .conceptstudio/       app only: app settings, training record and caches; never published
+  .conceptstudio/       app only: app settings, saved runs, excluded media, edit backups and caches; never published
 ```
 
 Either tool can pick up where the other left off: `concept-captioner run job.yaml --images images
@@ -196,7 +197,7 @@ run the CLI from the project folder.
 Where things stand: [app](app/docs/APP-STATUS.md), [Swift core](app/docs/CORE-STATUS.md),
 [pod](pod/docs/POD-STATUS.md).
 
-## What happens per image
+## What happens per training sample
 
 1. The captioner gets the instructions and the image (resized under provider limits and re-encoded, which
    drops EXIF) and returns `{caption, usable, note}`. If a mapped trigger is missing or an unmapped one appears,
@@ -204,6 +205,12 @@ Where things stand: [app](app/docs/APP-STATUS.md), [Swift core](app/docs/CORE-ST
 2. If a critic is configured it reviews the caption against the image. On rejection the captioner gets the
    notes as the next turn of the same conversation and tries once more; the critic reviews again.
 3. The caption is written, or the sample ends `unusable` / `rejected` / `failed` with its record and no caption.
+
+Video inputs carry the complete selected clip to a video-capable captioning provider; a poster
+frame is not a substitute. The app prepares exact segments and uses the LTX video profile.
+Local and Hub imagefolder sources retain media bytes. The Python tabular Hub path supports
+pure video columns with `datasets.Video(decode=False)`; mixed image/video tabular output is
+rejected explicitly. The native app's mixed imagefolder workflow remains supported.
 
 ## Library use
 

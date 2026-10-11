@@ -2,7 +2,9 @@ import ConceptCore
 import Foundation
 
 enum ProjectPublisher {
-    static func operations(for project: StudioProject) async throws -> [CommitOperation] {
+    static func operations(
+        for project: StudioProject, previousRows: [MetadataRow] = [], remotePaths: Set<String> = []
+    ) async throws -> [CommitOperation] {
         let sink = try SidecarSink(directory: project.imagesDirectory)
         var operations: [CommitOperation] = [.addFile(path: "concept-captioner/job.yaml", url: project.jobURL)]
         var rows: [MetadataRow] = []
@@ -19,7 +21,18 @@ enum ProjectPublisher {
             }
         }
         operations.append(.add(path: ImageFolderMetadata.fileName, data: ImageFolderMetadata.serialize(rows)))
-        return try operations + skillOperations(for: project)
+        operations += try skillOperations(for: project)
+        let retained = Set(operations.map(\.path))
+        var removed: Set<String> = []
+        for row in previousRows where Sources.mediaSuffixes.contains(Sources.suffix(of: row.fileName)) {
+            guard !retained.contains(row.fileName) else { continue }
+            let stem = Sources.stem(of: row.fileName)
+            for path in [row.fileName, stem + ".txt", stem + ".json"]
+                where remotePaths.contains(path) && !retained.contains(path) {
+                removed.insert(path)
+            }
+        }
+        return operations + removed.sorted().map { .delete(path: $0) }
     }
 
     /// The project's own skill copy, published beside job.yaml so its relative `skill:` path
@@ -38,7 +51,7 @@ enum ProjectPublisher {
         for case let url as URL in enumerator {
             try Task.checkCancellation()
             guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true,
-                  !Sources.imageSuffixes.contains("." + url.pathExtension.lowercased()) else { continue }
+                  !Sources.mediaSuffixes.contains("." + url.pathExtension.lowercased()) else { continue }
             let path = url.standardizedFileURL.path
             guard path.hasPrefix(root) else { continue }
             operations.append(.addFile(path: "concept-captioner/" + path.dropFirst(root.count), url: url))

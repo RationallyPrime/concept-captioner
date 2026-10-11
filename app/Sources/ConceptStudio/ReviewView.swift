@@ -75,7 +75,7 @@ struct ReviewView: View {
                     ContentUnavailableView(
                         "Choose a caption to review",
                         systemImage: "checkmark.bubble",
-                        description: Text("Select one photo to edit or compare its caption, "
+                        description: Text("Select one sample to edit or compare its caption, "
                             + "or several to re-caption them together.")
                     )
                 }
@@ -102,24 +102,26 @@ struct ReviewView: View {
         let skipped = selectedImages.filter { $0.isFinal || session.hasUnsavedCaption(for: $0) }
         let eligible = Set(selectedImages.map(\.id)).subtracting(skipped.map(\.id))
         return StudioSection(
-            title: "\(selection.count) photos selected",
+            title: "\(selection.count) samples selected",
             subtitle: "Re-captioning replaces their model captions with new ones from your Captioning choices."
         ) {
             if !skipped.isEmpty {
                 StudioNotice(
-                    "\(skipped.count) of them are skipped: final captions are protected, and photos with unsaved "
+                    "\(skipped.count) of them are skipped: final captions are protected, and samples with unsaved "
                         + "edits must be saved or discarded first.",
                     symbol: "lock"
                 )
             }
-            Button("Re-caption \(eligible.count) photos", systemImage: "arrow.clockwise") {
+            Button("Re-caption \(eligible.count) samples", systemImage: "arrow.clockwise") {
                 session.caption(only: eligible, overwrite: true)
             }
             .buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
             .keyboardShortcut(.return, modifiers: .command)
-            .help("Re-caption the selected photos (⌘↩)")
+            .help("Re-caption the selected samples (⌘↩)")
             .disabled(session.busy || eligible.isEmpty)
-            Text("Uses your provider account credits.").font(.callout).foregroundStyle(StudioStyle.supportingText)
+            Text(session
+                .demoMode ? "Prepared offline captions; no provider request." : "Uses your provider account credits.")
+                .font(.callout).foregroundStyle(StudioStyle.supportingText)
         }
     }
 
@@ -129,24 +131,25 @@ struct ReviewView: View {
         VStack(alignment: .leading, spacing: StudioStyle.contentSpacing) {
             StudioSection(
                 title: image.id,
-                subtitle: "Describe what can change. Your learning words hold the concept."
+                subtitle: "Check the caption against this exact training target. The trigger names the concept; "
+                    + "the remaining text should describe the visible details outside it."
             ) {
                 if !image.notes.isEmpty {
                     StudioNotice(image.notes.joined(separator: "\n"), symbol: "text.bubble")
                 }
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: 24) {
-                        PhotoView(url: image.url).frame(width: 240, height: 280)
+                        TrainingTargetPreview(url: image.url).frame(width: 240, height: 280)
                         captionEditor(for: image).frame(minWidth: 280)
                     }
                     VStack(alignment: .leading, spacing: 18) {
-                        PhotoView(url: image.url).frame(maxWidth: .infinity).frame(height: 200)
+                        TrainingTargetPreview(url: image.url).frame(maxWidth: .infinity).frame(height: 200)
                         captionEditor(for: image)
                     }
                 }
             }
             Divider()
-            DisclosureGroup("Compare two models") {
+            DisclosureGroup("Compare captioning models") {
                 comparison(for: image).padding(.top, 12)
             }
         }
@@ -154,7 +157,8 @@ struct ReviewView: View {
 
     private func comparison(for image: ProjectImage) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Each model writes a caption for this photo. Neither result is saved; your caption stays as it is.")
+            Text("Each model receives this exact image or clip and the same concept instructions. "
+                + "The comparison does not replace the saved caption.")
                 .font(.callout).foregroundStyle(StudioStyle.supportingText)
                 .fixedSize(horizontal: false, vertical: true)
             ViewThatFits(in: .horizontal) {
@@ -170,7 +174,9 @@ struct ReviewView: View {
             HStack(spacing: 12) {
                 Button(comparing ? "Comparing…" : "Compare models") { runComparison(id: image.id) }
                     .disabled(session.busy || comparing || sideA.model.isEmpty || sideB.model.isEmpty)
-                Text("Uses credits from both accounts.").font(.callout).foregroundStyle(StudioStyle.supportingText)
+                Text(session
+                    .demoMode ? "Prepared offline results; no provider requests." : "Uses credits from both accounts.")
+                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
             }
             if !resultA.isEmpty || !resultB.isEmpty {
                 ViewThatFits(in: .horizontal) {
@@ -240,7 +246,7 @@ struct ReviewView: View {
 
     private func captionEditor(for image: ProjectImage) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            TextEditor(text: textBinding(for: image)).frame(minHeight: 150)
+            TextEditor(text: textBinding(for: image)).font(.body).frame(minHeight: 150)
                 .padding(6).background(StudioStyle.surface, in: RoundedRectangle(cornerRadius: 8))
                 .accessibilityLabel("Caption for \(image.id)")
                 .disabled(session.editing)
@@ -248,7 +254,7 @@ struct ReviewView: View {
                 .disabled(session.editing)
             if session.hasUnsavedCaption(for: image) {
                 StudioNotice(
-                    "Unsaved edits stay here when you change photos or screens. "
+                    "Unsaved edits stay here when you change samples or screens. "
                         + "Save to keep them on disk. Closing or switching projects will ask before discarding them.",
                     symbol: "pencil"
                 )
@@ -257,7 +263,7 @@ struct ReviewView: View {
                 Button("Save caption") { save(image) }.buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
                 Button("Discard edits") { session.discardCaptionDraft(for: image) }
             }.disabled(session.editing || !session.hasUnsavedCaption(for: image))
-            Button("Re-caption this photo") { session.caption(only: [image.id], overwrite: true) }
+            Button("Re-caption this sample") { session.caption(only: [image.id], overwrite: true) }
                 .disabled(session.busy || image.isFinal || session.hasUnsavedCaption(for: image))
                 .help("Save or discard edits first. Final captions are protected.")
         }.frame(maxWidth: .infinity, alignment: .leading)

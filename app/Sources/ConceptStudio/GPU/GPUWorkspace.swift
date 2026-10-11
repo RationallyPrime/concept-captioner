@@ -3,39 +3,6 @@ import Foundation
 import Observation
 import Security
 
-/// The local record of the rented pod. Fields added after the first release decode with
-/// defaults, so a record written by an older build still restores (and stays under budget).
-struct SavedPod: Codable {
-    var pod: RentedPod
-    let started: Date
-    let hourlyRate: Double
-    var budget: Double
-    var trainer: String
-    var runID: String
-    var outputRepo: String
-    var idleMinutes = 15
-    var volumeID = ""
-    var points: [TrainingPoint] = []
-    var result: TrainingResult?
-}
-
-extension SavedPod {
-    init(from decoder: any Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        pod = try values.decode(RentedPod.self, forKey: .pod)
-        started = try values.decode(Date.self, forKey: .started)
-        hourlyRate = try values.decode(Double.self, forKey: .hourlyRate)
-        budget = try values.decode(Double.self, forKey: .budget)
-        trainer = try values.decode(String.self, forKey: .trainer)
-        runID = try values.decode(String.self, forKey: .runID)
-        outputRepo = try values.decode(String.self, forKey: .outputRepo)
-        idleMinutes = try values.decodeIfPresent(Int.self, forKey: .idleMinutes) ?? 15
-        volumeID = try values.decodeIfPresent(String.self, forKey: .volumeID) ?? ""
-        points = try values.decodeIfPresent([TrainingPoint].self, forKey: .points) ?? []
-        result = try values.decodeIfPresent(TrainingResult.self, forKey: .result)
-    }
-}
-
 @MainActor @Observable
 final class GPUWorkspace {
     let demoMode: Bool
@@ -78,6 +45,14 @@ final class GPUWorkspace {
     /// Model repos created for results are private unless the user turns this off.
     var privateResult = true
     var runID = ""
+    var seed = 42
+    var datasetRevision = ""
+    var datasetContainsVideo = false
+    var runHistory: [TrainingRun] = []
+    var selectedHistoryRunID = ""
+    var repeatSourceRunID = ""
+    var generations: [GeneratedComparison] = []
+    var generation: GeneratedComparison?
     var outputRepo = ""
     var triggerWords = "NORA7"
     var profile = "flux-image"
@@ -92,7 +67,7 @@ final class GPUWorkspace {
     var strayPods: [RentedPod] = []
     /// The open project; results without a Hub token are saved under `<project>/results/<run-id>/`.
     var projectFolder: URL? {
-        didSet { loadProjectRecord() }
+        didSet { if oldValue != projectFolder { loadProjectRecord() } }
     }
 
     /// The pod agent's bearer (also its vLLM key). Set only by renting, restoring or reconciling.
@@ -168,11 +143,14 @@ final class GPUWorkspace {
             saved = previous
             pod = previous.pod
             budget = previous.budget
-            trainer = previous.trainer
+            if repeatSourceRunID.isEmpty, previous.pod.isRunning { trainer = previous.trainer }
             runID = previous.runID
             outputRepo = previous.outputRepo
             points = previous.points
             result = previous.result ?? result
+            // The loaded project record owns history. The global pod record owns billing
+            // and pending-output custody, including while Welcome or another project is open.
+            generation = previous.generation
             idleMinutes = previous.idleMinutes
             watch()
         }
@@ -262,7 +240,8 @@ final class GPUWorkspace {
                     throw error
                 }
             }
-            self.message = "Your computer is starting. Its cost is visible below; you can stop it at any time."
+            self.message = "Your computer is rented and its control agent is connecting. "
+                + "Its cost is visible below; you can stop it at any time."
         }
     }
 
@@ -290,17 +269,17 @@ final class GPUWorkspace {
             if plan == nil { plan = try await agent.plan() }
             let services = try await agent.services()
             agentAnswered = true
+            if message.hasPrefix("Your computer is rented and its control agent is connecting.") {
+                message = "Your computer is connected and ready. "
+                    + "Its cost is visible below; you can stop it at any time."
+            }
             let active = services.contains { $0.active && !["tensorboard", "vllm"].contains($0.name) }
             if active { lastActivity = Date() }
-            if let state = services.first(where: { $0.name.hasPrefix("trainer-") && $0.active })
-                ?? services.first(where: { $0.name == "trainer-\(trainer)" }) {
-                if state.active { trainer = String(state.name.dropFirst("trainer-".count)) }
-                if let id = state.runID { runID = id }
-                trainingState = state.state
-            }
+            updateTrainingService(services)
             if !runID.isEmpty { try await updateProgress(agent, services: services) }
             // A result created while this refresh was in flight is judged on the next one.
             if !isBusy, result == resultBefore { try await settleResult(agent, services: services) }
+            if !isBusy { try await settleGeneration(agent, services: services) }
         } catch is CancellationError {
             return
         } catch {
@@ -331,6 +310,7 @@ final class GPUWorkspace {
         if let point = try await agent.latest(runID: runID) { merge([point]) }
         if let log = try? await agent.runLog(runID: runID) { logs = log }
         persist()
+        saveProjectRecord()
     }
 
     private func merge(_ incoming: [TrainingPoint]) {
@@ -354,6 +334,7 @@ final class GPUWorkspace {
     }
 
     func persist() {
+        captureRunProgress()
         if var saved, let pod {
             saved.pod = pod
             saved.trainer = trainer
@@ -362,6 +343,8 @@ final class GPUWorkspace {
             saved.idleMinutes = idleMinutes
             saved.points = points
             saved.result = result
+            saved.run = runHistory.first(where: { $0.runID == runID })
+            saved.generation = generation
             self.saved = saved
             if !demoMode, let data = try? JSONEncoder().encode(saved) {
                 preferences.set(data, forKey: Self.activePodKey)
@@ -429,8 +412,8 @@ extension GPUWorkspace {
             await stopEverything(discardingPendingResult: true)
             if !hasRunningPod {
                 message = "Your spending limit was reached. The GPU is stopped."
-                    + (stranded ? " Your trained LoRA stays on your network storage; rent a computer on the "
-                        + "same storage to retrieve it." : "")
+                    + (stranded ? " Your model and generated files stay on your network storage; rent a computer "
+                        + "on the same storage to retrieve them." : "")
             }
         }
     }
@@ -460,9 +443,9 @@ extension GPUWorkspace {
     /// `discardingPendingResult` is set (the budget sets it; the run stays on the volume).
     func stopEverything(discardingPendingResult: Bool = false) async {
         guard !isStopping else { return }
-        if !discardingPendingResult, resultNeedsSaving, let result {
-            message = "Your trained LoRA from run \(result.runID) is not saved yet. Retrieve it first, or stop "
-                + "anyway: it stays on your network storage and is retrieved from the next computer on that storage."
+        if !discardingPendingResult, resultNeedsSaving {
+            message = "Your trained model or generated outputs are not saved yet. Retrieve them first, or stop "
+                + "anyway: they stay on your network storage for retrieval from the next computer on that storage."
             return
         }
         isStopping = true

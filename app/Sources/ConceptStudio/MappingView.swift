@@ -27,9 +27,49 @@ struct MappingView: View {
     }
 
     var body: some View {
+        if let mapping = session.project?.job.wholeImageStyleMapping {
+            styleMapping(mapping)
+        } else {
+            mappingEditor
+        }
+    }
+
+    private func styleMapping(_ mapping: Job.Mapping) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                Text("The style applies to each included sample")
+                    .font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                Text("Your concept is the visual style of the whole image or clip. "
+                    + "There is no person or object to locate. Each included sample is assigned to "
+                    + (mapping.keys.first ?? "the trigger") + ".")
+                Text("Check that every included sample shows the intended style. Exclude unrelated examples "
+                    + "on Images. Captions will describe the subject matter and leave the style to the trigger.")
+                    .foregroundStyle(StudioStyle.supportingText)
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 180, maximum: 260))],
+                    alignment: .leading,
+                    spacing: 20
+                ) {
+                    ForEach(session.project?.images ?? []) { image in
+                        VStack(alignment: .leading, spacing: 8) {
+                            PhotoView(url: image.url).frame(height: 180)
+                            Text(image.id).lineLimit(1).help(image.id)
+                            Label("Style assigned", systemImage: "checkmark.circle")
+                                .font(.caption).foregroundStyle(StudioStyle.supportingText)
+                        }
+                    }
+                }
+                if session.project?.images.isEmpty != false {
+                    Text("Import images or clips on Images before captioning.")
+                }
+            }
+        }
+    }
+
+    private var mappingEditor: some View {
         VStack(alignment: .leading, spacing: 20) {
             StudioSection(
-                title: "Match each photo to your concepts",
+                title: "Locate the concept in each image or clip",
                 subtitle: "Identify who or what is present. "
                     + "A suggestion becomes part of your project only when you confirm it."
             ) {
@@ -40,19 +80,21 @@ struct MappingView: View {
                         value: Double(confirmedCount),
                         total: Double(max(session.project?.images.count ?? 0, 1))
                     )
-                    .frame(maxWidth: 180).accessibilityLabel("Photos confirmed")
+                    .frame(maxWidth: 180).accessibilityLabel("Samples confirmed")
                     Spacer()
                     Toggle("Show unconfirmed only", isOn: $onlyUnmapped).toggleStyle(.checkbox)
                 }.font(.callout)
                 HStack(spacing: 10) {
-                    Button("Suggest on this Mac", systemImage: "person.crop.rectangle") {
-                        session.proposeMappings(useModel: false)
+                    if session.project?.job.concepts.allSatisfy(\.targetConcept.isPersonIdentity) == true {
+                        Button("Compare reference faces on this Mac", systemImage: "person.crop.rectangle") {
+                            session.proposeMappings(useModel: false)
+                        }
                     }
-                    Button("Ask model using references", systemImage: "sparkles") {
+                    Button("Request assignments from model", systemImage: "sparkles") {
                         session.proposeMappings(useModel: true)
                     }
                 }.disabled(session.busy)
-                Text(session.demoMode ? "Both actions run offline in the demo." :
+                Text(session.demoMode ? "The demo uses prepared assignments. No recognition model is called." :
                     "Mac suggestions stay on this device. "
                     + "Asking the model uses your selected provider and may use account credits.")
                     .font(.callout).foregroundStyle(StudioStyle.supportingText)
@@ -74,8 +116,8 @@ struct MappingView: View {
                             Text(image.id).font(.title3.weight(.semibold)).textSelection(.enabled)
                             if fromSuggestion {
                                 StudioNotice(
-                                    "Filled in from a suggestion. Check every subject against this photo, "
-                                        + "then confirm. Nothing is saved until you do.",
+                                    "Filled in from a suggestion. Check every subject against this image or clip, "
+                                        + "then confirm the assignment.",
                                     symbol: "person.crop.rectangle.badge.checkmark"
                                 )
                             }
@@ -93,11 +135,11 @@ struct MappingView: View {
                         }.padding(.leading, 20).padding(.bottom, 12)
                     } else {
                         ContentUnavailableView(
-                            onlyUnmapped && images.isEmpty ? "Every photo is confirmed" : "Select a photo",
+                            onlyUnmapped && images.isEmpty ? "Every sample is confirmed" : "Select an image or clip",
                             systemImage: onlyUnmapped && images.isEmpty ? "checkmark.circle" : "person.crop.rectangle",
                             description: Text(onlyUnmapped && images
                                 .isEmpty ? "Turn off the filter to review your confirmed mappings." :
-                                "Choose a photo from the list to identify its subjects.")
+                                "Choose an image or clip from the list to identify the concept.")
                         )
                     }
                 }
@@ -127,12 +169,16 @@ struct MappingView: View {
     }
 
     private func photo(_ image: ProjectImage) -> some View {
-        PhotoView(url: image.url, faces: session.analyses[image.id]?.faces ?? [])
-            .background(StudioStyle.surface)
+        TrainingTargetPreview(
+            url: image.url,
+            faces: session.project?.job.concepts.contains { $0.targetConcept.isPersonIdentity } == true
+                ? session.analyses[image.id]?.faces ?? [] : []
+        )
+        .background(StudioStyle.surface)
     }
 
     private var presentSubjects: some View {
-        StudioSection(title: "Present in this photo") {
+        StudioSection(title: "Concept assignment") {
             ForEach(session.project?.job.concepts ?? [], id: \.trigger) { concept in
                 VStack(alignment: .leading, spacing: 10) {
                     Toggle(
@@ -148,20 +194,20 @@ struct MappingView: View {
                     ).toggleStyle(.checkbox).fontWeight(.medium)
                     if enabled.contains(concept.trigger) {
                         TextField(
-                            "Where is this subject? e.g. person on the left in a blue top",
+                            concept.targetConcept.locatorHint,
                             text: Binding(
                                 get: { locators[concept.trigger] ?? "" },
                                 set: { edited = true; locators[concept.trigger] = $0 }
                             ),
                             axis: .vertical
                         ).lineLimit(1 ... 3)
-                            .accessibilityLabel("\(concept.trigger) location in this photo")
+                            .accessibilityLabel("\(concept.trigger) location in this sample")
                     }
                 }.padding(.vertical, 4)
             }
             Text(
-                "Uncheck a learning word if its subject is absent. "
-                    + "Confirming with none selected means none of your concepts appears."
+                "Select only concepts visible in this sample. If none appears, exclude the sample on Images; "
+                    + "it cannot be captioned for this LoRA."
             )
             .font(.callout).foregroundStyle(StudioStyle.supportingText)
         }
@@ -175,8 +221,8 @@ struct MappingView: View {
                 Button("Confirm and next", systemImage: "checkmark") { confirm(image) }
                     .buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
                     .keyboardShortcut(.return, modifiers: .command)
-                    .help("Confirm this photo and open the next unconfirmed one (⌘↩)")
-                    .disabled(enabled.contains { (locators[$0] ?? "").isEmpty })
+                    .help("Confirm this sample and open the next unconfirmed one (⌘↩)")
+                    .disabled(enabled.isEmpty || enabled.contains { (locators[$0] ?? "").isBlank } || session.busy)
                 Text("⌘↩").font(.callout).foregroundStyle(StudioStyle.supportingText)
                     .accessibilityHidden(true)
                 Spacer(minLength: 8)

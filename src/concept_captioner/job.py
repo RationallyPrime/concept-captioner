@@ -52,6 +52,79 @@ class Concept(BaseModel):
     )
     explicit_boundary_decisions: dict[str, str] = Field(default_factory=dict)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _category_defaults(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        defaults = {
+            "full_identity": (
+                "the person's enduring face and physique",
+                [
+                    "expression and gaze",
+                    "pose and action",
+                    "permitted clothing changes",
+                    "setting",
+                    "lighting",
+                    "framing",
+                ],
+            ),
+            "character_design": (
+                "the character's distinctive appearance and design",
+                [
+                    "expression and gaze",
+                    "pose and action",
+                    "permitted clothing changes",
+                    "setting",
+                    "lighting",
+                    "framing",
+                ],
+            ),
+            "style": (
+                "the visual style, including its rendering, texture and palette",
+                [
+                    "subject matter",
+                    "objects",
+                    "actions",
+                    "spatial arrangement",
+                    "visible scene content",
+                ],
+            ),
+            "object": (
+                "the object's distinctive design",
+                ["placement", "orientation", "use", "surroundings", "lighting", "occlusion"],
+            ),
+            "motion": (
+                "the defining movement pattern",
+                [
+                    "performer",
+                    "clothing",
+                    "scene",
+                    "framing",
+                    "lighting",
+                    "independent start and end state",
+                ],
+            ),
+            "custom": (
+                "the concept described by the user",
+                ["observable details outside the stated concept"],
+            ),
+        }
+        category = value.get("target_concept")
+        if isinstance(category, str) and (selected := defaults.get(category)):
+            value = dict(value)
+            value.setdefault(
+                "class_noun",
+                {
+                    "full_identity": "person",
+                    "character_design": "character",
+                    "custom": "concept",
+                }.get(category, category),
+            )
+            value.setdefault("traits_to_learn", [selected[0]])
+            value.setdefault("attributes_to_describe", selected[1])
+        return value
+
     @field_validator("trigger", "class_noun")
     @classmethod
     def _literal(cls, value: str) -> str:

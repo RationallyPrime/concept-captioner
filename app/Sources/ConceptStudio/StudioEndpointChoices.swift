@@ -58,7 +58,7 @@ enum ProviderChoices {
 @MainActor
 extension StudioSession {
     static let defaultPodImageName =
-        "ghcr.io/rationallyprime/concept-captioner-pod-{trainer}:v0.1.0-verify20261010"
+        "ghcr.io/rationallyprime/concept-captioner-pod-{trainer}:v0.2.0-overnight20261011-r1"
 
     func normalizePodImageChoice() {
         if podImageName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -229,5 +229,33 @@ extension StudioSession {
         job.captionerThinking = modelThinking
         job.criticThinking = criticThinking
         return job
+    }
+}
+
+@MainActor
+extension StudioSession {
+    // MARK: Rented computer
+
+    func updateTrainingProjectDefaults() {
+        guard gpu.repeatSourceRunID.isEmpty else { return }
+        gpu.triggerWords = project?.job.triggers.joined(separator: ",") ?? ""
+        gpu.profile = project?.job.profile ?? "flux-image"
+        gpu.datasetRevision = projectState.datasetRevision
+        gpu.datasetContainsVideo = project?.images.contains { Sources.isVideo(Sources.suffix(of: $0.id)) } ?? false
+        if !gpu.hasRunningPod { gpu.trainer = gpu.profile.hasPrefix("ltx-") ? "ltx" : "aitoolkit" }
+    }
+
+    func configureGPU() {
+        normalizePodImageChoice()
+        updateTrainingProjectDefaults()
+        guard !demoMode else { return }
+        do {
+            try gpu.configure(
+                runpodKey: keyStore.read("runpod") ?? "",
+                hubToken: keyStore.read("huggingface") ?? "",
+                imageName: podImageName,
+                networkVolumeID: volumeID.isEmpty ? nil : volumeID
+            )
+        } catch { errorMessage = Self.describe(error) }
     }
 }

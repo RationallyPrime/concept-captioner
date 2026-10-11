@@ -2,6 +2,7 @@ import AppKit
 import ConceptCore
 import CryptoKit
 import ImageIO
+import Synchronization
 import Vision
 
 struct ImageAnalysis: Codable, Equatable {
@@ -9,6 +10,7 @@ struct ImageAnalysis: Codable, Equatable {
     var warnings: [String] = []
     var width = 0
     var height = 0
+    var duplicateOf: String?
 }
 
 /// What the Mac learned about one file's content, cached in the project by content hash
@@ -47,6 +49,9 @@ struct VisionCache: Codable, Equatable {
 }
 
 actor VisionInspector {
+    /// Vision's synchronous requests can wait for their own workers. Keep them off Swift's
+    /// cooperative executor and serialize them across the app's separate inspector instances.
+    private static let visionQueue = DispatchQueue(label: "ConceptStudio.Vision", qos: .userInitiated)
     // Conservative revision-2 proposal gates, not a calibrated identity-recognition model.
     static let similarPhotoDistance: Float = 0.08
     static let faceProposalDistance: Float = 0.10
@@ -85,8 +90,19 @@ actor VisionInspector {
             let data = try Data(contentsOf: url)
             let hash = Self.contentHash(data)
             used.insert(hash)
-            let entry = try cache.entries[hash].flatMap { $0.version == CachedImageAnalysis.version ? $0 : nil }
-                ?? Self.inspect(data)
+            let entry: CachedImageAnalysis
+            if Sources.isVideo(Sources.suffix(of: name)) {
+                let info = try await MediaEditor.videoInfo(url: url)
+                entry = CachedImageAnalysis(
+                    analysis: ImageAnalysis(width: info.width, height: info.height), featurePrint: nil
+                )
+            } else {
+                if let cached = cache.entries[hash], cached.version == CachedImageAnalysis.version {
+                    entry = cached
+                } else {
+                    entry = try await Self.performVision { _ in try Self.inspect(data) }
+                }
+            }
             cache.entries[hash] = entry
             let observation = entry.featurePrint.flatMap(Self.unarchive)
             let analysis = try Self.compare(
@@ -102,6 +118,32 @@ actor VisionInspector {
             try? cache.save(to: cacheDirectory)
         }
         return results
+    }
+
+    private static func performVision<Value: Sendable>(
+        _ operation: @escaping @Sendable (_ checkCancellation: @Sendable () throws -> Void) throws -> Value
+    ) async throws -> Value {
+        let cancelled = Mutex(false)
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            let result: Value = try await withCheckedThrowingContinuation { continuation in
+                visionQueue.async {
+                    let checkCancellation: @Sendable () throws -> Void = {
+                        if cancelled.withLock({ $0 }) { throw CancellationError() }
+                    }
+                    do {
+                        try checkCancellation()
+                        try continuation.resume(returning: operation(checkCancellation))
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+            try Task.checkCancellation()
+            return result
+        } onCancel: {
+            cancelled.withLock { $0 = true }
+        }
     }
 
     /// The checks that depend only on this file's content.
@@ -128,7 +170,7 @@ actor VisionInspector {
         if !(text.results ?? []).isEmpty {
             analysis.warnings
                 .append(
-                    "Readable text detected. Captions should describe signs and logos without copying the words."
+                    "Possible text detected. Captions should describe signs and logos without copying the words."
                 )
         }
         let print = try feature.results?.first.map {
@@ -148,14 +190,16 @@ actor VisionInspector {
     ) throws -> ImageAnalysis {
         var analysis = base
         if let original = hashes[hash] {
+            analysis.duplicateOf = original
             analysis.warnings.append("Exact duplicate of \(original). Repeated photos can overemphasize one scene.")
         } else if let observation {
             for (other, print) in prints {
                 var distance: Float = 0
                 try observation.computeDistance(&distance, to: print)
                 if distance <= similarPhotoDistance {
+                    analysis.duplicateOf = other
                     analysis.warnings
-                        .append("Visually similar to \(other). Keep enough variety in scenes and clothing.")
+                        .append("Visually similar to \(other). Inspect these candidates and exclude unwanted copies.")
                     break
                 }
             }
@@ -167,20 +211,29 @@ actor VisionInspector {
         try? NSKeyedUnarchiver.unarchivedObject(ofClass: VNFeaturePrintObservation.self, from: data)
     }
 
-    func proposals(images: [URL], references: [String: URL]) throws -> [String: Job.Mapping] {
+    func proposals(images: [URL], references: [String: URL]) async throws -> [String: Job.Mapping] {
+        try await Self.performVision { checkCancellation in
+            try Self.faceProposals(images: images, references: references, checkCancellation: checkCancellation)
+        }
+    }
+
+    private static func faceProposals(
+        images: [URL], references: [String: URL], checkCancellation: @Sendable () throws -> Void
+    ) throws -> [String: Job.Mapping] {
         var referencePrints: [String: VNFeaturePrintObservation] = [:]
         for (trigger, url) in references {
-            try Task.checkCancellation()
+            try checkCancellation()
             if let image = try Self.image(Data(contentsOf: url)), let face = try Self.faceImages(image).first {
                 referencePrints[trigger] = try Self.feature(face)
             }
         }
         var result: [String: Job.Mapping] = [:]
         for url in images {
-            try Task.checkCancellation()
+            try checkCancellation()
             guard let image = try Self.image(Data(contentsOf: url)) else { continue }
             var mapping = Job.Mapping()
             for (index, face) in try Self.faceImages(image).enumerated() {
+                try checkCancellation()
                 guard let feature = try Self.feature(face) else { continue }
                 var matches: [(String, Float)] = []
                 for (trigger, reference) in referencePrints {
@@ -243,7 +296,7 @@ extension StudioSession {
         guard let project else { return }
         analysisGeneration += 1
         let generation = analysisGeneration
-        let urls = project.images.map(\.url)
+        let urls = project.allMedia.map(\.url)
         let current = Set(urls.map(\.lastPathComponent))
         analyses = analyses.filter { current.contains($0.key) }
         analyzing = true

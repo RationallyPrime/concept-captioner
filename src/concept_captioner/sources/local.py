@@ -12,6 +12,9 @@ from typing import Any
 from ..types import ConfigurationError, Sample
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
+VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v"}
+MEDIA_SUFFIXES = IMAGE_SUFFIXES | VIDEO_SUFFIXES
+VIDEO_SAMPLING_FPS = 24
 
 
 def atomic_write_text(path: Path, text: str) -> None:
@@ -40,7 +43,7 @@ class LocalFolderSource:
         self._files = sorted(
             p
             for p in self.directory.iterdir()
-            if p.suffix.lower() in IMAGE_SUFFIXES and p.is_file()
+            if p.suffix.lower() in MEDIA_SUFFIXES and p.is_file()
         )
         if len({p.stem for p in self._files}) != len(self._files):
             raise ConfigurationError("image stems collide; sidecar captions would be ambiguous")

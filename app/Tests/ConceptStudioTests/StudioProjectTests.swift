@@ -74,3 +74,42 @@ struct StudioProjectTests {
         #expect(try LocalFolderSource(directory: project.imagesDirectory).files.count == 4)
     }
 }
+
+@Suite("concept categories")
+@MainActor
+struct ConceptCategoryTests {
+    @Test func styleAssignmentNeedsNoFaceReferenceAndSurvivesReopening() async throws {
+        let project = try await makeDemoProject()
+        defer { try? FileManager.default.removeItem(at: project.directory) }
+        let preferences = IsolatedDefaults()
+        defer { preferences.remove() }
+        let session = StudioSession(preferences: preferences.defaults, secrets: MemorySecretStore())
+        session.project = project
+        let style = try Concept(trigger: "INKSTYLE", targetConcept: .style)
+        #expect(style.classNoun == "style")
+        try session.saveConcept(style, replacing: "NORA7")
+        let reopened = try await StudioProject.open(at: project.directory)
+        #expect(reopened.job.concepts == [style])
+        #expect(reopened.job.unmapped(reopened.images.map(\.id)).isEmpty)
+        for image in reopened.images {
+            #expect(reopened.job.mapping(for: image.id) == styleMapping)
+        }
+        #expect(style.attributesToDescribe.contains("subject matter"))
+        #expect(!style.traitsToLearn.contains("distinctive facial identity"))
+        session.mappingProposals = ["garden.png": ["INKSTYLE": "stale style assignment"]]
+        try session.saveConcept(Concept(trigger: "NORA7"), replacing: "INKSTYLE")
+        #expect(session.unmappedCount == project.images.count)
+        #expect(session.mappingProposals.isEmpty)
+    }
+
+    @Test func wholeImageAssignmentOnlyAppliesToOneStyleConcept() throws {
+        let style = try Concept(trigger: "INKSTYLE", targetConcept: .style)
+        #expect(try Job(concepts: [style]).wholeImageStyleMapping == styleMapping)
+        #expect(try Job(concepts: [style, Concept(trigger: "PERSON")]).wholeImageStyleMapping == nil)
+        #expect(try Job(concepts: [Concept(trigger: "MUG", targetConcept: .object)]).wholeImageStyleMapping == nil)
+    }
+
+    private var styleMapping: Job.Mapping {
+        ["INKSTYLE": "the visual style of the entire image or clip"]
+    }
+}

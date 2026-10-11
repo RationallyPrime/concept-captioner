@@ -105,9 +105,10 @@ struct StudioAssistant {
     ) async throws -> String {
         if demo {
             try await Task.sleep(for: .milliseconds(200))
-            return "These synthetic portraits share one framing. Add real examples with different angles, "
-                + "clothing and backgrounds. Remove duplicates and avoid photos with obscured faces "
-                + "before renting a computer."
+            return "Prepared demo advice: these three synthetic photos depict the same fictional adult in "
+                + "different clothes, poses and settings. The captions describe those differences while NORA7 "
+                + "names the person's identity. Three examples are enough to demonstrate the controls; "
+                + "this demo does not evaluate whether a real dataset is sufficient for training."
         }
         let sampled = Self.critiqueSample(project.images)
         guard !sampled.isEmpty else { throw StudioError.message("Import photos before asking for dataset advice.") }
@@ -129,11 +130,15 @@ struct StudioAssistant {
                     + (notes.isEmpty ? "none" : notes.joined(separator: "; "))
             )]
             for image in batch {
-                try content += [.text("Photo \(image.id):"), Self.thumbnail(image.url)]
+                content.append(.text("Training sample \(image.id):"))
+                content += try await Self.adviceContent(image.url)
             }
             let reply = try await stage.run(
-                instructions: "Inspect these training photos for a diffusion LoRA. Give concise, beginner-friendly "
-                    + "advice on repeated clothing, backgrounds, framing, variety and visible quality. summary is "
+                instructions: "Inspect these training samples for the configured diffusion LoRA concept category. "
+                    + "For identity, assess variety of presentation and visibility; for objects and characters, "
+                    + "viewpoints and context; for style, variety of subject matter within the intended style; "
+                    + "for motion, require actual temporal evidence. Sparse frames cannot establish motion or sound. "
+                    + "Do not score aesthetics or judge a style dataset by face visibility. summary is "
                     + "two or three sentences; suggestions are at most five specific actions, naming photos where "
                     + "useful. Do not infer biography.",
                 messages: [.user(content)]
@@ -220,31 +225,46 @@ struct StudioAssistant {
         ).output
     }
 
-    func proposeMapping(image: URL, references: [String: URL]) async throws -> Job.Mapping {
-        if demo { return Job.Mapping(references.keys.sorted().map { ($0, "the illustrated person in the center") }) }
+    func proposeMapping(image: URL, references: [String: URL], concepts: [Concept]) async throws -> Job.Mapping {
+        if demo {
+            return Job.Mapping(concepts.map { ($0.trigger, "the person shown in the prepared demo photograph") })
+        }
         let stage = StructuredStage<MappingDraft>(
-            name: "mapping proposal",
-            endpoint: endpoint,
-            schemaName: "MappingDraft",
-            schema: MappingDraft.schema
+            name: "mapping proposal", endpoint: endpoint, schemaName: "MappingDraft", schema: MappingDraft.schema
         )
-        var content: [UserContent] = []
+        var content: [UserContent] =
+            [.text("Concept definitions: " + JSONValue.array(concepts.map(\.jsonValue)).pythonDumps())]
         for (trigger, url) in references.sorted(by: { $0.key < $1.key }) {
             try content += [.text("Reference for \(trigger):"), Self.image(url)]
         }
-        try content += [.text("Target photo:"), Self.image(image)]
+        try content += [.text("Exact selected training target:"), Self.image(image)]
         let reply = try await stage.run(
-            instructions: "Compare reference faces to the target. Return locators mapping only supplied triggers "
-                + "to visible matching people, using location and clothing to locate each. "
-                + "Omit uncertain or absent matches. This is a proposal, not a confirmation.",
+            instructions: "Locate the configured concepts in the target. Use references for person identity "
+                + "and object or character design; do not assign a person from biography or a name. "
+                + "For style, identify the whole target or the declared region; no face is required. "
+                + "For motion, identify the performer and observed temporal segment, using only actual video evidence. "
+                + "Return a short locator for each clearly present concept, using position or scene context. "
+                + "Omit uncertain or absent matches. This is a proposal the user must confirm.",
             messages: [.user(content)]
         )
-        let allowed = Set(references.keys)
-        return reply.output.mapping(allowed: allowed)
+        return reply.output.mapping(allowed: Set(concepts.map(\.trigger)))
+    }
+
+    static func adviceContent(_ url: URL) async throws -> [UserContent] {
+        guard Sources.isVideo(Sources.suffix(of: url.lastPathComponent)) else { return try [thumbnail(url)] }
+        let frames = try await MediaEditor.frames(url: url, count: 3)
+        var content: [UserContent] =
+            [.text("Sparse preview frames only. Audio is uninspected; do not infer movement between frames.")]
+        for frame in frames {
+            content.append(.text("Clip-relative time: \(String(format: "%.2f", frame.seconds)) seconds"))
+            let data = try MediaEditor.png(frame.image)
+            let encoded = try Images.providerImage(data, suffix: ".png")
+            content.append(.image(data: encoded.data, mediaType: encoded.mediaType))
+        }
+        return content
     }
 
     private static func image(_ url: URL) throws -> UserContent {
-        let encoded = try Images.providerImage(Data(contentsOf: url), suffix: "." + url.pathExtension)
-        return .image(data: encoded.data, mediaType: encoded.mediaType)
+        try MediaInput.content(data: Data(contentsOf: url), suffix: Sources.suffix(of: url.lastPathComponent))
     }
 }

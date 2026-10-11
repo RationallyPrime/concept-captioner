@@ -1,5 +1,5 @@
 // Gemini generateContent over URLSession: responseMimeType application/json + responseJsonSchema,
-// inlineData images, thinkingConfig.
+// inlineData images or video targets, thinkingConfig.
 
 import Foundation
 
@@ -46,8 +46,14 @@ public struct GeminiClient: ModelClient {
         var headers = ["x-goog-api-key": apiKey]
         if bearerAuth { headers["Authorization"] = "Bearer \(apiKey)" }
         settings.mergeExtraHeaders(into: &headers)
+        let body = requestBody(instructions: instructions, messages: messages, output: output, settings: settings)
+        if messages.flatMap(\.content).contains(where: { if case .video = $0 { return true }; return false }),
+           JSONValue.object(body).pythonDumpsData().count >= 20 * 1024 * 1024 {
+            throw ConfigurationError("This clip exceeds Gemini’s 20 MB inline request limit. Trim a shorter segment "
+                + "or save its caption manually; no partial video was sent.")
+        }
         let envelope = try await ProviderHTTP.post(
-            requestBody(instructions: instructions, messages: messages, output: output, settings: settings),
+            body,
             to: baseURL.appendingPathComponent("models/\(requestedModel):generateContent"),
             headers: headers,
             transport: transport
@@ -176,6 +182,16 @@ public struct GeminiClient: ModelClient {
                     "mimeType": .string(mediaType),
                     "data": .string(data.base64EncodedString()),
                 ]),
+            ])
+        case let .video(data, mediaType):
+            .object([
+                "inlineData": .object([
+                    "mimeType": .string(mediaType),
+                    "data": .string(data.base64EncodedString()),
+                ]),
+                // Default 1 FPS can omit motion in the app's shortest approved segments.
+                // Google's documented maximum is 24 FPS; keep the complete clip and sample it densely.
+                "videoMetadata": .object(["fps": .int(Sources.videoSamplingFPS)]),
             ])
         }
     }

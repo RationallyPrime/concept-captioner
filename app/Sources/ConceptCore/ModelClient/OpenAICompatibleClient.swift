@@ -71,11 +71,11 @@ public struct OpenAICompatibleClient: ModelClient {
         messages: [ChatMessage],
         output: OutputRequest,
         settings: RequestSettings
-    ) -> JSONObject {
+    ) throws -> JSONObject {
         var chat: [JSONValue] = [
             .object(["role": .string("system"), "content": .string(output.instructions(instructions))]),
         ]
-        chat.append(contentsOf: messages.map(Self.encode))
+        try chat.append(contentsOf: messages.map(Self.encode))
         var body: JSONObject = ["model": .string(requestedModel), "messages": .array(chat)]
         switch output.mode {
         case .native:
@@ -141,17 +141,19 @@ public struct OpenAICompatibleClient: ModelClient {
         return ["reasoning": .object(["effort": .string(effort), "enabled": .bool(true)])]
     }
 
-    private static func encode(_ message: ChatMessage) -> JSONValue {
+    private static func encode(_ message: ChatMessage) throws -> JSONValue {
         switch message.role {
         case .assistant:
             .object(["role": .string("assistant"), "content": .string(message.text)])
         case .user:
-            .object(["role": .string("user"), "content": .array(message.content.map(part))])
+            try .object(["role": .string("user"), "content": .array(message.content.map(part))])
         }
     }
 
-    private static func part(_ content: UserContent) -> JSONValue {
+    private static func part(_ content: UserContent) throws -> JSONValue {
         switch content {
+        case .video:
+            throw MediaInput.unsupportedVideo()
         case let .text(text):
             .object(["type": .string("text"), "text": .string(text)])
         case let .image(data, mediaType):

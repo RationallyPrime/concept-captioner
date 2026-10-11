@@ -140,7 +140,7 @@ public struct ChatGPTModelClient: ModelClient {
             throw ConfigurationError("Choose a model available to your connected ChatGPT account.")
         }
         try Self.validate(settings: settings, outputMode: output.mode)
-        var body = OpenAIResponsesClient.body(
+        var body = try OpenAIResponsesClient.body(
             model: requestedModel, instructions: instructions, messages: messages, output: output, settings: settings
         )
         body["stream"] = .bool(true)

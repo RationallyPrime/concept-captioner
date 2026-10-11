@@ -102,6 +102,8 @@ enum RunArtifacts {
 /// which the session hands to `outputRepo` and `privateResult`.
 struct ProjectTrainingRecord: Codable, Equatable {
     var results: [TrainingResult] = []
+    var runs: [TrainingRun] = []
+    var comparisons: [GeneratedComparison] = []
 
     init(results: [TrainingResult] = []) {
         self.results = results
@@ -110,6 +112,8 @@ struct ProjectTrainingRecord: Codable, Equatable {
     init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         results = try values.decodeIfPresent([TrainingResult].self, forKey: .results) ?? []
+        runs = try values.decodeIfPresent([TrainingRun].self, forKey: .runs) ?? []
+        comparisons = try values.decodeIfPresent([GeneratedComparison].self, forKey: .comparisons) ?? []
     }
 
     static func url(in project: URL) -> URL {
@@ -251,6 +255,8 @@ extension GPUWorkspace {
 
     /// True when a finished LoRA sits on this pod's volume and has been neither pushed nor saved.
     var resultNeedsSaving: Bool {
+        if let generation, generation.state == .pending, hasRunningPod,
+           generation.volumeID == currentVolumeID { return true }
         guard let result, result.state == .pending, hasRunningPod else { return false }
         return resultIsOnThisPod(result)
     }
@@ -258,6 +264,8 @@ extension GPUWorkspace {
     /// True while the latest run on this pod's volume has not been settled (still training, or its
     /// trainer exited and the check of its files has not succeeded yet).
     var resultUnsettled: Bool {
+        if let generation, generation.state == .generating, hasRunningPod,
+           generation.volumeID == currentVolumeID { return true }
         guard let result, result.state == .training, hasRunningPod else { return false }
         return resultIsOnThisPod(result)
     }
@@ -266,7 +274,7 @@ extension GPUWorkspace {
         result.volumeID.isEmpty || currentVolumeID.isEmpty || result.volumeID == currentVolumeID
     }
 
-    private func startAutomaticRetrieval() {
+    func startAutomaticRetrieval() {
         guard retrievalTask == nil, !isBusy, !isStopping,
               Date().timeIntervalSince(lastAutomaticRetrieval) >= automaticRetrievalInterval else { return }
         lastAutomaticRetrieval = Date()
@@ -279,12 +287,18 @@ extension GPUWorkspace {
     /// Saves a pending result: pushes it when it was meant for the Hub (falling back to a download
     /// if the push fails), else downloads it through the agent and verifies every file's sha256.
     func retrieveResult() async {
-        await perform { try await self.retrievePendingResult() }
+        await perform {
+            if self.generation?.state == .pending { try await self.retrieveGeneration() }
+            if self.result?.state == .pending { try await self.retrievePendingResult() }
+        }
     }
 
     private func retrievePendingResult() async throws {
         guard let result, result.state == .pending else {
             throw StudioError.message("There is no finished training result waiting to be saved.")
+        }
+        guard projectFolder == nil || projectOwnsRun(result.runID) else {
+            throw StudioError.message("Open this training run's original project before retrieving its outputs.")
         }
         guard let agent, hasRunningPod, resultIsOnThisPod(result) else {
             throw StudioError.message(
@@ -322,7 +336,7 @@ extension GPUWorkspace {
         message = "Your LoRA was saved to \(folder.path)."
     }
 
-    private func download(_ file: RunFile, runID: String, into folder: URL, agent: any PodAgent) async throws {
+    func download(_ file: RunFile, runID: String, into folder: URL, agent: any PodAgent) async throws {
         let manager = FileManager.default
         let root = folder.standardizedFileURL
         let destination = root.appendingPathComponent(file.path).standardizedFileURL
@@ -382,22 +396,52 @@ extension GPUWorkspace {
     }
 
     func loadProjectRecord() {
+        runHistory = []
+        generations = []
+        selectedHistoryRunID = ""
+        repeatSourceRunID = ""
         guard let projectFolder else { return }
         let record = ProjectTrainingRecord.load(from: projectFolder)
+        runHistory = record.runs
+        generations = record.comparisons
+        selectedHistoryRunID = runHistory.last?.runID ?? ""
+        if generation == nil {
+            generation = generations.last { [.generating, .pending].contains($0.state) }
+        }
         if result == nil {
             result = record.results.last { [.training, .pending].contains($0.state) }
         }
     }
 
-    func saveProjectRecord() {
-        guard !demoMode, let projectFolder else { return }
+    @discardableResult
+    func saveProjectRecord() -> Bool {
+        guard !demoMode, let projectFolder else { return false }
         var record = ProjectTrainingRecord.load(from: projectFolder)
-        if let result {
+        if let result, projectOwnsRun(result.runID) {
             record.results.removeAll { $0.runID == result.runID }
             record.results.append(result)
         }
-        do { try record.save(to: projectFolder) } catch {
-            message = "Could not record the training result in the project folder: \(error.localizedDescription)"
+        captureRunProgress()
+        record.runs = runHistory
+        if let generation, projectOwnsRun(generation.sourceRunID) {
+            generations.removeAll { $0.runID == generation.runID }
+            generations.append(generation)
         }
+        record.comparisons = generations
+        do {
+            try record.save(to: projectFolder)
+            return true
+        } catch {
+            message = "Could not record the training result in the project folder: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    /// A global pod restore keeps costs and pending outputs under control; only a project's
+    /// existing run/result record authorizes writing those artifacts into that project.
+    func projectOwnsRun(_ id: String) -> Bool {
+        if runHistory.contains(where: { $0.runID == id }) { return true }
+        guard let projectFolder else { return false }
+        return ProjectTrainingRecord.load(from: projectFolder).results.contains { $0.runID == id }
     }
 }

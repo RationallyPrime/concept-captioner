@@ -8,18 +8,18 @@ principles. It does not replace the product brief. The owner delegated this refi
 
 ## Direction
 
-A calm workspace for making deliberate choices about photos. The photographs and their
+A calm workspace for preparing images and video clips for diffusion training. The photographs and their
 captions carry the visual interest. Give a beginner enough context to act; keep routine
 controls quick for a returning user. The interface should feel at home on a Mac.
 
 Hákon supplied [hakonfreyr.com](https://hakonfreyr.com/) as a quality reference: its drawing
 sheet composition, rules, annotations and illustrations express one coherent idea. Apply that
-discipline here through a photo workspace: a contact sheet, a visible learning boundary and
+discipline here through a photo workspace: a contact sheet, one clearly defined concept and
 an image paired with its editable caption. Every visual detail should help the current decision.
 
 - Keep the native sidebar, lists, split views, pickers, menus, sheets, keyboard focus and
   selection behavior. Retain the nine screen names and their order. Group their navigation
-  into preparing photos, writing captions and training a model; step numbers describe order,
+  into preparing training data, writing captions and training a model; step numbers describe order,
   never imply that work has been completed.
 - Use the system font and SF Symbols. Page titles, section titles, field labels and supporting
   text have distinct, consistent roles. Reserve monospaced text for logs and monospaced
@@ -62,12 +62,20 @@ These apply the direction above. The two marked owner decisions are not open to 
   default. "Keep the computer running" is offered as a secondary choice with the hourly price,
   the spend so far and a plain warning that the app must be reopened to stop it.
 - **Keyboard.** ⌘[ and ⌘] move Back and Next; ⌘1 to ⌘9 open each screen; ⌘↩ runs each screen's
-  primary action (Import folder, Add concept, Confirm and next, Start captioning, Re-caption,
+  primary action (Import folder, Confirm and next, Start captioning, Re-caption,
   Publish, Start training, Retrieve now). Renting a computer starts billing and has no shortcut.
   File › Open Recent lists recent projects.
 - **Selection.** Lists use native selection. Review selects several photos with ⌘- or ⇧-click.
-- **Suggestions prefill, people confirm.** A mapping suggestion fills the editor and says so;
-  nothing is saved until Confirm.
+- **Suggestions prefill, people confirm.** Person/object/motion proposals fill the editor and
+  require confirmation. A sole whole-image style is assigned directly to every included target;
+  that assignment does not require a face or a model inference.
+- **One concept by default.** Category, a description and a trigger define the ordinary flow.
+  Multiple concepts and detailed caption-policy overrides live under Advanced settings.
+- **Operating copy.** Every surface explains its inputs, operation and consequences. Menus and
+  buttons name their actions. No sales-page copy or vague substitutes for technical terms.
+  Preserve the owner's introductory explanation, with hover/click/keyboard definitions.
+- **Honest examples.** Demo photographs are synthetic, captions and advice are prepared, and
+  service states are simulated. Never label them as live inference or training-quality evidence.
 - **Photos** are decoded as downsampled thumbnails off the main thread and cached in memory.
 - **Money** has one format, US dollars in the reader's locale.
 - **Settings** has one entry per context: the toolbar in a project, the link on Welcome, and the

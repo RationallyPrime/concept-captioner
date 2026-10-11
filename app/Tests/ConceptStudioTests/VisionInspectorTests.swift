@@ -5,6 +5,48 @@ import Testing
 
 @Suite("on-device image suggestions")
 struct VisionInspectorTests {
+    @Test(.timeLimit(.minutes(1)))
+    func cancelStopsProposalBatchAfterItsCurrentNativeRequest() async throws {
+        let directory = temporaryTestDirectory("cancel-vision-proposals")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let image = directory.appendingPathComponent("synthetic.png")
+        try MediaEditor.png(MediaFixtures.image(width: 640, height: 512)).write(to: image)
+        let task = Task {
+            try await VisionInspector().proposals(images: Array(repeating: image, count: 1000), references: [:])
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        let cancelledAt = ContinuousClock.now
+        task.cancel()
+        await #expect(throws: CancellationError.self) { try await task.value }
+        #expect(cancelledAt.duration(to: .now) < .seconds(2))
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func separateInspectorsCompleteConcurrentNativeRequestsWithoutStarvingAsyncWork() async throws {
+        let directory = temporaryTestDirectory("concurrent-vision")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let image = directory.appendingPathComponent("synthetic.png")
+        try MediaEditor.png(MediaFixtures.image(width: 640, height: 512)).write(to: image)
+        let completed = try await withThrowingTaskGroup(of: Int.self) { group in
+            for index in 1 ... 8 {
+                group.addTask {
+                    let result = try await VisionInspector().analyze([image])
+                    #expect(result[image.lastPathComponent]?.width == 640)
+                    return index
+                }
+            }
+            group.addTask { await Task.yield(); return 0 }
+            var results: [Int] = []
+            for try await result in group {
+                results.append(result)
+            }
+            return results
+        }
+        #expect(completed.sorted() == Array(0 ... 8))
+    }
+
     @Test func pixelEquivalentReencodingIsSimilarButDistinctIllustrationsAreNot() async throws {
         let project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }

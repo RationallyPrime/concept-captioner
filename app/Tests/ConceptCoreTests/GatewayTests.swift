@@ -206,8 +206,8 @@ struct ResponsesGatewayTests {
         }
     }
 
-    @Test func extraBodyCannotTurnRetentionBackOn() {
-        let body = OpenAIResponsesClient.body(
+    @Test func extraBodyCannotTurnRetentionBackOn() throws {
+        let body = try OpenAIResponsesClient.body(
             model: "gpt-5.2", instructions: "Caption.", messages: [.user("Image.")],
             output: OutputRequest(name: Caption.schemaName, schema: Caption.jsonSchema, mode: .native),
             settings: RequestSettings(extraBody: ["store": .bool(true)])

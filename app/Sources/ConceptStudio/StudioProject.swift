@@ -24,15 +24,15 @@ enum StudioStep: Int, CaseIterable, Identifiable, Codable {
 
     var explanation: String {
         [
-            "Choose the photos that show what you want your model to learn.",
-            "Decide what should stay recognizable and what you want to change later.",
-            "Confirm who or what each learning word refers to in each photo.",
-            "Describe the changeable details so your model can learn the intended concept.",
-            "Check the words beside each photo and protect the captions you finish.",
-            "Send your dataset to your Hugging Face account so your training computer can read it.",
-            "Rent a training computer, with the price and spending limit visible before you start.",
-            "Choose how to train, read the plan, and start when you are ready.",
-            "Watch your training progress, collect the result, and stop the rented computer.",
+            "Import and curate the images or clips used for training.",
+            "Define each concept, its category and the trigger used in captions.",
+            "Identify the subject or style each concept applies to in each training sample.",
+            "Generate descriptions with your chosen captioning provider.",
+            "Inspect and edit captions, then protect the ones you finish.",
+            "Upload included media and saved captions for training.",
+            "Choose, rent and manage training hardware and its cost.",
+            "Configure and start a training run.",
+            "Inspect training progress, results and saved runs.",
         ][rawValue]
     }
 
@@ -81,6 +81,14 @@ struct StudioProject {
     let directory: URL
     var job: Job
     var images: [ProjectImage]
+    var excludedImages: [ProjectImage] = []
+    var mediaState = ProjectMediaState()
+    var curationUndo: [CurationUndo] = []
+
+    var allMedia: [ProjectImage] {
+        (images + excludedImages).sorted { $0.id < $1.id }
+    }
+
     var imagesDirectory: URL {
         directory.appendingPathComponent("images", isDirectory: true)
     }
@@ -125,11 +133,37 @@ struct StudioProject {
                 isImported: ProjectImage.isImported(record)
             ))
         }
-        return StudioProject(directory: directory, job: job, images: images)
+        var project = StudioProject(directory: directory, job: job, images: images)
+        if let mapping = job.wholeImageStyleMapping {
+            var changed = false
+            for image in images where project.job.mapping(for: image.id) != mapping {
+                try project.job.setMapping(mapping, for: image.id)
+                changed = true
+            }
+            if changed { try project.job.save(to: project.jobURL) }
+        }
+        project.mediaState = ProjectMediaState.load(in: directory)
+        if FileManager.default.fileExists(atPath: project.excludedDirectory.path) {
+            let excluded = try LocalFolderSource(directory: project.excludedDirectory)
+            let excludedSink = try SidecarSink(directory: project.excludedDirectory)
+            for url in excluded.files {
+                let record = try await excludedSink.record(url.lastPathComponent)
+                let caption = (try? String(
+                    contentsOf: excludedSink.captionURL(for: url.lastPathComponent),
+                    encoding: .utf8
+                )) ?? ""
+                project.excludedImages.append(ProjectImage(
+                    url: url, caption: caption, status: record?.status,
+                    isFinal: record?.isHumanFinal ?? false, isImported: ProjectImage.isImported(record)
+                ))
+            }
+        }
+        return project
     }
 
     func save() throws {
         try job.save(to: jobURL)
+        try mediaState.save(in: directory)
     }
 
     /// Write job.yaml only when `updated` differs from what the project already holds.
@@ -217,21 +251,23 @@ struct StudioProject {
     // MARK: Images
 
     mutating func importFiles(_ files: [URL]) throws {
-        for source in files where Sources.imageSuffixes.contains(source.pathExtension.lowercased().withDot) {
+        for source in files {
             try Task.checkCancellation()
-            let target = availableTarget(for: source.lastPathComponent)
-            try FileManager.default.copyItem(at: source, to: target)
-            images.append(ProjectImage(url: target))
-            try job.setMapping(nil, for: target.lastPathComponent)
+            let suffix = source.pathExtension.lowercased().withDot
+            guard Sources.mediaSuffixes.contains(suffix) || MediaEditor.convertibleImageSuffixes.contains(suffix) else {
+                continue
+            }
+            _ = try importData(Data(contentsOf: source), name: source.lastPathComponent)
         }
         try save()
     }
 
     mutating func importData(_ data: Data, name: String) throws -> String {
-        let target = availableTarget(for: URL(fileURLWithPath: name).lastPathComponent)
-        try AtomicFile.write(data, to: target)
+        let imported = try MediaEditor.normalizedImport(data, name: URL(fileURLWithPath: name).lastPathComponent)
+        let target = availableTarget(for: imported.name)
+        try AtomicFile.write(imported.data, to: target)
         images.append(ProjectImage(url: target))
-        try job.setMapping(nil, for: target.lastPathComponent)
+        try job.setMapping(job.wholeImageStyleMapping, for: target.lastPathComponent)
         try save()
         return target.lastPathComponent
     }
@@ -242,7 +278,7 @@ struct StudioProject {
         let file = URL(fileURLWithPath: fileName)
         let stem = file.deletingPathExtension().lastPathComponent
         let suffix = file.pathExtension
-        let taken = Set(images.map { $0.url.deletingPathExtension().lastPathComponent.lowercased() })
+        let taken = Set(allMedia.map { $0.url.deletingPathExtension().lastPathComponent.lowercased() })
         var candidate = stem
         var counter = 1
         while taken.contains(candidate.lowercased())
@@ -327,17 +363,24 @@ struct ProjectAppState: Codable, Equatable {
 
     /// Where Publish sends the captioned dataset.
     var dataset = HubDestination()
+    var datasetRevision = ""
     /// Where the trained LoRA is uploaded (GPU journey).
     var trainingOutput = HubDestination()
 
-    init(dataset: HubDestination = HubDestination(), trainingOutput: HubDestination = HubDestination()) {
+    init(
+        dataset: HubDestination = HubDestination(),
+        datasetRevision: String = "",
+        trainingOutput: HubDestination = HubDestination()
+    ) {
         self.dataset = dataset
+        self.datasetRevision = datasetRevision
         self.trainingOutput = trainingOutput
     }
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         dataset = try container.decodeIfPresent(HubDestination.self, forKey: .dataset) ?? HubDestination()
+        datasetRevision = try container.decodeIfPresent(String.self, forKey: .datasetRevision) ?? ""
         trainingOutput = try container.decodeIfPresent(HubDestination.self, forKey: .trainingOutput)
             ?? HubDestination()
     }

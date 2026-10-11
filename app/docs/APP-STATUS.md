@@ -1,85 +1,106 @@
 # ConceptStudio app status
 
-State after the 2026-10-11 fix round; live checks date from lab commit `e620882`
-(2026-10-10). How to run it: [RUNNING.md](RUNNING.md). The day-by-day record is in [status-history-2026-10-10.md](../../docs/process/status-history-2026-10-10.md).
-The library underneath is in [CORE-STATUS.md](CORE-STATUS.md); the pod side in
-[POD-STATUS.md](../../pod/docs/POD-STATUS.md).
+Updated 2026-10-11 after the overnight implementation, based on all seven hardening lanes and
+follow-up `cd5f746`. App/source checks and native demo acceptance below have completed; current
+GPU generation/resume execution is still being verified. See [RUNNING.md](RUNNING.md),
+[CORE-STATUS.md](CORE-STATUS.md) and [POD-STATUS.md](../../pod/docs/POD-STATUS.md).
 
-## What exists
+## Implemented
 
-An unsigned macOS 15 Swift 6 / SwiftUI app, built by script into `app/dist/ConceptStudio.app`.
-Yams is its only third-party dependency.
+- **Onboarding and the entire nine-screen flow:** the owner's full explanation of diffusion
+  training, concepts, training data, captions and concept boundaries; italic glossary terms;
+  hover, click and keyboard definitions. Welcome uses ordinary project/account actions and
+  photographic demo examples. Labels describe operations, inputs and consequences.
+- **One concept by default:** category-specific questions and caption/mapping/reviewer
+  instructions for person, object/character, style and motion. Multiple concepts and detailed
+  overrides are under Advanced. A sole style applies to the entire training target without
+  face identification. Human confirmation remains required for subject proposals.
+- **Dataset curation:** duplicate candidate groups, Include/Exclude and session Undo, crop
+  inspection and approval, HEIC/TIFF normalization. Captioning and publication use only
+  included approved targets. Approval invalidates old captions and subject mappings; a sole
+  style is reassigned automatically. Previously published excluded targets are removed from
+  the next dataset commit; unrelated remote files are preserved and excluded from app training.
+- **Real clips:** import from files, folders, Photos or Hub imagefolder; playback, frame
+  inspection, exact segment approval and LTX video captions. Approved segments preserve the
+  selected frames and timing, with aspect-preserving 32-aligned dimensions. Variable-rate
+  selections are refused because pinned LTX preprocessing cannot preserve their timestamps;
+  constant-rate portions remain selectable. LTX derives its
+  preprocessing buckets from those targets. Direct Gemini and Pydantic's Google route accept
+  native video; other native transports fail explicitly instead of sending a poster frame.
+- **Saved training runs:** project-local dataset revisions, settings, checkpoints, outputs and
+  available GPU cost information; reopen history, Load settings for repeat and supported
+  checkpoint resume. Missing revision or cost information is shown as unavailable.
+- **Generated results:** actual pod generation services for FLUX.1-dev and LTX-2, checkpoint
+  choice, paired base/LoRA generation with matched prompts and seeds, downloaded galleries,
+  and Save trained model to this Mac. Other generation combinations explain their limits.
+- **OpenRouter browser authorization:** documented PKCE consent, temporary loopback callback,
+  Keychain key storage, cancellation, direct API calls afterward, key usage and allowance.
+  Manual keys remain available. ChatGPT sign-in remains a separate account path.
+- **Shared project and cost controls:** CLI-compatible job/sidecar formats, project-contained
+  custom skills, private Hub upload, local retrieval, budget/idle stop, launch reconciliation,
+  and explicit handling of pending outputs before a computer is stopped.
 
-- **Welcome and Settings.** New, open and recent projects; an offline demo; keys in the
-  Keychain, gateway-first, with direct provider keys under Advanced; a captioning connection
-  test; **Log in with ChatGPT** (PKCE, signed identity, Keychain credentials, model discovery,
-  explicit choice between ChatGPT plan usage and OpenAI API credits, never switched silently).
-- **The nine-screen journey.** Images (folder, selected files, Apple Photos, Hub imagefolder;
-  duplicate, face-quality and readable-text warnings), Concepts, Mapping, Captioning (live
-  per-image outcomes, optional critic, cancel), Review (drafts kept across navigation, mark
-  final, re-caption one, compare two models), Publish (one Hub commit), GPU pods, Training,
-  Monitor (in-app curves, authenticated TensorBoard).
-- **Shared formats.** Projects use the same job file, sidecars and response records as the
-  CLI (layout in the [README](../../README.md#project-folder)). A chosen custom skill is copied
-  into the project as `skill/<name>/`; app-only state lives in `.conceptstudio/`.
-- **Money controls.** Price before renting, running cost, per-run budget cap, idle stop,
-  quit/close warnings, Stop everything, keep-awake while a computer runs and a reconcile of
-  the app's own pods on launch. Pods use the public trainer images by default.
-- **Training result.** A finished LoRA is pushed to a private Hub model repo when a Hub write
-  token is set, otherwise downloaded into `<project>/results/<run-id>/`; Stop refuses while a
-  result is neither pushed nor saved unless the user chooses to discard it.
-- **Demo mode.** Every screen and status with fake model, provider and pod backends; no
-  Keychain reads and no network.
+## Exercised in the native window
 
-## Verified live
+The 2026-10-11 rebuilt unsigned app was opened and controlled directly:
 
-Through code paths the app uses, run as headless probes against real services (not through
-the app window):
+- Welcome and the full training explanation; an inline definition opens a native popover.
+- Images: three synthetic photographs, Exclude and Undo, crop sheet and Cancel.
+- Concepts and Mapping: one-concept presentation and prepared confirmed assignments.
+- Captioning: all three prepared captions written without any provider request.
+- Review: caption/image pairing, mark Final, Save, and disabled re-caption protection.
+- Publish, GPU pods and Training: simulated upload, rental, training completion and Stop.
+- Monitor: simulated loss, honest no-real-generation demo state, saved settings and Repeat.
+- Settings and Advanced settings, File and Go menus, visible native sidebar and scrolling.
 
-- Swift Hub upload, LFS verify and download; native RunPod catalog and network-volume reads.
-- One Gemini structured caption request; vLLM image captions from the owned pod (Qwen 2.5 VL 3B
-  and Qwen3 VL 8B).
-- `PodAgentClient` reads of plan, services, logs and training events; the loss point decoded
-  from both a real FLUX run and a real LTX run.
-- `RunPodProvider` status, stop and status against a real two-GPU pod.
+This was an agent walkthrough of the offline demo, not the owner's acceptance or a live paid
+training run. It found and repaired a native paragraph-width bug missed by offscreen rendering.
+The first Edit concept presentation also exposed a sheet-state defect; the rebuilt native
+check passed, including preserving custom style details through reopening and unchanged Save.
 
-In the window itself: Welcome, demo Images and Concepts were reached, and Hákon confirmed the
-app responds normally.
+## Offline verification
 
-## Verified offline only
+- Focused tests cover account authorization/cancellation, category-aware prompts, exact media,
+  curation/Undo, Hub file selection, output generation requests, run restore/repeat/resume and
+  cost/output custody. Independent source review has driven repairs at the integration seams.
+- Actual local video fixtures exercise frame counts, variable timing and visible-edge
+  preservation, plus HEIC/TIFF normalization and file/sidecar restoration.
+- 114 offscreen render frames cover Welcome, nine journey screens, Settings, Advanced,
+  concept/crop editors, empty/error states and generated/saved-result surfaces in light and
+  dark at minimum/default sizes. Native vibrancy and interactions are verified separately.
+- The current integration passes **402 Swift tests** (160 app, 242 Core) and **94 Python tests**.
+  Strict SwiftLint is clean; SwiftFormat is clean on 129 source/test files, with two resource
+  exclusions. Python Ruff and format checks are clean. The debug bundle builds and explicitly
+  links AVKit, whose absence was caught by a valid video-editor render.
+- Updated focused renders cover the actual video editor in both appearances, with start time
+  and duration visible before approval. Exact frames and image size remain in Advanced.
+  The final native keyboard/video playback checks await an unlocked Mac.
 
-- **346 Swift tests pass** (108 app/GPU/auth in 17 suites, 238 Core in 34 suites); one opt-in
-  render test is skipped in an ordinary run. Strict SwiftLint: zero violations. SwiftFormat:
-  clean on 105 files. The bundle
-  builds with an arm64 executable and valid Info and entitlement plists.
-- ChatGPT sign-in and captioning: PKCE and callback state, identity claims, separate accounts,
-  token refresh, sign-out ordering, streamed completion, usage-limit cancellation. Independent
-  review accepted the code after rerunning 22 auth and 12 Core tests.
-- Layout: offscreen renders of all screens at two window sizes in light and dark. These do not
-  show focus, scrolling, input, VoiceOver or native sidebar vibrancy.
+## Live evidence and remaining acceptance
 
-## Open
+Earlier live proofs (2026-10-10) established Swift Hub upload/download, direct Gemini and
+vLLM image captions, native RunPod reads/stop, and FLUX/LTX training-event reads. Those proofs
+predate this redesign and do not establish its new generation, resume or video paths.
 
-- **Full interactive walkthrough** of all nine screens in the window, including keyboard, menus,
-  dialogs and VoiceOver. Agent GUI control failed (`cgWindowNotFound`, closed transport pipe).
-- **ChatGPT with a real account:** browser consent, Keychain persistence in the signed app and
-  one plan-billed caption are unverified. They need a user to authorize the app's registration.
-- **Real app-driven rental:** create pod, caption, train, publish, stop, all from the window.
-- **Live OpenAI, Anthropic and gateway requests** (see CORE-STATUS).
-- **Signing, notarization and sandbox runtime checks:** documented in RUNNING.md, not done.
-- **2026-10-11 fix round, verified offline only:** the ChatGPT route streams through the fixed
-  server-sent-event parser (see CORE-STATUS); the custom skill is copied into the project; the
-  LoRA push-or-download path, keep-awake and the launch reconcile; the TensorBoard session
-  handshake and the run-file download against the pod agent's new endpoints. None of these has
-  run against a real pod or account yet.
-- **Cost guards and the crash window.** While a computer is running, ConceptStudio keeps the
-  Mac from idle sleep and checks the spending limit and idle stop every five seconds. On every
-  launch it asks RunPod for the computers it created (named ConceptStudio-<project>) and puts
-  any running one back under these guards. Billing is not stopped while the app is not running
-  or the Mac is asleep: if the app crashes or is force-quit, or the Mac sleeps anyway (lid
-  closed without an external display, low battery, or a manual Sleep), the computer keeps
-  billing until the app is opened again. At that point the spending limit is applied
-  immediately, using wall-clock time since the computer started, so the overspend equals the
-  time away. There is no stop on the RunPod side; RunPod's REST v2 API offers no stop-after or
-  terminate-after setting. A computer found on launch whose local record was lost has its
-  spending limit counted from the moment it is found.
+On 2026-10-11, the native Gemini path sent one exact approved synthetic nine-frame,
+512 × 288 MP4 and returned HTTP 200 with a usable shared Caption object from
+`gemini-3.8-flash` (4,389 input / 76 output tokens). Explicit 24 FPS sampling repaired
+the initial default-sampling 400, verified first with a single-variable control and then
+the unmodified production client. [Safe receipts](../../notes/evidence/2026-10-11-video-native-proof/README.md)
+record all three requests. This is functional provider acceptance, not a caption-quality
+study, every-source-frame observation or actual trainer preprocessing proof.
+
+Still separate from implementation:
+
+- Live ChatGPT and OpenRouter consent and authenticated captioning under the owner's account.
+- Current trainer images are published under `v0.2.0-overnight20261011-r1` and verified by
+  anonymous digest pulls. The app defaults and public template now use these images. Bounded
+  real-GPU generation/video/resume checks are recorded in POD-STATUS as each completes.
+- The owner's full morning walkthrough and first real dataset training run.
+- VoiceOver acceptance, Photos permission/bookmark persistence in a signed sandboxed build,
+  Developer ID signing and notarization. The preview remains unsigned.
+
+The app's budget and idle limits run on the Mac. They cannot stop a rented computer while the
+app is absent or the Mac is asleep. Launch reconciliation resumes those guards. Separately
+billed saved storage remains after GPU stop. This limitation is unchanged; there is no claim of
+server-side budget enforcement.

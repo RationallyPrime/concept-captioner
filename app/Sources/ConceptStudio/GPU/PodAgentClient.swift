@@ -81,6 +81,11 @@ struct RunFile: Codable, Equatable {
     }
 }
 
+struct AgentRunConfiguration {
+    let config: JSONObject
+    let dataset: JSONObject
+}
+
 protocol PodAgent: Sendable {
     func plan() async throws -> TrainingPlan
     func services() async throws -> [AgentService]
@@ -94,6 +99,13 @@ protocol PodAgent: Sendable {
     func runFiles(runID: String) async throws -> [RunFile]
     /// Streams one run file to `destination` without holding it in memory.
     func download(runID: String, path: String, to destination: URL) async throws
+    func runConfiguration(runID: String) async throws -> AgentRunConfiguration
+}
+
+extension PodAgent {
+    func runConfiguration(runID: String) async throws -> AgentRunConfiguration {
+        throw StudioError.message("This agent does not expose saved run configuration.")
+    }
 }
 
 /// Streams a response body to disk. The seam exists so tests never touch the network.
@@ -193,6 +205,14 @@ struct PodAgentClient: PodAgent {
     func runFiles(runID: String) async throws -> [RunFile] {
         struct Result: Decodable { let files: [RunFile] }
         return try await JSONDecoder().decode(Result.self, from: call("runs/\(runID)/files")).files
+    }
+
+    func runConfiguration(runID: String) async throws -> AgentRunConfiguration {
+        let info = try await JSONValue(parsing: call("runs/\(runID)/config")).objectValue
+        return AgentRunConfiguration(
+            config: info?["config"]?.objectValue ?? [:],
+            dataset: info?["dataset"]?.objectValue ?? [:]
+        )
     }
 
     func download(runID: String, path: String, to destination: URL) async throws {

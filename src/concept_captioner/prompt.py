@@ -11,49 +11,60 @@ import json
 from .job import Job
 from .skills import Skill
 
-USER_TURN = "Inspect this exact target image and return the configured JSON object."
+USER_TURN = "Inspect this exact training target and return the configured JSON object."
 
 CAPTIONER_TASK = """\
 RESPONSE
 Return one JSON object. `caption` is the training text only, in the profile's format, with
-line breaks as JSON escapes. Keep uncertainty out of it. Apply exactly the mapped triggers to
-exactly the mapped subjects; describe any other people ordinarily. If a mapped subject is
-absent, too small or obscured, or cannot be bound to one visible person, set `usable` false,
-leave `caption` empty and explain in `note`. Do not guess. For single_subject_only jobs any
+line breaks as JSON escapes. Keep uncertainty out of it. Apply the mapped triggers according
+to each concept's target_concept and boundary. For person, object or character concepts, bind
+the trigger to the correct visible subject. For style, apply it to the declared whole target
+or region and describe subject matter without verbalizing the style being learned. For
+motion, bind it to the observed movement and describe the performer and scene outside that
+movement concept. Describe unrelated people and objects ordinarily. If the mapped concept is
+absent, obscured or cannot be identified from the supplied evidence, set `usable` false, leave
+`caption` empty and explain in `note`. Do not guess. For single_subject_only person jobs any
 second identity makes the sample unusable. Do not quote readable text (labels, logos, signs)
 verbatim; describe it generically."""
 
 CRITIC_TASK = """\
 REVIEW TASK (replaces the captioning task above)
-You are reviewing a proposed caption against the supplied target image and the ACTIVE JOB
-CONFIGURATION. Approve only if every statement in the caption is visible in the image, the
-mapped triggers are bound to the right people, no trait the configuration reserves for a
-trigger is described, nothing is inferred that a still cannot show (age, biography, sound,
-motion), and no readable text is quoted verbatim. Otherwise reject with short, specific notes
-the captioner can act on."""
+Review the proposed caption against the supplied training target and ACTIVE JOB CONFIGURATION.
+Approve only if every statement is supported by the target, each trigger is applied to the
+correct person, object, character, style or motion, and no defining trait reserved for that
+concept is described, including through synonyms. A whole-image style does not require a
+visible person. Do not infer age, biography, sound or motion from a still. For a video, assess
+only observed changes and inspected audio; never infer sound from thumbnails. No readable text
+may be quoted verbatim. Otherwise reject with short, specific notes the captioner can act on."""
 
 
-def _assemble(skill: Skill, profile_text: str, job: Job, mapping: dict[str, str]) -> list[str]:
+def _assemble(
+    skill: Skill, profile_text: str, job: Job, mapping: dict[str, str], *, is_video: bool = False
+) -> list[str]:
     sections = [skill.instructions(), profile_text]
     for key, text in job.policy_overrides.items():
         sections.append(f"# Job policy override: {key}\n\n{text.strip()}\n")
-    sections.append(
-        "ACTIVE JOB CONFIGURATION\n" + json.dumps(job.sample_view(mapping), ensure_ascii=False)
-    )
+    view = job.sample_view(mapping)
+    if is_video:
+        view["inputs"]["evidence"] = "attached_target_video"
+        view["inputs"]["audio_status"] = "uninspected"
+    sections.append("ACTIVE JOB CONFIGURATION\n" + json.dumps(view, ensure_ascii=False))
     return sections
 
 
 def captioner_instructions(
-    skill: Skill, profile_text: str, job: Job, mapping: dict[str, str]
+    skill: Skill, profile_text: str, job: Job, mapping: dict[str, str], *, is_video: bool = False
 ) -> str:
-    sections = [*_assemble(skill, profile_text, job, mapping), CAPTIONER_TASK]
+    sections = [*_assemble(skill, profile_text, job, mapping, is_video=is_video), CAPTIONER_TASK]
     return "\n\n".join(section.strip() for section in sections) + "\n"
 
 
-def critic_instructions(skill: Skill, profile_text: str, job: Job, mapping: dict[str, str]) -> str:
-    sections = [*_assemble(skill, profile_text, job, mapping), CRITIC_TASK]
+def critic_instructions(
+    skill: Skill, profile_text: str, job: Job, mapping: dict[str, str], *, is_video: bool = False
+) -> str:
+    sections = [*_assemble(skill, profile_text, job, mapping, is_video=is_video), CRITIC_TASK]
     return "\n\n".join(section.strip() for section in sections) + "\n"
 
 
 def critic_user_turn(caption: str) -> str:
-    return "Review this proposed caption against the attached image:\n\n" + caption
+    return "Review this proposed caption against the attached training target:\n\n" + caption

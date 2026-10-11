@@ -12,6 +12,45 @@ public enum TargetConcept: String, Codable, Sendable, CaseIterable {
     case motion
     case characterDesign = "character_design"
     case custom
+
+    public var isPersonIdentity: Bool {
+        self == .facialIdentity || self == .fullIdentity
+    }
+
+    public var defaultClassNoun: String {
+        switch self {
+        case .facialIdentity, .fullIdentity: "person"
+        case .object: "object"
+        case .characterDesign: "character"
+        case .style: "style"
+        case .motion: "motion"
+        case .custom: "concept"
+        }
+    }
+
+    public var defaultLearningTarget: String {
+        switch self {
+        case .facialIdentity: "distinctive facial identity"
+        case .fullIdentity: "the person's enduring face and physique"
+        case .style: "the visual style, including its rendering, texture and palette"
+        case .object: "the object's distinctive design"
+        case .motion: "the defining movement pattern"
+        case .characterDesign: "the character's distinctive appearance and design"
+        case .custom: "the concept described by the user"
+        }
+    }
+
+    public var defaultDescribedAttributes: [String] {
+        switch self {
+        case .facialIdentity: Concept.defaultAttributesToDescribe
+        case .fullIdentity, .characterDesign:
+            ["expression and gaze", "pose and action", "permitted clothing changes", "setting", "lighting", "framing"]
+        case .style: ["subject matter", "objects", "actions", "spatial arrangement", "visible scene content"]
+        case .object: ["placement", "orientation", "use", "surroundings", "lighting", "occlusion"]
+        case .motion: ["performer", "clothing", "scene", "framing", "lighting", "independent start and end state"]
+        case .custom: ["observable details outside the stated concept"]
+        }
+    }
 }
 
 public enum ThinkingLevel: String, Codable, Sendable, CaseIterable {
@@ -63,17 +102,17 @@ public struct Concept: Sendable, Equatable {
 
     public init(
         trigger: String,
-        classNoun: String = "person",
+        classNoun: String? = nil,
         targetConcept: TargetConcept = .facialIdentity,
         traitsToLearn: [String]? = nil,
         attributesToDescribe: [String]? = nil,
         explicitBoundaryDecisions: OrderedDictionary<String, String> = [:]
     ) throws {
         self.trigger = try literalText(trigger, what: "trigger/class_noun")
-        self.classNoun = try literalText(classNoun, what: "trigger/class_noun")
+        self.classNoun = try literalText(classNoun ?? targetConcept.defaultClassNoun, what: "trigger/class_noun")
         self.targetConcept = targetConcept
-        self.traitsToLearn = try nonblankItems(traitsToLearn ?? Concept.defaultTraitsToLearn)
-        self.attributesToDescribe = try nonblankItems(attributesToDescribe ?? Concept.defaultAttributesToDescribe)
+        self.traitsToLearn = try nonblankItems(traitsToLearn ?? [targetConcept.defaultLearningTarget])
+        self.attributesToDescribe = try nonblankItems(attributesToDescribe ?? targetConcept.defaultDescribedAttributes)
         self.explicitBoundaryDecisions = explicitBoundaryDecisions
     }
 
@@ -81,7 +120,7 @@ public struct Concept: Sendable, Equatable {
     public init(json: JSONValue, context: String = "concept") throws {
         var reader = try ObjectReader(json, context: context)
         let trigger = try reader.string("trigger") ?? reader.missing("trigger")
-        let classNoun = try reader.string("class_noun") ?? "person"
+        let classNoun = try reader.string("class_noun")
         let targetConcept = try reader.enumeration("target_concept", TargetConcept.self) ?? .facialIdentity
         let traits = try reader.strings("traits_to_learn")
         let attributes = try reader.strings("attributes_to_describe")
@@ -200,6 +239,12 @@ public struct Endpoints: Sendable, Equatable {
 /// A captioning job: concepts, per-sample subject mappings, skill, profile, endpoints.
 public struct Job: Sendable, Equatable {
     public typealias Mapping = OrderedDictionary<String, String>
+
+    /// A single style applies to the selected training target as a whole; no face locator is involved.
+    public var wholeImageStyleMapping: Mapping? {
+        guard concepts.count == 1, let concept = concepts.first, concept.targetConcept == .style else { return nil }
+        return [concept.trigger: "the visual style of the entire image or clip"]
+    }
 
     /// A skill directory path. Relative paths resolve against `directory`, the folder that holds
     /// the job file, never against the process's working directory (see `resolvedURL(for:)`).

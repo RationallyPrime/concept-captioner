@@ -202,7 +202,7 @@ extension StudioSession {
             guard await ask(.discardCaptionDrafts(warning: warning)) == .confirm else { return nil }
         }
         var decision = StudioCloseDecision.stop(discardingPendingResult: false)
-        if gpu.hasRunningPod || busy || editing || chatGPT.isBusy || gpu.isBusy {
+        if gpu.hasRunningPod || busy || editing || chatGPT.isBusy || openRouter.isBusy || gpu.isBusy {
             switch await ask(.stopWork(runningWork(for: purpose))) {
             case .confirm: break
             case .alternate: decision = .keepRunning
@@ -244,6 +244,7 @@ extension StudioSession {
     func leaveComputerRunning() async {
         chatGPTWorkGeneration += 1
         await chatGPT.cancelAndWait()
+        await openRouter.cancelAndWait()
         task?.cancel()
         editTask?.cancel()
         stopImageAnalysis()

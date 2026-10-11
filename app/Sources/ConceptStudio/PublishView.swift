@@ -8,19 +8,20 @@ struct PublishView: View {
             VStack(alignment: .leading, spacing: StudioStyle.contentSpacing) {
                 StudioSection(
                     title: "Prepare the training dataset",
-                    subtitle: "Put your photos and saved captions online so your training computer can use them."
+                    subtitle: "Upload the included images or clips and their saved captions "
+                        + "so the training computer can download them."
                 ) {
                     if let project = session.project {
-                        LabeledContent("Photos", value: "\(project.images.count)")
+                        LabeledContent("Included samples", value: "\(project.images.count)")
                         LabeledContent("Captions", value: "\(project.images.count(where: { !$0.caption.isEmpty }))")
                         LabeledContent("Final captions", value: "\(project.images.filter(\.isFinal).count)")
                         if project.images.contains(where: \.caption.isEmpty) {
                             StudioNotice(
-                                "Some photos have no caption yet. Review or caption them before training.",
+                                "Some samples have no caption yet. Review or caption them before training.",
                                 symbol: "exclamationmark.triangle"
                             )
                         } else if !project.images.isEmpty {
-                            Label("Every photo has a saved caption", systemImage: "checkmark.circle")
+                            Label("Every included sample has a saved caption", systemImage: "checkmark.circle")
                                 .foregroundStyle(StudioStyle.accent)
                         }
                     }
@@ -34,8 +35,9 @@ struct PublishView: View {
                     }
                     DisclosureGroup("What gets uploaded") {
                         Text(
-                            "The upload includes photos, caption sidecars, response records and the job file "
-                                + "in the shared project layout. Reference faces stay on your Mac."
+                            "The upload contains your included training images or selected video segments, their saved "
+                                + "captions and the project configuration. Approved crops replace the full images. "
+                                + "Excluded samples, editing originals and mapping references are omitted."
                         )
                         .font(.callout).foregroundStyle(StudioStyle.supportingText).padding(.top, 12)
                     }
@@ -62,7 +64,7 @@ struct PublishView: View {
                         : "Uploads to your own account. This action does not rent a computer."
                 ) {
                     Button(
-                        session.demoMode ? "Try publishing the demo" : "Publish dataset",
+                        session.demoMode ? "Simulate dataset upload" : "Publish dataset",
                         systemImage: "arrow.up.doc"
                     ) {
                         session.publish()

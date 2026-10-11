@@ -6,6 +6,23 @@ import Foundation
 public enum UserContent: Sendable, Equatable {
     case text(String)
     case image(data: Data, mediaType: String)
+    case video(data: Data, mediaType: String)
+}
+
+public enum MediaInput {
+    /// A video is the exact selected target, never an image substituted for temporal evidence.
+    public static func content(data: Data, suffix: String) throws -> UserContent {
+        if Sources.isVideo(suffix) {
+            return .video(data: data, mediaType: Sources.videoMediaType(suffix))
+        }
+        let image = try Images.providerImage(data, suffix: suffix)
+        return .image(data: image.data, mediaType: image.mediaType)
+    }
+
+    static func unsupportedVideo() -> ConfigurationError {
+        ConfigurationError("This provider route does not accept video clips. Choose a Gemini video-capable model "
+            + "or review and save the clip's caption manually. No still frame was sent as a video.")
+    }
 }
 
 public struct ChatMessage: Sendable, Equatable {

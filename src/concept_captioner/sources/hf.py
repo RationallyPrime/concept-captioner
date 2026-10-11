@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from ..types import ConfigurationError, Sample
-from .local import IMAGE_SUFFIXES, LocalFolderSource
+from .local import MEDIA_SUFFIXES, VIDEO_SUFFIXES, LocalFolderSource
 
 
 def _require_datasets():
@@ -41,16 +41,31 @@ def _sample_id(row: dict[str, Any], index: int, id_column: str | None) -> str:
     return str(index)
 
 
-def _encode(image: Any) -> tuple[bytes, str]:
+def _encode(image: Any, *, video: bool = False) -> tuple[bytes, str]:
     """PIL image (or datasets Image dict) -> (bytes, suffix)."""
+    if video and (
+        not isinstance(image, dict)
+        or Path(image.get("path") or "").suffix.lower() not in VIDEO_SUFFIXES
+    ):
+        raise ConfigurationError(
+            "a Hugging Face Video column needs a byte/path descriptor with an MP4, MOV or M4V filename"
+        )
     if isinstance(image, dict) and image.get("bytes"):
         data = image["bytes"]
         suffix = Path(image.get("path") or "").suffix.lower() or ".png"
-        return data, suffix if suffix in IMAGE_SUFFIXES else ".png"
+        return data, suffix if suffix in MEDIA_SUFFIXES else ".png"
+    if isinstance(image, dict) and image.get("path"):
+        path = Path(image["path"])
+        if path.suffix.lower() in VIDEO_SUFFIXES:
+            return path.read_bytes(), path.suffix.lower()
     from PIL import Image
 
     if isinstance(image, dict) and image.get("path"):
         image = Image.open(image["path"])
+    if not isinstance(image, Image.Image):
+        raise ConfigurationError(
+            "unsupported decoded Hugging Face media; use an Image or Video byte/path descriptor"
+        )
     out = io.BytesIO()
     fmt = (getattr(image, "format", None) or "PNG").upper()
     if fmt == "JPEG":
@@ -74,7 +89,7 @@ class HFDatasetSource:
         token: str | None = None,
     ) -> None:
         _require_datasets()
-        from datasets import load_dataset
+        from datasets import Video, load_dataset
 
         self.repo_id = repo_id
         self.split = split
@@ -85,6 +100,9 @@ class HFDatasetSource:
             raise ConfigurationError(
                 f"dataset has no column {image_column!r}; columns: {self._dataset.column_names}"
             )
+        self._video = isinstance(self._dataset.features[image_column], Video)
+        if self._video:
+            self._dataset = self._dataset.cast_column(image_column, Video(decode=False))
 
     @property
     def dataset(self):
@@ -102,7 +120,7 @@ class HFDatasetSource:
 
     async def samples(self) -> AsyncIterator[Sample]:
         for index, row in enumerate(self._dataset):
-            data, suffix = _encode(row[self.image_column])
+            data, suffix = _encode(row[self.image_column], video=self._video)
             yield Sample(sample_id=_sample_id(row, index, self.id_column), data=data, suffix=suffix)
 
 
@@ -127,6 +145,13 @@ class HFDatasetSink:
         push: bool = True,
     ) -> None:
         _require_datasets()
+        if isinstance(source, LocalFolderSource):
+            videos = [p.suffix.lower() in VIDEO_SUFFIXES for p in source.files]
+            if any(videos) and not all(videos):
+                raise ConfigurationError(
+                    "Python tabular Hugging Face output does not support mixed images and clips; "
+                    "save local sidecars or publish an imagefolder dataset from Concept Studio"
+                )
         self.source = source
         if target_repo_id is None:
             if isinstance(source, HFDatasetSource):
@@ -177,13 +202,18 @@ class HFDatasetSink:
                 if column in dataset.column_names:
                     dataset = dataset.remove_columns(column)
         else:
-            from datasets import Dataset, Image
+            from datasets import Dataset, Image, Video
 
             files = self.source.files
             ids = [p.name for p in files]
+            feature = (
+                Video(decode=False)
+                if files and all(p.suffix.lower() in VIDEO_SUFFIXES for p in files)
+                else Image()
+            )
             dataset = Dataset.from_dict(
                 {"image": [str(p) for p in files], "file_name": ids}
-            ).cast_column("image", Image())
+            ).cast_column("image", feature)
         captions = [self._captions.get(i) or self._existing_captions.get(i) or "" for i in ids]
         records = [
             json.dumps(
@@ -260,11 +290,11 @@ def pull_images(
     out.mkdir(parents=True, exist_ok=True)
     written = 0
     for index, row in enumerate(source.dataset):
-        data, suffix = _encode(row[image_column])
+        data, suffix = _encode(row[image_column], video=source._video)
         sample_id = _sample_id(row, index, None)
         name = (
             sample_id
-            if Path(sample_id).suffix.lower() in IMAGE_SUFFIXES
+            if Path(sample_id).suffix.lower() in MEDIA_SUFFIXES
             else Path(sample_id).stem + suffix
         )
         (out / name).write_bytes(data)

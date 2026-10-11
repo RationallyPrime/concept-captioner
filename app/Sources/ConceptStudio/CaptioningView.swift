@@ -13,7 +13,7 @@ struct CaptioningView: View {
                     subtitle: "Choose a model and the format your training model needs."
                 ) {
                     Form {
-                        Picker("Account", selection: $session.endpointKind) {
+                        Picker("Captioning provider", selection: $session.endpointKind) {
                             ForEach(ProviderChoices.kinds, id: \.self) { Text(ProviderChoices.title($0)).tag($0) }
                         }.disabled(session.busy)
                         if session.endpointKind == "openai", session.openAIUsesChatGPT, !session.demoMode {
@@ -32,20 +32,20 @@ struct CaptioningView: View {
                             set: { session.project?.job.profile = $0; session.saveProject() }
                         )) {
                             ForEach(profiles, id: \.self) { Text(profileTitle($0)).tag($0) }
-                        }
+                        }.disabled(session.demoMode)
                     }.formStyle(.columns)
                     if session.endpointKind == "openai" || (session.useCritic && session.criticKind == "openai") {
                         ChatGPTCaptioningControls(session: session)
                     }
                     Text(
-                        "Your concept boundaries guide every caption. "
-                            + "The format controls how that description is written."
+                        "The captioning model describes each selected image or clip according to your concept. "
+                            + "The caption format is the text structure expected by the diffusion model you will train."
                     )
                     .font(.callout).foregroundStyle(StudioStyle.supportingText)
                     Toggle("Have a second model check the caption", isOn: $session.useCritic)
                     if session.useCritic {
                         Form {
-                            Picker("Reviewer account", selection: $session.criticKind) {
+                            Picker("Reviewer provider", selection: $session.criticKind) {
                                 ForEach(ProviderChoices.kinds, id: \.self) { Text(ProviderChoices.title($0)).tag($0) }
                             }.disabled(session.busy)
                             if session.criticKind == "openai", session.openAIUsesChatGPT, !session.demoMode {
@@ -65,7 +65,8 @@ struct CaptioningView: View {
                         }.formStyle(.columns)
                         Text(
                             "The reviewer can reject a caption with notes. "
-                                + "This adds a second provider request per photo."
+                                + "It reads the same target, can request a revision and check it again, "
+                                + "and uses additional account credits."
                         )
                         .font(.callout).foregroundStyle(StudioStyle.supportingText)
                     }
@@ -105,7 +106,7 @@ struct CaptioningView: View {
                             Picker("Structured response mode", selection: $session.outputMode) {
                                 ForEach(OutputMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                             }
-                            Stepper("\(session.concurrency) photos at once", value: $session.concurrency, in: 1 ... 16)
+                            Stepper("\(session.concurrency) samples at once", value: $session.concurrency, in: 1 ... 16)
                             if session.endpointKind == "vllm" {
                                 TextField(
                                     "Server URL for this project (blank uses Settings)",
@@ -137,28 +138,30 @@ struct CaptioningView: View {
                     }.padding(.top, 12)
                 }.disabled(session.busy)
                 Divider()
-                StudioSection(title: "Write and watch") {
+                StudioSection(title: "Captioning results") {
                     if session.demoMode {
-                        Picker("Demo outcome to try", selection: $session.scenario) {
+                        Picker("Simulated outcome", selection: $session.scenario) {
                             ForEach(DemoScenario.allCases) { Text($0.rawValue.capitalized).tag($0) }
                         }
                         Text(
-                            "Enable the reviewer to try Rejected. Clear a mapping on Mapping to try Needs mapping."
+                            "These are prepared FLUX captions for the three synthetic demo photos. "
+                                + "No captioning model is called. Enable the reviewer to simulate rejection, "
+                                + "or clear an assignment on Mapping to see a sample held for review."
                         )
                         .font(.callout).foregroundStyle(StudioStyle.supportingText)
                     }
                     if session.unmappedCount > 0 {
                         StudioNotice(
-                            "\(session.unmappedCount) photos still need mapping. "
+                            "\(session.unmappedCount) samples still need concept assignments. "
                                 + "They will be skipped until you confirm them.",
                             symbol: "person.crop.rectangle"
                         )
                     }
                     if session.project?.images.isEmpty == true {
                         ContentUnavailableView(
-                            "Add photos first",
+                            "Import images or clips first",
                             systemImage: "photo.on.rectangle",
-                            description: Text("Import your image set on Images, then return here.")
+                            description: Text("Use Images to add the training data for your concept.")
                         )
                     }
                     LazyVStack(alignment: .leading, spacing: 14) {
@@ -218,7 +221,7 @@ struct CaptioningView: View {
     }
 
     private var captionCost: String {
-        if session.demoMode { return "Demo captioning costs $0 and stays offline." }
+        if session.demoMode { return "Shows prepared captions. No model request or charge." }
         if session.usesChatGPTForThisRun {
             return "OpenAI requests use your ChatGPT plan. Any other provider uses its own account credits."
         }
@@ -233,6 +236,7 @@ struct CaptioningView: View {
         [
             "flux-image": "FLUX · image captions",
             "ltx-image": "LTX · image captions",
+            "ltx-video": "LTX · video captions",
             "h3-still": "H3 · still-image captions",
             "plain": "Plain prose",
         ][profile] ?? profile
