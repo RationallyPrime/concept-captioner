@@ -1,8 +1,30 @@
 import ConceptCore
 import SwiftUI
 
+/// Provider vocabulary and default model ids for every view. Lane app-contract moves this table into
+/// StudioEndpointChoices.swift; at integration the views read that table instead.
 enum ModelChoices {
     static let providers = ["openrouter", "vercel", "gateway/anthropic", "google", "anthropic", "openai", "vllm"]
+
+    /// The model offered when a provider is chosen and the model field is empty or still holds the
+    /// previous provider's default. `nil` for OpenAI with a ChatGPT plan, whose models come from the plan.
+    static func defaultModel(for kind: String, chatGPTPlan: Bool = false) -> String? {
+        switch kind {
+        case "google": "gemini-3.8-flash"
+        case "anthropic", "gateway/anthropic": "claude-sonnet-4-6"
+        case "openai": chatGPTPlan ? nil : "gpt-5.2"
+        case "vllm": "Qwen/Qwen3-VL-8B-Instruct"
+        default: "google/gemini-3.8-flash"
+        }
+    }
+
+    /// The model to show after switching from `old` to `new`: a typed model is never replaced.
+    static func model(afterSwitchingFrom old: String, to new: String, current: String, chatGPTPlan: Bool) -> String {
+        let replaceable = current.isEmpty || current == defaultModel(for: old, chatGPTPlan: chatGPTPlan)
+        guard replaceable, let model = defaultModel(for: new, chatGPTPlan: chatGPTPlan) else { return current }
+        return model
+    }
+
     static func title(_ kind: String) -> String {
         [
             "openrouter": "OpenRouter gateway",
@@ -205,15 +227,14 @@ struct CaptioningView: View {
             Task { await session.prepareChatGPTModels() }
         }
         .onChange(of: session.openAIUsesChatGPT) { _, _ in session.rememberChoices() }
-        .onChange(of: session.endpointKind) { _, kind in
-            switch kind {
-            case "google": session.modelName = "gemini-3.8-flash"
-            case "anthropic", "gateway/anthropic": session.modelName = "claude-sonnet-4-6"
-            case "openai":
-                if !session.openAIUsesChatGPT { session.modelName = "gpt-5.2" }
-            case "vllm":
-                session.modelName = session.usingPodCaptioner ? session.gpu.captionModel : "Qwen/Qwen3-VL-8B-Instruct"
-            default: session.modelName = "google/gemini-3.8-flash"
+        .onChange(of: session.endpointKind) { old, kind in
+            if kind == "vllm", session.usingPodCaptioner {
+                session.modelName = session.gpu.captionModel
+            } else {
+                session.modelName = ModelChoices.model(
+                    afterSwitchingFrom: old, to: kind, current: session.modelName,
+                    chatGPTPlan: session.openAIUsesChatGPT
+                )
             }
         }
     }
@@ -224,6 +245,8 @@ struct CaptioningView: View {
             HStack(spacing: 16) {
                 Button("Start captioning", systemImage: "play.fill") { session.caption(overwrite: overwrite) }
                     .buttonStyle(.borderedProminent).tint(StudioStyle.actionTint).fixedSize()
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .help("Start captioning (⌘↩)")
                     .disabled(session.busy || session.project?.images.isEmpty != false
                         || (!session.demoMode && session.usesChatGPTForThisRun && !session.chatGPTReady))
                     .disabled(session.chatGPTConfigurationIssue != nil)

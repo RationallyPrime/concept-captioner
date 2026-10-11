@@ -67,6 +67,8 @@ struct PublishView: View {
                     ) {
                         session.publish()
                     }.buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .help("Publish the dataset (⌘↩)")
                         .disabled(session.busy || (!session.demoMode && session.repoID.isEmpty))
                     if session.busy { ProgressView(session.message) }
                     Text(

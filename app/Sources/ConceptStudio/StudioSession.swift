@@ -357,5 +357,6 @@ final class StudioSession {
     var quitDecision: StudioCloseDecision?
     /// The GPU workspace whose RunPod and Hub keys were last read from the Keychain.
     @ObservationIgnored weak var gpuKeysLoadedFor: GPUWorkspace?
+
     // MARK: - End lane ui stored state
 }

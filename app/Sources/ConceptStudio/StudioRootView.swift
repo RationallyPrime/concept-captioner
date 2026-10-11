@@ -193,10 +193,10 @@ struct StudioFailureAlert: ViewModifier {
                 Button("OK") { session.errorMessage = nil }
             }
         } message: { Text(session.errorMessage ?? "") }
-        .onChange(of: session.gpu.failure) { _, failure in
-            guard let failure else { return }
-            session.gpu.failure = nil
-            if session.errorMessage == nil { session.errorMessage = failure }
-        }
+            .onChange(of: session.gpu.failure) { _, failure in
+                guard let failure else { return }
+                session.gpu.failure = nil
+                if session.errorMessage == nil { session.errorMessage = failure }
+            }
     }
 }

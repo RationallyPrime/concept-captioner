@@ -18,6 +18,8 @@ struct ConceptsView: View {
                     Divider()
                 }
                 Button("Add another concept", systemImage: "plus") { editing = nil; showEditor = true }
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .help("Add a concept (⌘↩)")
                     .disabled(session.busy)
                 Text(
                     "Use one clear reference face per person for mapping suggestions. "

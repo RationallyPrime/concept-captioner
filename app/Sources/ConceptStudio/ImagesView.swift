@@ -85,6 +85,8 @@ struct ImagesView: View {
     @ViewBuilder private var importButtons: some View {
         Button("Import folder…", systemImage: "folder") { session.importFolder() }
             .buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
+            .keyboardShortcut(.return, modifiers: .command)
+            .help("Import a folder of photos (⌘↩)")
         Button("Choose photos…") { session.importImages(ProjectAccess.chooseImages()) }
         PhotosPicker(selection: $photos, matching: .images) { Label("Apple Photos", systemImage: "photo") }
             .disabled(session.demoMode)

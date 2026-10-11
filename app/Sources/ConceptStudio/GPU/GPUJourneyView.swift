@@ -118,7 +118,8 @@ struct GPUJourneyView: View {
             Divider()
             StudioSection(
                 title: "Keep your work",
-                subtitle: "Network storage keeps checkpoints after stopping. It is billed separately, even when stopped."
+                subtitle: "Network storage keeps checkpoints after stopping. "
+                    + "It is billed separately, even when stopped."
             ) {
                 Form {
                     Picker("Saved storage", selection: $workspace.selectedVolume) {
@@ -376,6 +377,8 @@ struct TrainingResultSection: View {
                 HStack(spacing: 12) {
                     Button("Retrieve now", systemImage: "arrow.down.circle", action: retrieve)
                         .buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .help("Retrieve the trained model (⌘↩)")
                         .disabled(busy)
                     if busy { ProgressView().controlSize(.small) }
                 }
@@ -394,8 +397,10 @@ struct TrainingResultSection: View {
                     NSWorkspace.shared.activateFileViewerSelecting([url])
                 }
             case .failed?:
-                Label("The run ended without a trained model. Read the training log for the cause.",
-                      systemImage: "exclamationmark.triangle")
+                Label(
+                    "The run ended without a trained model. Read the training log for the cause.",
+                    systemImage: "exclamationmark.triangle"
+                )
             }
         }
     }
@@ -423,11 +428,11 @@ extension StudioSession {
 
 // MARK: - Integration seam for lane gpu (DELETE at integration)
 
-// Lane gpu owns GPUWorkspace and, in this fix round, adds the result state, result privacy, training
-// resolution, budget raise, stray-pod reconciliation and keep-awake. The members below mirror the names lane gpu
-// was using when this view was written (GPUWorkspace.swift / GPUWorkspace+Results.swift on fix/gpu), so that after
-// both lanes merge they collide with the real declarations: delete this whole block, then fix any call site
-// whose name lane gpu changed. Only `failure` has no lane gpu counterpart yet; see the lane ui notes.
+/// Lane gpu owns GPUWorkspace and, in this fix round, adds the result state, result privacy, training
+/// resolution, budget raise, stray-pod reconciliation and keep-awake. The members below mirror the names lane gpu
+/// was using when this view was written (GPUWorkspace.swift / GPUWorkspace+Results.swift on fix/gpu), so that after
+/// both lanes merge they collide with the real declarations: delete this whole block, then fix any call site
+/// whose name lane gpu changed. Only `failure` has no lane gpu counterpart yet; see the lane ui notes.
 struct TrainingResult: Equatable {
     enum State: Equatable {
         case training

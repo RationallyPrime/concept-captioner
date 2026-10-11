@@ -356,7 +356,7 @@ struct WindowCloseGuard: NSViewRepresentable {
         let session: StudioSession
         private var allowed = false
         /// SwiftUI's delegate; every message this guard does not handle goes to it.
-        nonisolated(unsafe) private var original: (any NSWindowDelegate)?
+        private nonisolated(unsafe) var original: (any NSWindowDelegate)?
 
         init(session: StudioSession) {
             self.session = session
