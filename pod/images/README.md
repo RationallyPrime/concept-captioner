@@ -1,29 +1,36 @@
 # images
 
-Current public release: `ghcr.io/rationallyprime/concept-captioner-pod-{base,aitoolkit,ltx}:v0.2.0-overnight20261011-r2`.
-All three final tags passed actual anonymous Docker pulls on cx53 using fresh empty client
-configurations. Their OCI revision is `98708207dc0618ec798f76e7af40811e4f911a69`; the accepted
-CFR wrapper SHA-256 is `b971993a54580f37e6e682b0c382bb26d8d17001a3aecfb18f300a13955bc452`.
+Current public release: `ghcr.io/rationallyprime/concept-captioner-pod-{base,aitoolkit,ltx}:v0.2.2-clean-20261011`,
+a **clean build from commit `2789c1d33a4aec015ad1728f24b72be3445e4b8f`** (`main`): the three
+Dockerfiles as committed, built on cx53 with `docker buildx build` and no overlay (the base image
+reused the layer cache of the previous clean build; the two trainer images were built after the
+build cache had been pruned). The images carry no OCI revision label; this table is the record of
+which commit they came from.
 
 | image suffix | public manifest digest |
 | --- | --- |
-| `base` | `sha256:65e6b5ec1c139687b4d21d4bd7860a22be0e10c36626e8bc05eec4107e67551e` |
-| `aitoolkit` | `sha256:e7a84abe46e31eba2ce33a5aaf446fb1e498d1e451fa7c4ff96523faa0d31337` |
-| `ltx` | `sha256:e236160afed735c80709d372d500b09f059aee32768898ddfbbdae9d8551ba66` |
+| `base` | `sha256:5a10967a5302c4484a390673b9a6f8422e011a1a7d4f97e071410e19d5cf8779` |
+| `aitoolkit` | `sha256:c8fc06b7552114e8ad9050e9d16cdd92bb42a5821245a7601792fd4884dc158f` |
+| `ltx` | `sha256:e1c4a492ddd889db3e3ebc1f48e1c887051fd3eafe7ebbee77f34ba2f8b561c6` |
 
-Initial runtime images were rebuilt from `017d79f` with the repository Dockerfiles. The
-accepted constant-frame-rate gate from `b1d0bef` and selected-checkpoint custody repair from
-`98708207` were overlaid by exact source hashes, retaining those pinned trainer dependency layers.
-The actual installed catalog SHA is `82615993a7fc8df098a95d492e0b899bd5a746d901830f6e865a395869683591`;
-the generator SHA is `d36efeafb4a9354d4952f3d3ed8b19a87204b639de44f56bb317d5c7d0a12451`.
-Both hashes and the CFR wrapper hash were checked in all three images. An actual r2 CPU witness
-also verifies that replacing the original model/config after preparation leaves the selected
-private snapshot unchanged. Final CPU control smoke passed authentication,
-TensorBoard sessions, file downloads and planning with fake GPUs. Current actual CUDA checks
-and historical tiny trainer receipts are distinguished in [POD-STATUS](../docs/POD-STATUS.md).
-Safe build/push/anonymous-pull receipts are in the private notes evidence and on cx53 under
-`/home/hive/work/concept-captioner-pod-verify-20261010/logs`. Docker is not installed on the
-Mac; this existing x86 build host produces the images.
+Checked on cx53 after the push: each image pulled anonymously by digest with an empty Docker
+client configuration, and each tag resolves anonymously to the digest above. The base build ran
+`check_vllm_flags.py` (23 flags found, build passed). The CPU control smoke ran against the
+pushed base image: authentication (401 without the bearer), service catalog,
+TensorBoard session and its cookie scope, run files with a range read, and planning with two
+fake GPUs all passed. The LTX image has TensorBoard 2.21.0, LTX-2 at `9ec55f9f` and
+`LTX_HUB_REVISION` `dfcc2108383fe1aaa0584bdf55d368a4bdadd90c`. No real-pod run has used these
+images yet; that is the owner's training run. Receipts are on cx53 under
+`/home/hive/work/cc-clean2-logs` (the `v0.2.1-clean-20261011` receipts stay under `cc-clean-logs`). Docker is not installed on the Mac; this x86 build host
+produces the images.
+
+The previous release, `v0.2.0-overnight20261011-r2` (base `sha256:65e6b5ec…7551e`, aitoolkit
+`sha256:e7a84abe…31337`, ltx `sha256:e236160a…1ba66`), stays published and is what every real-pod
+run so far used. It was not a clean build: runtime images were built from `017d79f`, and two
+source files (the constant-frame-rate gate from `b1d0bef` and the selected-checkpoint custody
+repair from `98708207`) were overlaid by exact source hashes onto those layers. The overlay
+recipes were never committed. Current actual CUDA checks and historical tiny trainer receipts
+are distinguished in [POD-STATUS](../docs/POD-STATUS.md).
 
 | file | purpose |
 | --- | --- |
@@ -177,12 +184,12 @@ refuses to start without the token, so a pod created without it exits immediatel
 
 Actual builds, anonymous pulls, runtime receipts and their exact scope are recorded in
 [POD-STATUS](../docs/POD-STATUS.md). The three repository Dockerfiles built successfully on
-cx53 with the pinned vLLM cu129 stack, FlashInfer cache, AI Toolkit stack and LTX workspace;
-final r2 overlays preserve those installed dependency layers and verify accepted source hashes.
+cx53 with the pinned vLLM cu129 stack, FlashInfer cache, AI Toolkit stack and LTX workspace, and
+`v0.2.2-clean-20261011` is that build from `main` with nothing overlaid.
 
 On the real CUDA 13.0 Blackwell hosts used for this project, vLLM returned structured captions,
 both trainers produced checkpoints and loss curves, FLUX generation/Resume completed, and the
-final r2 LTX image trained the approved clip, resumed it and generated a matched 49-frame
+r2 LTX image trained the approved clip, resumed it and generated a matched 49-frame
 base/LoRA video pair on a 32 GB GPU/62 GB host. Actual native checksum-verified collection
 and stopped-pod receipts are recorded separately in that status.
 These are functional infrastructure checks with synthetic inputs and tiny checkpoints, not

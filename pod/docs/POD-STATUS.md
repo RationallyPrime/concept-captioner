@@ -1,15 +1,17 @@
 # POD-STATUS
 
-State after the 2026-10-11 source review repairs. The published-image/live evidence below
-remains the overnight snapshot; the repairs have not been rebuilt into images or GPU-tested.
-The overnight generation,
-run-history and approved-video code is published in public images at the accepted source
-`98708207` (tag `v0.2.0-overnight20261011-r2`). Actual FLUX generation and Resume passed on
-the r1 AI Toolkit image; r2 AI Toolkit has a CPU witness only, and its checkpoint-snapshot
-path has not run on a FLUX GPU. LTX approved-video training, Resume and matched video
-generation passed on the final r2 image. Both proof pods were stopped after verification
-and terminated in the owner-authorized afternoon cleanup; outputs were secured locally and
-on the network volume.
+State after the 2026-10-11 source review repairs. The current tag,
+`v0.2.2-clean-20261011`, is a clean build of `main` at `2789c1d33a4aec015ad1728f24b72be3445e4b8f`
+(the review repairs and the direct dataset upload included) with the repository Dockerfiles and
+no overlay; it has had anonymous pulls by digest and a CPU smoke but no real-pod run yet. The
+earlier clean tag `v0.2.1-clean-20261011` (from `ce52a220`, before those repairs) stays
+published. The real-pod evidence below was gathered on the overnight
+`v0.2.0-overnight20261011-r2` tag (accepted source `98708207`, with two files overlaid onto older
+layers), which also stays published. Actual FLUX generation and Resume passed on the r1 AI
+Toolkit image; r2 AI Toolkit has a CPU witness only, and its checkpoint-snapshot path has not
+run on a FLUX GPU. LTX approved-video training, Resume and matched video generation passed on
+the final r2 image. Both proof pods were stopped after verification and terminated in the
+owner-authorized afternoon cleanup; outputs were secured locally and on the network volume.
 Historical live checks date from lab commit `e620882` (2026-10-10, last live read 21:26 UTC). The
 contract is [POD-SPEC.md](POD-SPEC.md). The day-by-day record, with every timestamp, digest,
 hash and billing bucket, is in
@@ -26,7 +28,8 @@ hash and billing bucket, is in
   local dataset installation, AI Toolkit
   (FLUX) and LTX launchers, LoRA push.
 - **podctl** (`pod/podctl`): command-line client for the agent.
-- **Images**, public on GHCR under tag `v0.2.0-overnight20261011-r2`: `concept-captioner-pod-base`,
+- **Images**, public on GHCR under tag `v0.2.2-clean-20261011` (clean build from commit
+  `2789c1d3`; digests in [images/README](../images/README.md)): `concept-captioner-pod-base`,
   `-aitoolkit`, `-ltx`; plus a fake image for compose tests. Public RunPod template
   `87fxs5v8fn` points at the base image; it carries no token, and the agent refuses to start
   without one.
@@ -133,7 +136,11 @@ dependencies; Ruff check/format clean. These checks use fake agent/model seams, 
 - Pinned primary-source witnesses are cached under
   `/tmp/concept-captioner-overnight-upstream/manifest.json`: AI Toolkit `f7a1fb9…`, LTX-2
   `9ec55f9…`. The old public `v0.1.0-verify20261010` tags do not include these services or the
-  preceding hardening round. The final `v0.2.0-overnight20261011-r2` images do. Runtime source
+  preceding hardening round. The `v0.2.0-overnight20261011-r2` images do, and
+`v0.2.2-clean-20261011` rebuilds them from `main` at `2789c1d3` without the overlay (verified
+by anonymous digest pulls, the base `check_vllm_flags.py` build step, a CPU control smoke on the
+published base image, and TensorBoard 2.21.0 plus the LTX-2 `9ec55f9f` pin in the LTX image).
+The r2 history: runtime source
   `017d79f` was built with the repository Dockerfiles; the independently accepted CFR repair
   at `b1d0bef` and selected-checkpoint custody repair at `98708207` were overlaid by exact
   source hashes, preserving those trainer runtime layers. All three final tags passed anonymous
