@@ -171,6 +171,17 @@ extension StudioSession {
     }
 }
 
+/// The open project folder paired with the GPU workspace it belongs to (the workspace is replaced per project).
+private struct TrainingDestination: Equatable {
+    let workspace: ObjectIdentifier
+    let folder: URL?
+
+    @MainActor init(_ session: StudioSession) {
+        workspace = ObjectIdentifier(session.gpu)
+        folder = session.demoMode ? nil : session.project?.directory
+    }
+}
+
 /// The one presentation path for blocking failures: a window-attached alert. Progress and recoverable
 /// states stay inline beside the work they describe.
 struct StudioFailureAlert: ViewModifier {
@@ -193,6 +204,10 @@ struct StudioFailureAlert: ViewModifier {
                 Button("OK") { session.errorMessage = nil }
             }
         } message: { Text(session.errorMessage ?? "") }
+            .onChange(of: TrainingDestination(session), initial: true) { _, destination in
+                // Results without a Hub token are saved inside the open project.
+                session.gpu.projectFolder = destination.folder
+            }
             .onChange(of: session.gpu.failure) { _, failure in
                 guard let failure else { return }
                 session.gpu.failure = nil

@@ -497,6 +497,12 @@ extension GPUWorkspace {
         await publishResult()
     }
 
+    /// Where results without a Hub token are saved (`<project>/results/<run-id>/`); StudioRootView sets it.
+    var projectFolder: URL? {
+        get { nil }
+        set { _ = newValue }
+    }
+
     /// A blocking failure for the window alert (no lane gpu counterpart yet; GPU failures reach `message`).
     var failure: String? {
         get { nil }
