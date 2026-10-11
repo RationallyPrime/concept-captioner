@@ -46,10 +46,13 @@ All nine modules of CORE-SPEC, with focused tests:
   the shared Caption schema (`gemini-3.8-flash`). The exact approved synthetic MP4 contained
   nine frames at 512 × 288; production returned HTTP 200 and a usable Caption, with 4,389
   input / 76 output tokens. A controlled repair added explicit 24 FPS video sampling after
-  the default-sampling request returned 400. [Receipts and limits](../../notes/evidence/2026-10-11-video-native-proof/README.md)
-  distinguish functional decoding from caption quality and every-frame observation.
-- **Pod agent and RunPod**, through app code compiled with this library: training-event reads
-  for FLUX and LTX, and a real pod stop (details in APP-STATUS and POD-STATUS).
+  the default-sampling request returned 400. The private notes receipt at
+  `evidence/2026-10-11-video-native-proof/README.md` records all three requests. This
+  establishes functional decoding, not caption quality or every-frame observation.
+- **Pod agent and RunPod**, through app code compiled with this library: historical training-event
+  reads and pod stop; current native model/comparison downloads for both FLUX and LTX with
+  matching hashes and offline project reopen. The operator also verified current GPU training,
+  resume, generation and stop separately (details in APP-STATUS and POD-STATUS).
 
 ## Verified offline only
 

@@ -169,7 +169,10 @@ Save trained model to this Mac retrieves the actual model files.
 
 Saved training runs retain the dataset revision reported by the agent, settings, available
 checkpoints, outputs and recorded cost information. Load settings for repeat copies the selected
-run's settings into Training; edit them before starting a new run. Resume latest checkpoint
+run's settings into Training; edit them before starting a new run. It initially reuses that
+run's recorded dataset revision. **Use this project's current dataset instead** refreshes the
+dataset revision, caption format, concept triggers and video status while preserving the
+training settings you edited. Resume latest checkpoint
 continues on the same saved storage when the selected trainer and checkpoint support it.
 Missing revisions or wallet information are shown as unavailable. GPU estimates exclude
 separately billed storage.

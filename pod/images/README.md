@@ -1,11 +1,29 @@
 # images
 
-Container images for the pod (POD-SPEC §6). All three CUDA images have been built and pushed
-on cx53 with `docker buildx build --platform=linux/amd64`; all three public images have passed
-actual anonymous pulls, including both exact trainer digests on 2026-10-10 at 21:25 UTC.
-Live agent, vLLM, tiny FLUX/LTX checkpoints, curves, Hub roundtrips and final publication
-receipts are recorded in `../docs/POD-STATUS.md`. Docker is not
-available on the development Mac, so builds use the existing build host.
+Current public release: `ghcr.io/rationallyprime/concept-captioner-pod-{base,aitoolkit,ltx}:v0.2.0-overnight20261011-r2`.
+All three final tags passed actual anonymous Docker pulls on cx53 using fresh empty client
+configurations. Their OCI revision is `98708207dc0618ec798f76e7af40811e4f911a69`; the accepted
+CFR wrapper SHA-256 is `b971993a54580f37e6e682b0c382bb26d8d17001a3aecfb18f300a13955bc452`.
+
+| image suffix | public manifest digest |
+| --- | --- |
+| `base` | `sha256:65e6b5ec1c139687b4d21d4bd7860a22be0e10c36626e8bc05eec4107e67551e` |
+| `aitoolkit` | `sha256:e7a84abe46e31eba2ce33a5aaf446fb1e498d1e451fa7c4ff96523faa0d31337` |
+| `ltx` | `sha256:e236160afed735c80709d372d500b09f059aee32768898ddfbbdae9d8551ba66` |
+
+Initial runtime images were rebuilt from `017d79f` with the repository Dockerfiles. The
+accepted constant-frame-rate gate from `b1d0bef` and selected-checkpoint custody repair from
+`98708207` were overlaid by exact source hashes, retaining those pinned trainer dependency layers.
+The actual installed catalog SHA is `82615993a7fc8df098a95d492e0b899bd5a746d901830f6e865a395869683591`;
+the generator SHA is `d36efeafb4a9354d4952f3d3ed8b19a87204b639de44f56bb317d5c7d0a12451`.
+Both hashes and the CFR wrapper hash were checked in all three images. An actual r2 CPU witness
+also verifies that replacing the original model/config after preparation leaves the selected
+private snapshot unchanged. Final CPU control smoke passed authentication,
+TensorBoard sessions, file downloads and planning with fake GPUs. Current actual CUDA checks
+and historical tiny trainer receipts are distinguished in [POD-STATUS](../docs/POD-STATUS.md).
+Safe build/push/anonymous-pull receipts are in the private notes evidence and on cx53 under
+`/home/hive/work/concept-captioner-pod-verify-20261010/logs`. Docker is not installed on the
+Mac; this existing x86 build host produces the images.
 
 | file | purpose |
 | --- | --- |
@@ -26,7 +44,7 @@ available on the development Mac, so builds use the existing build host.
 /opt/venvs/ltx/                     LTX-2 workspace, torch 2.13.0+cu132         (ltx image; freeze.txt)
 /opt/ai-toolkit/  /opt/ltx-2/       the trainers' checkouts (ltx-2 also holds the uv.lock the build resolved)
 /opt/src/{concept-captioner,podagent}  the sources the agent venv was installed from (record only)
-/opt/pod/scripts/*.py               pull_dataset.py, push_lora.py, launch_aitoolkit.py, launch_ltx.py
+/opt/pod/scripts/*.py               pull_dataset.py, push_lora.py, launch_aitoolkit.py, launch_ltx.py, generate_results.py
 /opt/pod/entrypoint.sh
 /workspace                          the network volume (POD-SPEC §6.4); nothing of value lives elsewhere
 ```
@@ -81,7 +99,7 @@ index and NATTEN cu132. So:
 | image | wheels | host driver | RunPod |
 | --- | --- | --- | --- |
 | `…-pod-base` | vLLM cu129 | CUDA 12.x driver (R570+; R525+ via minor-version compatibility, unverified) | any GPU host |
-| `…-pod-aitoolkit`, `…-pod-ltx` | base + CUDA 13.0 / 13.2 | **R580 or newer** | filter the pod's CUDA version to 13.0+ when creating it (`allowedCudaVersions` in the REST v2 pod create; the console's "CUDA version" filter) |
+| `…-pod-aitoolkit`, `…-pod-ltx` | base + CUDA 13.0 / 13.2 | **R580 or newer** | filter the pod's CUDA version to 13.0+ when creating it (`gpu.minCudaVersion` in the REST v2 pod create; the console's "CUDA version" filter) |
 
 Mixing cu129 and cu13x venvs in one image is fine: each venv has its own `nvidia-*` libraries, and
 one driver that satisfies the strictest (13.2) satisfies all. The base's `NVIDIA_REQUIRE_CUDA`
@@ -140,8 +158,9 @@ podctl --url http://127.0.0.1:8800 health
 The compose file publishes 8000 beside 8800 and sets `PODAGENT_FAKE_HOST=0.0.0.0`, so
 vLLM's fake readiness endpoint is reachable from the host. Fake and real TensorBoard both bind
 loopback and are shown through the authenticated agent at `/tensorboard/`; port6006 is never
-published. The browser's first navigation sends the bearer and receives a cookie scoped to
-that route for its subresources.
+published. The app first calls authenticated `POST /tensorboard-session`, installs its derived HMAC
+cookie scoped to `/tensorboard`, then loads the page and its subresources. The cookie cannot
+authenticate other agent API routes; the bearer is not a browser cookie.
 
 `Dockerfile.fake` installs `pod/agent` alone (no `[pod]` extra, no concept-captioner); it exists to
 drive the fake services (POD-SPEC §3, §6.3) and is not a stand-in for the CUDA images.
@@ -154,40 +173,27 @@ refuses to start without the token, so a pod created without it exits immediatel
 `nvidia-smi` is not in the image: the NVIDIA container runtime mounts it (the base sets
 `NVIDIA_DRIVER_CAPABILITIES=compute,utility`), which is how `/gpus` reads the inventory.
 
-## What to verify on a real pod
+## Verification record and remaining coverage
 
-Record the pod id, image tag and outcome in `docs/POD-STATUS.md` ("Verified on a real pod").
+Actual builds, anonymous pulls, runtime receipts and their exact scope are recorded in
+[POD-STATUS](../docs/POD-STATUS.md). The three repository Dockerfiles built successfully on
+cx53 with the pinned vLLM cu129 stack, FlashInfer cache, AI Toolkit stack and LTX workspace;
+final r2 overlays preserve those installed dependency layers and verify accepted source hashes.
 
-1. **The builds succeed as written.** Three things were pinned from upstream metadata and never
-   executed here: the `+cu129` vLLM wheel resolves with the four `+cu129` torch pins (its own
-   metadata may name `nvidia-cutlass-dsl[cu12]` rather than the PyPI wheel's `[cu13]`; either
-   installs); `flashinfer-jit-cache` from flashinfer.ai is a real multi-gigabyte wheel (a ranged
-   request to the release asset answered a 4.5 KB body on 2026-10-10 — if the install fails, build
-   with `FLASHINFER_JIT_CACHE_VERSION=""`); `uv sync --all-packages --all-extras` enables ltx-core's
-   `natten` extra from a virtual workspace root (the build asserts torch `2.13.0+cu132` and that
-   `natten` is installed, so a wrong assumption fails loudly — fall back to `uv sync --extra natten`
-   at the root, the upstream README's form).
-2. **Driver floor.** On an R570-class host the base image serves a model with vLLM cu129; on an
-   R580+ host both trainer venvs import torch and see the GPU (`torch.cuda.is_available()` from
-   `/opt/venvs/aitoolkit/bin/python` and `/opt/venvs/ltx/bin/python`).
-3. **vLLM without `nvcc`.** Serve the captioning model (`vllm serve <model> --host 0.0.0.0 --port 8000`
-   with `VLLM_API_KEY` set, as the catalog does) on the GPU types the app will offer, including a
-   Blackwell card, and caption one image. A log line about FlashInfer compiling a kernel means the
-   prebuilt cache did not cover it: rebuild with `CUDA_JIT_TOOLCHAIN=1`, or switch the base to the
-   `-devel` tag. `torchcodec` must import against jammy's FFmpeg 4.4 (it supports FFmpeg 4–8).
-4. **ai-toolkit on the runtime base.** `run.py` with a FLUX config trains a few steps; `optimum-quanto`
-   and Triton JIT paths find `gcc` (installed) and fall back cleanly where they need a CUDA
-   compiler (upstream's image is also a runtime image, so this is the configuration upstream ships).
-   Then the POD-SPEC §4.2 items that belong to the wrapper: H3 config keys, `trigger_word`,
-   native TensorBoard logging.
-5. **LTX-2.** `process_dataset.py` and `train.py` run from `/opt/venvs/ltx/bin/python` with the
-   arguments the wrapper writes (POD-SPEC §4.3 VERIFY); VRAM needed per config (the trainer README
-   says 80 GB for the standard configs, 32 GB with the low-VRAM INT8 config).
-6. **`tini` as PID 1.** The entrypoint runs the agent under `tini -s` (apt package on both the
-   CUDA base and the fake image). This is load-bearing, not cosmetic: the supervisor keeps a
-   service's GPUs booked while anything in its process group is alive (`killpg(pgid, 0)`), and a
-   zombie counts as alive, so grandchildren orphaned by a crashed wrapper or vLLM API server must
-   be reaped by init or their GPUs would never be released. Verify on a real pod: `ps -o pid,ppid,
-   stat,cmd` after killing a vLLM API-server process by hand shows the engine workers gone (not
-   `Z`) and `GET /gpus` free within `ORPHAN_KILL_GRACE_S` (5 s).
-7. **Sizes and pull time** on RunPod (the base is pre-cached only for `runpod/*` images, not ours).
+On the real CUDA 13.0 Blackwell hosts used for this project, vLLM returned structured captions,
+both trainers produced checkpoints and loss curves, FLUX generation/Resume completed, and the
+final r2 LTX image trained the approved clip, resumed it and generated a matched 49-frame
+base/LoRA video pair on a 32 GB GPU/62 GB host. Actual native checksum-verified collection
+and stopped-pod receipts are recorded separately in that status.
+These are functional infrastructure checks with synthetic inputs and tiny checkpoints, not
+training-quality measurements.
+
+Coverage that remains open:
+
+- Base-image inference on an R570-class driver; observed trainer hosts used CUDA 13.0 drivers.
+- H3-specific AI Toolkit keys, parquet datasets and GPU configurations beyond those recorded.
+- Recovery after a real agent or vLLM-worker crash. `tini -s` is installed and supervisor
+  process-group ownership is tested, but actual crash/reaping recovery has not been forced.
+- Fresh empty-cache LTX Hub download through the revision-pinned wrapper. This round reused
+  the existing network-volume model cache; the source validation and download-failure paths
+  have focused tests.

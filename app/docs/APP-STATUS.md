@@ -1,8 +1,9 @@
 # ConceptStudio app status
 
 Updated 2026-10-11 after the overnight implementation, based on all seven hardening lanes and
-follow-up `cd5f746`. App/source checks and native demo acceptance below have completed; current
-GPU generation/resume execution is still being verified. See [RUNNING.md](RUNNING.md),
+follow-up `cd5f746`. Source checks, native offline demo checks and bounded current-image
+FLUX/LTX generation, resume and video training checks have completed. Owner acceptance remains
+separate. See [RUNNING.md](RUNNING.md),
 [CORE-STATUS.md](CORE-STATUS.md) and [POD-STATUS.md](../../pod/docs/POD-STATUS.md).
 
 ## Implemented
@@ -68,7 +69,9 @@ check passed, including preserving custom style details through reopening and un
 - 114 offscreen render frames cover Welcome, nine journey screens, Settings, Advanced,
   concept/crop editors, empty/error states and generated/saved-result surfaces in light and
   dark at minimum/default sizes. Native vibrancy and interactions are verified separately.
-- The current integration passes **402 Swift tests** (160 app, 242 Core) and **94 Python tests**.
+- The full implementation gate passed **402 Swift tests** (160 app, 242 Core) and **94 Python tests**.
+  The final dataset-switch repair then passed **23 focused session/history tests**, including
+  the offline demo and current-versus-saved dataset requests, with independent source acceptance.
   Strict SwiftLint is clean; SwiftFormat is clean on 129 source/test files, with two resource
   exclusions. Python Ruff and format checks are clean. The debug bundle builds and explicitly
   links AVKit, whose absence was caught by a valid video-editor render.
@@ -86,16 +89,43 @@ On 2026-10-11, the native Gemini path sent one exact approved synthetic nine-fra
 512 × 288 MP4 and returned HTTP 200 with a usable shared Caption object from
 `gemini-3.8-flash` (4,389 input / 76 output tokens). Explicit 24 FPS sampling repaired
 the initial default-sampling 400, verified first with a single-variable control and then
-the unmodified production client. [Safe receipts](../../notes/evidence/2026-10-11-video-native-proof/README.md)
-record all three requests. This is functional provider acceptance, not a caption-quality
-study, every-source-frame observation or actual trainer preprocessing proof.
+the unmodified production client. The private notes receipt at
+`evidence/2026-10-11-video-native-proof/README.md` records all three requests. This
+is functional provider acceptance, not a caption-quality study, every-source-frame observation
+or actual trainer preprocessing proof.
 
-Still separate from implementation:
+The new FLUX generation service completed a real matched base/LoRA pair at 256 × 256, with
+one prompt, seed 42 and four inference steps. The downloaded PNGs and manifest matched their
+served hashes. Native `retrieveGeneration` and `downloadRun` fetched those real files; an
+offline project reopen restored one run and one comparison with no Keychain or network calls.
+The historical source lacked a dataset revision, start time and cost; the retained proof receipt
+records its row timestamp as the local import time rather than reconstructing those values.
+Resume continued the retained synthetic training run from step 2 to step 3,
+exited successfully and saved a distinct valid checkpoint with step-3 metadata. These small
+checks establish execution, not training quality. The proof GPU was stopped and independently
+read back as Exited. The final checkpoint-snapshot images passed source/hash and CPU control
+checks. LTX preprocessed the approved clip at its derived 512 × 288 × 9 bucket, completed two
+training steps, then resumed to step 3. It generated a real matched base/LoRA pair: each video
+decodes to 49 frames at 512 × 512 and 24 fps. Its complete manifest records the selected step-3
+checkpoint hash. Native collection and offline reopen passed for those model/video files and
+the recorded dataset revision. The LTX proof pod was also stopped and independently read back
+as Exited. The approved input hash is verified at native export and exact-revision Hub download,
+not directly on the pod filesystem.
+
+The current TensorBoard session/cookie handshake passed through the real RunPod proxy,
+including rejected unauthenticated and out-of-scope requests. This proves backend access,
+not native WebKit rendering. Both new proof pods used one 32 GB GPU and 62 GB host RAM; these
+small recipes do not establish a memory guarantee for other datasets or settings.
+
+Current trainer images are published under `v0.2.0-overnight20261011-r2` and verified by
+anonymous digest pulls. The app defaults and public template use these images. Bounded GPU
+checks and their limits are recorded in POD-STATUS.
+
+Owner acceptance and distribution still pending:
 
 - Live ChatGPT and OpenRouter consent and authenticated captioning under the owner's account.
-- Current trainer images are published under `v0.2.0-overnight20261011-r1` and verified by
-  anonymous digest pulls. The app defaults and public template now use these images. Bounded
-  real-GPU generation/video/resume checks are recorded in POD-STATUS as each completes.
+- Final keyboard/focus, video import/playback, real gallery/Save/Reveal and native TensorBoard
+  checks after the Mac lock prevented further physical-window inspection.
 - The owner's full morning walkthrough and first real dataset training run.
 - VoiceOver acceptance, Photos permission/bookmark persistence in a signed sandboxed build,
   Developer ID signing and notarization. The preview remains unsigned.

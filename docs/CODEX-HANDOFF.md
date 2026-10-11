@@ -1,18 +1,17 @@
 # Handoff, updated 2026-10-11
 
-Read CLAUDE.md and docs/v0.2-plan.md first. This repository is the lab notebook: ordinary
-verified commits and pushes to main are authorized. Preserve concurrent work. Curated history
-is deferred under the re-stage rule below.
+Read CLAUDE.md and docs/v0.2-plan.md first. Ordinary verified commits and pushes to main are
+authorized in this lab repository. Preserve concurrent work; curated history remains deferred.
 
 ## What exists
 
 The Python CLI/reference, Swift captioning core, nine-screen Mac app and pod agent exist.
 The app manages projects, captions, Hub datasets, rented computers and trained results; the demo
-works offline. Original public images and FLUX/LTX proofs predate the latest hardening.
+works offline. Current public images include the hardening and new generation/video services.
 
 Claude's seven hardening lanes were fully pushed through 36617c8: Core, Python, pod, project
-contract, GPU module, interface and docs/process. That satisfied the overnight start condition. Reuse their project storage, output retrieval,
-UI and transport work. Status documents distinguish source, image and live evidence; an app
+contract, GPU module, interface and docs/process. The overnight start condition is satisfied.
+Reuse their storage, output retrieval, UI and transports. Status documents distinguish source, image and live evidence; an app
 build does not prove live success.
 
 ## Three standing rules
@@ -28,12 +27,11 @@ build does not prove live success.
 
 ## Two parallel streams
 
-**Mac application:** implement the owner-approved introduction and single-concept flow, review
-all UI surfaces as operating software, and integrate curation/video, saved runs, result generation
-and OpenRouter. Keep the ordinary workflow accessible without programming or ML knowledge,
-while retaining direct controls for repeat users.
+**Mac application:** the owner-approved introduction, single-concept flow, curation/video, saved
+runs, result generation and OpenRouter are implemented. Every UI surface has been reviewed. Next is the owner's native walkthrough, account consent and real dataset
+run. Keep the workflow accessible without programming or ML knowledge, with direct expert controls.
 
-**Pod services:** implement and verify exact dataset pulls, supported training/resume and actual
+**Pod services:** maintain exact dataset pulls, supported training/resume and actual
 base-versus-LoRA generation. Rebuild published images when their code changes. Meet the app at
 the existing authenticated HTTP API and shared project/training contracts. Secure outputs and
 stop paid pods as soon as useful work ends.
@@ -41,17 +39,16 @@ stop paid pods as soon as useful work ends.
 ## Conventions
 
 Use uv/pytest/Ruff and Swift 6/SwiftPM/Yams/Swift Testing. Tests make no external network requests.
-Keep credentials out of output/configuration and private evidence outside this public repository. Use Codex agents: Sol for nontrivial
+Keep credentials out of output/configuration and private evidence outside the repository. Use Codex agents: Sol for nontrivial
 implementation and independent review, Luna for mechanical work. Resolve routine decisions and
 continue autonomously; report concrete blockers rather than declaring unfinished work complete.
 
-The real user training run belongs to the next human walkthrough. The caption-policy comparison
-experiment remains deferred until the owner starts it with an appropriately sized dataset.
+The caption-policy comparison experiment remains deferred until the owner starts it with an
+appropriately sized dataset.
 
 ## Re-stage rule (owner instruction, 2026-10-11)
 
 Do not prepare, maintain, synchronize or publish a re-stage until Hákon explicitly says it is
 time to re-stage the app. Decide the granularity and commit partition with him then. Existing
-narrative commits and decision sheets are historical drafts, not an agreed partition or an
-ongoing maintenance obligation. This rule applies to all agents. Continue ordinary commits
-and pushes in this lab repository; it remains the exploration record.
+narrative commits and decision sheets are historical drafts, not an agreed partition or
+maintenance obligation. This applies to all agents. Continue ordinary lab commits and pushes.

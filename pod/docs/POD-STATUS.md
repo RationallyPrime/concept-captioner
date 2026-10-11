@@ -1,7 +1,10 @@
 # POD-STATUS
 
 State of the pod side during the 2026-10-11 overnight feature round. The new generation,
-run-history and approved-video code is verified offline; it is not yet in the public images.
+run-history and approved-video code is published in public images at the accepted source
+`98708207` (tag `v0.2.0-overnight20261011-r2`). Actual FLUX generation and Resume have
+passed. LTX approved-video training, Resume and matched video generation also passed on the
+final r2 image. Both new proof pods are stopped; outputs are secured locally and on the network volume.
 Historical live checks date from lab commit `e620882` (2026-10-10, last live read 21:26 UTC). The
 contract is [POD-SPEC.md](POD-SPEC.md). The day-by-day record, with every timestamp, digest,
 hash and billing bucket, is in
@@ -16,7 +19,7 @@ hash and billing bucket, is in
 - **Transfer scripts and trainer wrappers** (`pod/scripts`): Hub dataset pull, AI Toolkit
   (FLUX) and LTX launchers, LoRA push.
 - **podctl** (`pod/podctl`): command-line client for the agent.
-- **Images**, public on GHCR under tag `v0.1.0-verify20261010`: `concept-captioner-pod-base`,
+- **Images**, public on GHCR under tag `v0.2.0-overnight20261011-r2`: `concept-captioner-pod-base`,
   `-aitoolkit`, `-ltx`; plus a fake image for compose tests. Public RunPod template
   `87fxs5v8fn` points at the base image; it carries no token, and the agent refuses to start
   without one.
@@ -44,12 +47,12 @@ published), with a SHA-256 manifest. Build and push logs are on cx53 under
 
 ## Verified offline only
 
-- **agent + scripts 882 passed** in the overnight combined gate (the venv has the `pod`
+- **agent + scripts 892 passed** in the overnight combined gate (the venv has the `pod`
   extra, including TensorBoard and datasets); **podctl 125 passed** in the preceding fix round. Fresh venvs per [pod/README.md](../README.md);
   ruff check and format clean on all three. These counts establish source behavior, not CUDA
   execution.
 - Fake compose: health, auth, two fake GPUs, concurrent plan, TensorBoard through the proxy.
-- **2026-10-11 fix round, not yet run on a pod** (every live receipt above predates it):
+- **2026-10-11 hardening source checks** (actual runtime scopes are recorded below):
   - TensorBoard's browser credential is no longer the bearer: `POST /tensorboard-session`
     issues a derived, 12-hour HMAC session cookie (POD-SPEC §2.1, §2.9); proxied responses set
     no cookie. The app's TensorBoard view calls the handshake before loading the page.
@@ -61,22 +64,23 @@ published), with a SHA-256 manifest. Build and push logs are on cx53 under
     writing run files, and exits 69 on failure.
   - `Dockerfile.ltx` pins TensorBoard 2.21.0; `Dockerfile.base` runs
     `images/check_vllm_flags.py`, the automated form of the 2026-10-10 manual source probe.
-    Neither image has been rebuilt with these steps.
+    The full runtime builds executed these steps; r2 overlays preserve those verified layers.
   - `GET /runs/{id}/files` and `GET /runs/{id}/files/{path}` list and stream a run's output
     files (Range supported) for users without a Hub account; `podctl files`, `pull` and
-    `tensorboard` were run end to end against a local fake agent only.
+    `tensorboard` were run end to end against a local fake agent. The overnight real-pod
+    downloads exercised the same HTTP file-list and streaming endpoints from Python and Swift.
 
-## Overnight features: source verified, deployment pending
+## Overnight features: published and verified in bounded GPU checks
 
-Focused native GPU/history/results gate: **40 passed**; strict SwiftLint and SwiftFormat
-clean. Combined agent/scripts gate: **882 passed**, including installed optional parity
+Native GPU/history/results checks and the final dataset-switch regressions are recorded in
+[APP-STATUS](../../app/docs/APP-STATUS.md). Combined agent/scripts gate: **892 passed**, including installed optional parity
 dependencies; Ruff check/format clean. These checks use fake agent/model seams, not GPUs.
 
 - `generate-aitoolkit` and `generate-ltx` use the actual pinned trainer inference paths,
   with selected checkpoint, matched prompts/seeds/settings, incremental manifests, real-file
   validation and the existing authenticated SHA-256 downloads. FLUX.1-dev and LTX-2 are the
   implemented families. This is runnable backend code, not a substitute demonstration gallery;
-  no GPU-generated comparison has been observed from these new services yet.
+  one actual FLUX image pair and one LTX video pair have been generated and retrieved.
 - Native saved-run history records dataset repository and resolved commit, submitted settings,
   loss points, available checkpoints, result location, and GPU cost estimates when a rate is
   known. Repeat creates a new run pinned to a recorded revision; if none was recorded, the app
@@ -103,9 +107,89 @@ dependencies; Ruff check/format clean. These checks use fake agent/model seams, 
 - Pinned primary-source witnesses are cached under
   `/tmp/concept-captioner-overnight-upstream/manifest.json`: AI Toolkit `f7a1fb9…`, LTX-2
   `9ec55f9…`. The old public `v0.1.0-verify20261010` tags do not include these services or the
-  preceding hardening round. Fresh base/trainer builds and bounded infrastructure smokes are
-  next, after independent source acceptance. No new pod compute has been used for this feature
-  round; the authorized future smoke cap is $5, with outputs secured and exact pod stopped.
+  preceding hardening round. The final `v0.2.0-overnight20261011-r2` images do. Runtime source
+  `017d79f` was built with the repository Dockerfiles; the independently accepted CFR repair
+  at `b1d0bef` and selected-checkpoint custody repair at `98708207` were overlaid by exact
+  source hashes, preserving those trainer runtime layers. All three final tags passed anonymous
+  pulls using fresh empty Docker client configurations; OCI revision and installed catalog,
+  generator and CFR wrapper hashes were checked in each actual image. Generation privately
+  captures selected checkpoint/config before either variant, so later Resume cannot replace
+  the LoRA input. The manifest keeps captured settings/SHA; the private weight copy is removed
+  on normal completion or handled error. The actual r2 CPU image passed an original-file
+  replacement witness; this does not claim concurrent CUDA execution.
+- Final base CPU smoke passed health/auth, all eight services, TensorBoard session and cookie
+  scope, run configuration, file SHA and Range download, and planning on two fake GPUs.
+  This is an actual image/control check, not CUDA inference.
+- Actual native `ProjectPublisher` and `HubClient` published the approved synthetic nine-frame
+  512×288 MP4 to private dataset `RationallyPrime/concept-captioner-video-infra-20261011`
+  at commit `3dee9e096b06a2741c10269236a13f6f64be1163`. Its exact-revision download matched
+  SHA-256 `497b84d0c020cc1c98fba5e158ab3c7503efdbd7f981582ee5e937941bd91e99`.
+- Actual FLUX `generate-aitoolkit` returned exit 0 with one base/LoRA PNG pair: selected
+  original step-two checkpoint, `NORA7 geometric figure on a plain background`, seed 42,
+  256×256, four inference steps, guidance 4. Both PNGs and complete manifest were downloaded
+  with matching SHA-256 through Python and actual native `GPUWorkspace.retrieveGeneration`.
+  This functional proof used r1 and predates the private snapshot repair. Original selected
+  weights were secured before Resume.
+- Actual same-ID FLUX Resume advanced `tiny-flux-proof-20261010` from step 2 to 3 and exited 0.
+  Its downloaded 21,610,744-byte checkpoint has 988 tensors and `training_info.step=3`,
+  SHA-256 `d2947945f647005a6796dfa2bcd0ce4eee6a8a74b6b9ad967eb77fd0c009b437`.
+  `scraped/loss` reports step 3, value 0.2554000020. The original step-two file remains secured
+  locally with SHA-256 `e9b60bdce2c72e18d81ef0f691de9b119136ed9f5d31d625e12aa769f5c54dd9`.
+- That pod, `c6xdg7goo1jpkm`, was stopped after outputs were secured; fresh MCP stop and two
+  independent reads report `EXITED`. Its actual rate was $0.72/hour, with a conservative
+  creation-to-readback projection of $0.220754 including image pull (settled billing is separate).
+  The network volume remains; ephemeral container disk is discarded on stop.
+- Actual LTX training on r2 processed the approved constant-rate nine-frame 512×288 target
+  using the derived `512x288x9` bucket, completed two optimizer steps and exited 0 at
+  05:06:36 UTC. The disabled validation template in the log is 512×512×1; it does not describe
+  the training clip. `scraped/loss` reports step 2, value 0.1256999969. Downloaded step-two
+  LoRA weights are 27,062,728 bytes, SHA-256
+  `a8f6a66a68486dc5e63b1dad96ab7b4db9a3312b10120b2541d1996694cd73e5`; matching
+  trainer-state files are available. Input SHA was measured at native publication and the
+  exact Hub revision download, not directly on the pod filesystem.
+- Actual same-ID LTX Resume restored scheduler/RNG at step 2, performed one optimizer
+  update and exited 0 at 05:12:51 UTC. The new step-three LoRA has 2,304 tensors and
+  SHA-256 `8e1e6bf0902a238c8d0cae10fd4032105f27da87003ed8f09e835bd11c92de70`;
+  its matching trainer-state file is listed. Downloaded bytes match the served checksum.
+  `scraped/loss` reports step 3, value 0.0322000012; the trainer reports peak GPU memory
+  20.99 GB on the 32 GB GPU/62 GB host. This uses the upstream minimal state and does not
+  establish full optimizer-state continuity.
+- Actual public HTTPS proxy TensorBoard handshake passed on that pod: bearer-authenticated
+  `POST /tensorboard-session` returned 200; its scoped cookie opened real TensorBoard HTML
+  with 200. Unauthenticated TensorBoard and cookie-only `/health` requests returned 401.
+  The cookie has path `/tensorboard`, Secure, HttpOnly and SameSite=Strict. Its value was
+  not recorded or printed. This is a real RunPod proxy/CPU service check while GPU work was
+  queued, in addition to the final-image fake-GPU control checks above.
+- Actual r2 LTX `generate-ltx` exited 0 at 05:24:35 UTC with a complete base/LoRA MP4 pair.
+  Both have 49 decoded frames, 512×512, 24 fps and duration 2.041667 seconds, using the same
+  prompt, seed 42, four inference steps and guidance 4. The manifest captures the step-three
+  checkpoint SHA above and its source settings; manifest SHA-256 is
+  `ff116fc6b28594ca916792ec8421bf0d720e4eafa0f746f56df5f38440dc2861`. Both variants
+  completed streamed Gemma and diffusion on the measured 32 GB GPU/62 GB host, using
+  `--quantization fp8-cast --offload cpu`. Generated AAC audio is present; this does not
+  establish audio fine-tuning, because this training preset skipped audio optimization.
+- The actual native `PodAgentClient`/`GPUWorkspace` collector completed nine authenticated
+  GETs by 05:25:08 UTC and saved the pinned step-three model, complete manifest and both
+  videos with matching SHA-256. Python independently downloaded and decoded both videos.
+  This is synthetic functional evidence; no user training or quality campaign was run.
+- Owned LTX proof pod `5bqs5hgvb166t5` was created 04:52:22 UTC with one RTX PRO 4500,
+  62 GB host RAM and r2 on the same volume. After collection it was stopped; stop and fresh
+  independent GET reported `EXITED` at 05:25:55 UTC. Both overnight proof pods were read
+  again as `EXITED` at 05:26:45 UTC, with the 200 GB network volume still present. The
+  ephemeral container disks are discarded on stop; no pod or volume was terminated/deleted.
+- Actual running rates were $0.72/hour for each new pod. Conservative creation-to-stopped-
+  readback compute projections are **$0.220754 FLUX + $0.4025358 LTX = $0.6232898**, below
+  the $5 compute cap; these include image pull and are not settled charges. Task-only billing
+  read at 05:27 UTC for the aligned 04:00–06:00 window had no posted pod records yet. The
+  volume had one posted 04:00–05:00 charge of **$0.0194444451**; the current hour is partial.
+  Existing network storage continues independently at $14/month. No owned GPU work remains
+  running or queued; invoice settlement is not awaited on a paid pod.
+- Durable private receipts: `~/Projects/concept-captioner-notes/evidence/2026-10-11-overnight-pod/`,
+  including `final-r2-images.json`, `base-r2-fake-smoke.json`, `template-r2.json`,
+  `hub-receipt.json`, `ltx-pair-validation.json`, both stop receipts,
+  `final-stopped-readbacks.json`, `billing-final.json`, source freezes and focused test logs.
+  The public template's image-only update to the final base was independently read back;
+  all other fields were preserved.
 
 ## Open
 
@@ -113,10 +197,11 @@ dependencies; Ruff check/format clean. These checks use fake agent/model seams, 
   five-image experiment; none is training data. The larger comparison is deferred by Hákon.
 - **Caption inference while training runs.** Both services were resident at once, but the
   caption request ran after training exited.
-- **Not run live:** FLUX resume, H3 trainer keys, parquet datasets, recovery after an agent
+- **Not run live:** H3 trainer keys, parquet datasets, recovery after an agent
   crash, CUDA driver R570.
-- **Not run live (2026-10-11 fix round):** the TensorBoard session handshake, the run-file
-  endpoints and the pinned LTX download above; the images need a rebuild first.
+- **Pinned LTX download scope:** this round reused the previously populated network-volume
+  model cache, resolved through the revision-pinned wrapper. A fresh empty-cache download at
+  that pin was not repeated; model loading and actual training used those cached files.
 - **No self-stop on the pod (decided 2026-10-11):** cost guards live in the app, which keeps
   the Mac awake while a pod runs and finds its pods on launch (implemented in the app; see
   [APP-STATUS](../../app/docs/APP-STATUS.md)).
