@@ -129,9 +129,10 @@ enum StudioClosePurpose {
     }
 }
 
-enum StudioCloseDecision {
-    /// Cancel local work and stop the rented computer.
-    case stop
+enum StudioCloseDecision: Equatable {
+    /// Cancel local work and stop the rented computer. `discardingPendingResult` is set when the person chose
+    /// to stop although a trained model has not been collected.
+    case stop(discardingPendingResult: Bool)
     /// Cancel local work but leave the rented computer billing; the app shows it again on next launch.
     case keepRunning
 }
@@ -199,7 +200,7 @@ extension StudioSession {
         if let warning = captionDiscardWarning {
             guard await ask(.discardCaptionDrafts(warning: warning)) == .confirm else { return nil }
         }
-        var decision = StudioCloseDecision.stop
+        var decision = StudioCloseDecision.stop(discardingPendingResult: false)
         if gpu.hasRunningPod || busy || chatGPT.isBusy || gpu.isBusy {
             let work = StudioPrompt.RunningWork(
                 hasRunningPod: gpu.hasRunningPod,
@@ -209,13 +210,39 @@ extension StudioSession {
                 purpose: purpose
             )
             switch await ask(.stopWork(work)) {
-            case .confirm: decision = .stop
+            case .confirm: break
             case .alternate: decision = .keepRunning
+            case .cancel: return nil
+            }
+        }
+        if decision != .keepRunning, gpu.resultNeedsSaving {
+            switch await ask(.stopWithPendingResult) {
+            case .confirm:
+                await gpu.retrieveResult()
+                guard !gpu.resultNeedsSaving else { return nil }
+            case .alternate: decision = .stop(discardingPendingResult: true)
             case .cancel: return nil
             }
         }
         if discardDrafts { discardAllCaptionDrafts() }
         return decision
+    }
+
+    /// Carries out a close decision. Returns false when the computer could not be confirmed stopped,
+    /// in which case the project stays open and the alert explains why.
+    func carryOut(_ decision: StudioCloseDecision) async -> Bool {
+        switch decision {
+        case let .stop(discardingPendingResult):
+            if discardingPendingResult {
+                await leaveComputerRunning()
+                await gpu.stopEverything(discardingPendingResult: true)
+            }
+            await closeProject()
+            return !gpu.hasRunningPod
+        case .keepRunning:
+            await leaveComputerRunning()
+            return true
+        }
     }
 
     /// Cancels local work but leaves the rented computer billing. Its saved record brings it back on next launch.
@@ -228,8 +255,8 @@ extension StudioSession {
 
     func requestClose() {
         Task {
-            guard await decideClose(.closeProject) != nil else { return }
-            await closeProject()
+            guard let decision = await decideClose(.closeProject) else { return }
+            _ = await carryOut(decision)
         }
     }
 }
@@ -272,18 +299,18 @@ final class StudioAppDelegate: NSObject, NSApplicationDelegate {
         switch session.quitDecision {
         case .keepRunning:
             return .terminateNow
-        case .stop:
+        case let .stop(discardingPendingResult)?:
             session.quitDecision = nil
             Task {
-                await session.closeProject()
-                sender.reply(toApplicationShouldTerminate: !session.gpu.hasRunningPod)
+                let stopped = await session.carryOut(.stop(discardingPendingResult: discardingPendingResult))
+                sender.reply(toApplicationShouldTerminate: stopped)
             }
             return .terminateLater
         case nil:
             guard session.needsCloseConfirmation else { return .terminateNow }
             Task {
                 guard let decision = await session.decideClose(.quit) else { return }
-                if decision == .keepRunning { await session.leaveComputerRunning() }
+                if decision == .keepRunning { _ = await session.carryOut(.keepRunning) }
                 session.quitDecision = decision
                 sender.terminate(nil)
             }
@@ -354,16 +381,10 @@ struct WindowCloseGuard: NSViewRepresentable {
                 return original?.windowShouldClose?(sender) ?? true
             }
             Task {
-                guard let decision = await session.decideClose(.closeWindow) else { return }
-                switch decision {
-                case .stop:
-                    await session.closeProject()
-                    guard !session.gpu.hasRunningPod else { return }
-                case .keepRunning:
-                    await session.leaveComputerRunning()
-                    // Closing the last window quits; the quit pass must not ask again.
-                    session.quitDecision = .keepRunning
-                }
+                guard let decision = await session.decideClose(.closeWindow),
+                      await session.carryOut(decision) else { return }
+                // Closing the last window quits; the quit pass must not ask again.
+                if decision == .keepRunning { session.quitDecision = .keepRunning }
                 allowed = true
                 sender.performClose(nil)
             }

@@ -154,7 +154,7 @@ struct GPUJourneyView: View {
                 }
                 if workspace.hasRunningPod {
                     LabeledContent("Spending limit") {
-                        Text(StudioStyle.money(workspace.budget)).monospacedDigit()
+                        Text(StudioStyle.money(workspace.activeBudget ?? workspace.budget)).monospacedDigit()
                     }
                     TextField("Raise the limit to (USD)", value: $newBudget, format: .number)
                 } else {
@@ -164,7 +164,7 @@ struct GPUJourneyView: View {
             }.formStyle(.columns)
             if workspace.hasRunningPod {
                 Button("Raise spending limit…") { raiseBudget() }
-                    .disabled((newBudget ?? 0) <= workspace.budget)
+                    .disabled((newBudget ?? 0) <= (workspace.activeBudget ?? workspace.budget))
                     .help("The limit can only go up while the computer runs. You confirm the new amount first.")
             } else if workspace.quotedHourlyRate <= 0 {
                 Text("Choose an available computer to see its price.")
@@ -189,14 +189,13 @@ struct GPUJourneyView: View {
     }
 
     private func raiseBudget() {
-        guard let target = newBudget, target > workspace.budget else { return }
-        let current = workspace.budget
+        let current = workspace.activeBudget ?? workspace.budget
+        guard let target = newBudget, target > current else { return }
         Task {
             let rate = workspace.pod.map(\.cost).flatMap { $0 > 0 ? $0 : nil }
             guard await session.ask(.raiseBudget(from: current, to: target, hourlyRate: rate)) == .confirm
             else { return }
-            workspace.raiseBudget(to: target)
-            newBudget = nil
+            if workspace.raiseBudget(to: target) { newBudget = nil }
         }
     }
 
@@ -229,7 +228,7 @@ struct GPUJourneyView: View {
                     TextField("Starting model", text: $workspace.baseModel)
                         .help("The existing model your photos will teach. Keep the included choice for your first run.")
                     TextField("Save trained model to (your-name/model-name)", text: $workspace.outputRepo)
-                    Toggle("Keep the trained model private", isOn: $workspace.resultIsPrivate)
+                    Toggle("Keep the trained model private", isOn: $workspace.privateResult)
                 }.formStyle(.columns)
                 Text("With a Hugging Face token in Settings, the trained model is uploaded to this repository when "
                     + "training finishes. Without one, it is saved in this project's results folder on your Mac.")
@@ -258,8 +257,8 @@ struct GPUJourneyView: View {
 
     private var advancedTraining: some View {
         Form {
-            Picker("Training resolution", selection: $workspace.trainingResolution) {
-                ForEach(GPUWorkspace.trainingResolutions, id: \.self) { Text("\($0) px").tag($0) }
+            Picker("Training resolution", selection: $workspace.resolution) {
+                ForEach(GPUWorkspace.resolutionChoices, id: \.self) { Text("\($0) px").tag($0) }
             }
             .help("The longest side photos are scaled to while training. Higher values need more memory and time.")
             Stepper("LoRA rank: \(workspace.rank)", value: $workspace.rank, in: 1 ... 128)
@@ -349,56 +348,54 @@ struct GPUJourneyView: View {
                 }
             }
             Divider()
-            TrainingResultSection(result: workspace.resultDisplay, busy: workspace.isBusy) {
+            TrainingResultSection(result: workspace.result, busy: workspace.isBusy) {
                 Task { await workspace.retrieveResult() }
             }
         }
     }
 }
 
-/// Where the trained model of the current run ended up.
-enum TrainingResultDisplay: Equatable {
-    /// No run has finished yet.
-    case notReady
-    /// Finished, but still only on the rented computer.
-    case pending
-    case pushed(repo: String)
-    case saved(folder: URL)
-}
-
 struct TrainingResultSection: View {
-    let result: TrainingResultDisplay
+    let result: TrainingResult?
     let busy: Bool
     let retrieve: () -> Void
 
     var body: some View {
         StudioSection(title: "Your trained model") {
-            switch result {
-            case .notReady:
+            switch result?.state {
+            case nil, .training?:
                 Text("When training finishes, the model is uploaded to your Hugging Face repository, or saved in "
                     + "this project's results folder if you have no Hugging Face token.")
                     .foregroundStyle(StudioStyle.supportingText).fixedSize(horizontal: false, vertical: true)
-            case .pending:
+            case .pending?:
                 StudioNotice(
-                    "The trained model is still only on the rented computer. Retrieve it before you stop the "
-                        + "computer; stopping clears its temporary files.",
+                    "The trained model is still only on the rented computer's storage. Retrieve it before you "
+                        + "stop the computer.",
                     symbol: "exclamationmark.triangle"
                 )
-                Button("Retrieve now", systemImage: "arrow.down.circle", action: retrieve)
-                    .buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
-                    .disabled(busy)
-                if busy { ProgressView("Retrieving the trained model…").controlSize(.small) }
-            case let .pushed(repo):
+                HStack(spacing: 12) {
+                    Button("Retrieve now", systemImage: "arrow.down.circle", action: retrieve)
+                        .buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
+                        .disabled(busy)
+                    if busy { ProgressView().controlSize(.small) }
+                }
+            case let .pushed(repo)?:
                 Label("Pushed to \(repo)", systemImage: "checkmark.circle").font(.headline)
                 if let url = URL(string: "https://huggingface.co/\(repo)") {
                     Link("Open on Hugging Face", destination: url)
                 }
-            case let .saved(folder):
-                Label("Saved to \(folder.lastPathComponent)", systemImage: "checkmark.circle").font(.headline)
-                    .help(folder.path)
+            case let .saved(folder)?:
+                let url = URL(fileURLWithPath: folder, isDirectory: true)
+                Label("Saved to \(url.lastPathComponent)", systemImage: "checkmark.circle").font(.headline)
+                    .help(folder)
+                Text(folder).font(.callout).foregroundStyle(StudioStyle.supportingText).textSelection(.enabled)
+                    .lineLimit(2).truncationMode(.middle)
                 Button("Reveal in Finder", systemImage: "folder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([folder])
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
                 }
+            case .failed?:
+                Label("The run ended without a trained model. Read the training log for the cause.",
+                      systemImage: "exclamationmark.triangle")
             }
         }
     }
@@ -408,57 +405,93 @@ extension StudioSession {
     /// Stop everything, warning first when a trained model has been neither pushed nor saved.
     func requestStopEverything() {
         Task {
-            if gpu.hasPendingResult {
+            var discardingPendingResult = false
+            if gpu.resultNeedsSaving {
                 switch await ask(.stopWithPendingResult) {
                 case .confirm:
                     await gpu.retrieveResult()
-                    guard !gpu.hasPendingResult else { return }
-                case .alternate: break
+                    guard !gpu.resultNeedsSaving else { return }
+                case .alternate: discardingPendingResult = true
                 case .cancel: return
                 }
             }
-            await stopEverything()
+            await leaveComputerRunning()
+            await gpu.stopEverything(discardingPendingResult: discardingPendingResult)
         }
     }
 }
 
 // MARK: - Integration seam for lane gpu (DELETE at integration)
 
-// Lane gpu owns GPUWorkspace and adds the result state, result privacy, training resolution, budget raise and
-// blocking-failure signal in this fix round. This extension only keeps this branch compiling against today's
-// workspace. At integration, delete it and point each member at lane gpu's API (names listed in the lane ui
-// return value); every use site then fails to compile until it is mapped.
-extension GPUWorkspace {
-    static let trainingResolutions = [512, 768, 1024]
-
-    var resultDisplay: TrainingResultDisplay {
-        guard !runID.isEmpty, !isTraining else { return .notReady }
-        return .pending
+// Lane gpu owns GPUWorkspace and, in this fix round, adds the result state, result privacy, training
+// resolution, budget raise, stray-pod reconciliation and keep-awake. The members below mirror the names lane gpu
+// was using when this view was written (GPUWorkspace.swift / GPUWorkspace+Results.swift on fix/gpu), so that after
+// both lanes merge they collide with the real declarations: delete this whole block, then fix any call site
+// whose name lane gpu changed. Only `failure` has no lane gpu counterpart yet; see the lane ui notes.
+struct TrainingResult: Equatable {
+    enum State: Equatable {
+        case training
+        case pending
+        case pushed(repo: String)
+        case saved(folder: String)
+        case failed
     }
 
-    var hasPendingResult: Bool {
-        resultDisplay == .pending
+    let runID: String
+    var outputRepo: String
+    var state: State
+}
+
+extension GPUWorkspace {
+    static let resolutionChoices = [512, 768, 1024]
+
+    var resolution: Int {
+        get { 512 }
+        set { _ = newValue }
+    }
+
+    var privateResult: Bool {
+        get { true }
+        set { _ = newValue }
+    }
+
+    var result: TrainingResult? {
+        nil
+    }
+
+    var strayPods: [RentedPod] {
+        []
+    }
+
+    func stopStrayPod(id: String) async {
+        _ = id
+    }
+
+    var activeBudget: Double? {
+        hasRunningPod ? budget : nil
+    }
+
+    @discardableResult
+    func raiseBudget(to newBudget: Double) -> Bool {
+        guard newBudget > budget else { return false }
+        budget = newBudget
+        return true
+    }
+
+    var resultNeedsSaving: Bool {
+        false
+    }
+
+    func stopEverything(discardingPendingResult: Bool) async {
+        _ = discardingPendingResult
+        await stopEverything()
     }
 
     func retrieveResult() async {
         await publishResult()
     }
 
-    var resultIsPrivate: Bool {
-        get { true }
-        set { _ = newValue }
-    }
-
-    var trainingResolution: Int {
-        get { 512 }
-        set { _ = newValue }
-    }
-
-    func raiseBudget(to amount: Double) {
-        budget = max(budget, amount)
-    }
-
-    /// A blocking failure for the window alert; today GPU failures only reach `message`.
+    /// A blocking failure for the window alert (no lane gpu counterpart yet; GPU failures reach `message`).
     var failure: String? {
         get { nil }
         set { _ = newValue }

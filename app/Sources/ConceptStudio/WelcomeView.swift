@@ -27,9 +27,10 @@ struct WelcomeView: View {
         }
         .background(StudioStyle.canvas)
         .safeAreaInset(edge: .top, spacing: 0) {
-            if session.gpu.hasRunningPod {
-                VStack(spacing: 0) {
-                    retainedComputer.padding(24)
+            if session.gpu.hasRunningPod || !session.gpu.strayPods.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    if session.gpu.hasRunningPod { retainedComputer.padding(24) }
+                    if !session.gpu.strayPods.isEmpty { reconciledComputers.padding(24) }
                     Divider()
                 }.background(StudioStyle.surface)
             }
@@ -55,18 +56,24 @@ struct WelcomeView: View {
             Text("Start with your photos. Choose what should stay recognizable and what you want to change. "
                 + "We’ll help you describe the difference, then train a model on a rented computer.")
                 .font(.title3).foregroundStyle(StudioStyle.supportingText).fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 10) {
-                Button("New project…") { session.createProject() }.buttonStyle(.borderedProminent)
-                    .tint(StudioStyle.actionTint)
-                Button("Open project…") { session.openProject() }
-            }.controlSize(.large).disabled(session.busy)
-            VStack(alignment: .leading, spacing: 8) {
-                Button("Try the demo", systemImage: "play.circle") { session.useDemo() }
-                    .disabled(session.busy)
-                Text("Explore every step. No accounts, no uploads, no charges.")
-                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) { startButtons }
+                VStack(alignment: .leading, spacing: 10) { startButtons }
             }
+            .controlSize(.large).disabled(session.busy)
+            Text("The demo walks through every step with practice photos. No accounts, no uploads, no charges.")
+                .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    @ViewBuilder private var startButtons: some View {
+        Button("New project…") { session.createProject() }
+            .buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
+        Button("Try the demo", systemImage: "play.circle") { session.useDemo() }
+            .disabled(session.gpu.hasRunningPod || session.gpu.isBusy)
+            .help(session.gpu.hasRunningPod ? "Stop the rented computer first." : "Practice every step offline.")
+        Button("Open project…") { session.openProject() }
     }
 
     private var example: some View {
@@ -94,8 +101,7 @@ struct WelcomeView: View {
     private var retainedComputer: some View {
         StudioSection(title: "A rented computer is still running") {
             HStack {
-                Text("$\(session.gpu.elapsedCost, specifier: "%.2f") estimated since creation")
-                    .font(.headline).monospacedDigit()
+                Text(retainedCost).font(.headline).monospacedDigit()
                 Spacer()
                 Button("Manage retained computer") { showRetainedComputer = true }
                 Button(session.gpu.isStopping ? "Stopping…" : "Stop everything", systemImage: "stop.circle") {
@@ -106,6 +112,32 @@ struct WelcomeView: View {
             Text("Stop this computer before starting a different project or demo.")
                 .font(.callout).foregroundStyle(StudioStyle.supportingText)
         }
+    }
+
+    /// Computers this app created that the provider still lists, though this Mac had lost their record.
+    private var reconciledComputers: some View {
+        StudioSection(
+            title: "Found running computers from an earlier session",
+            subtitle: "ConceptStudio created these, but this Mac had lost track of them. They are still billing."
+        ) {
+            ForEach(session.gpu.strayPods) { pod in
+                HStack(spacing: 12) {
+                    Image(systemName: "server.rack").foregroundStyle(StudioStyle.accent)
+                    Text(pod.id).fontWeight(.medium).textSelection(.enabled)
+                    Text("\(pod.status.capitalized) · \(StudioStyle.money(pod.cost)) per hour")
+                        .foregroundStyle(StudioStyle.supportingText).monospacedDigit()
+                    Spacer()
+                    Button("Stop", systemImage: "stop.circle") { Task { await session.gpu.stopStrayPod(id: pod.id) } }
+                        .disabled(session.gpu.isStopping)
+                }
+            }
+        }
+    }
+
+    private var retainedCost: String {
+        let spent = "\(StudioStyle.money(session.gpu.elapsedCost)) estimated since creation"
+        guard let rate = session.gpu.pod?.cost, rate > 0 else { return spent }
+        return "\(StudioStyle.money(rate)) per hour · \(spent)"
     }
 
     private var recentProjects: some View {
