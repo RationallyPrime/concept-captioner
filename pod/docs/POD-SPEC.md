@@ -50,7 +50,14 @@ The app creates pods through RunPod REST v2 `POST /v2/pods`: `image` names
 `minCudaVersion: "13.0"` and `minRamPerGpu: 60`; `disk: 50` is the temporary container disk.
 `mounts.network` attaches the selected `volumeId` at `/workspace`, `dataCenterIds` selects
 that volume's location, and `ports` is `["8800/http", "8000/http"]`. The `env` object carries
-a generated `PODAGENT_TOKEN` and the user's `HF_TOKEN`.
+`PODAGENT_TOKEN` and, when the user has a Hub token, `HF_TOKEN`, both as RunPod secret
+references rather than values: the app writes the Hub token to the account secret
+`conceptstudio_hf_token` before every creation (so a rotated token takes effect) and the pod's
+generated agent bearer to a per-pod secret `conceptstudio_agent_<random>`, then passes
+`{{ RUNPOD_SECRET_<name> }}` placeholders that RunPod substitutes when the container boots
+(`account/secrets` in the v2 schema; a secret's value can never be read back). A pod listing
+therefore never shows a token. The app deletes the agent secret when it removes the pod and,
+at launch, any `conceptstudio_agent_*` secret that no pod references; the Hub secret stays.
 
 Stopping a pod is the app's job; the pod side has no self-stop and no terminate-after guard.
 The app keeps the Mac awake while a pod runs; its launch-discovery limits are recorded in

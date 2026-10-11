@@ -244,6 +244,16 @@ extension GPUWorkspace {
             message = "\(strayPods.count) more running computer(s) from this app are billing on your RunPod "
                 + "account. Stop them below or in RunPod."
         }
+        await pruneAgentSecrets(provider)
+    }
+
+    /// Removes agent secrets that no pod references any more: a removal that failed, or a pod
+    /// removed in the RunPod console. The current pod's secret is kept even if the listing lags.
+    private func pruneAgentSecrets(_ provider: any GPUProvider) async {
+        guard let orphans = try? await provider.orphanedSecrets(prefix: PodSecrets.agentPrefix) else { return }
+        for name in orphans where name != saved?.agentSecret {
+            try? await provider.deleteSecret(name: name)
+        }
     }
 
     func stopStrayPod(id: String) async {

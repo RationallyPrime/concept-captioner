@@ -18,6 +18,9 @@ private actor ImageChoiceTransport: HTTPTransport {
                 + #""dataCenters":[{"id":"test","availability":"HIGH"}]}]}"#
         } else if url.path().hasSuffix("network-volumes") {
             body = #"{"networkVolumes":[{"id":"test","name":"Data","size":100,"dataCenter":"test"}]}"#
+        } else if url.path().contains("account/secrets") {
+            // Credentials are stored as account secrets before the pod is created (POD-SPEC §1).
+            body = request.httpMethod == "GET" ? #"{"secrets":[]}"# : #"{"id":"secret","name":"secret"}"#
         } else {
             if url.path() == "/v2/pods", request.httpMethod == "POST" {
                 let payload = try JSONValue(parsing: #require(request.httpBody)).objectValue

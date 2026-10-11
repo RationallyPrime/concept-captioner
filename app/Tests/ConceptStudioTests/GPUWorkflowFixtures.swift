@@ -46,6 +46,14 @@ actor UnreachableAgentTransport: HTTPTransport {
     private(set) var inferenceRequests: [URLRequest] = []
     private(set) var starts: [URLRequest] = []
     private(set) var agentRequests: [URLRequest] = []
+    /// The account's secret store: name → (id, value). Values are kept so tests can check what
+    /// was written; the real API never returns them.
+    private var secretStore: [String: (id: String, value: String)] = [:]
+    private var secretCounter = 0
+    private var createFails = false
+    private(set) var secretRequests: [String] = []
+    private(set) var deletedSecrets: [String] = []
+    private(set) var createBodies: [JSONObject] = []
 
     init(failFirstStop: Bool = false, agentAvailable: Bool = false, inferenceReady: Bool = false, gpuCount: Int = 1) {
         failedFirstStop = !failFirstStop
@@ -83,6 +91,19 @@ actor UnreachableAgentTransport: HTTPTransport {
         services[service] = state
     }
 
+    func seedSecret(_ name: String, value: String) {
+        secretCounter += 1
+        secretStore[name] = ("sec-\(secretCounter)", value)
+    }
+
+    func secretValue(_ name: String) -> String? {
+        secretStore[name]?.value
+    }
+
+    func failCreate(_ fail: Bool) {
+        createFails = fail
+    }
+
     func send(_ request: URLRequest) async throws -> HTTPResponse {
         let url = try #require(request.url)
         if url.host()?.contains("-8000.") == true {
@@ -105,6 +126,14 @@ actor UnreachableAgentTransport: HTTPTransport {
                 status: 200,
                 body: JSONValue.object(agentReply(request, url: url)).pythonDumpsData()
             )
+        }
+        if url.path().contains("/v2/account/secrets") {
+            return try secretsReply(request, url: url)
+        }
+        if url.path().hasSuffix("/v2/pods"), request.httpMethod == "POST" {
+            let created = try JSONValue(parsing: #require(request.httpBody)).objectValue
+            try createBodies.append(#require(created))
+            if createFails { return HTTPResponse(status: 500) }
         }
         if url.path().hasSuffix("action") {
             stopCalls += 1
@@ -157,6 +186,52 @@ actor UnreachableAgentTransport: HTTPTransport {
             if let run = runIDs[name] { service["run_id"] = .string(run) }
             return .object(service)
         })]
+    }
+
+    /// `GET/POST account/secrets` and `PATCH/DELETE account/secrets/{id}` as the v2 schema shapes them.
+    private func secretsReply(_ request: URLRequest, url: URL) throws -> HTTPResponse {
+        let method = request.httpMethod ?? "GET"
+        let id = url.lastPathComponent == "secrets" ? nil : url.lastPathComponent
+        let query = url.query().map { "?" + $0 } ?? ""
+        secretRequests.append("\(method) \(url.path().replacingOccurrences(of: "/v2/", with: ""))\(query)")
+        func metadata(_ name: String, id: String) -> HTTPResponse {
+            let body: JSONObject = ["id": .string(id), "name": .string(name)]
+            return HTTPResponse(status: 200, body: JSONValue.object(body).pythonDumpsData())
+        }
+        switch (method, id) {
+        case ("GET", nil):
+            let wanted = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+                .first { $0.name == "name" }?.value?.lowercased()
+            let entries: [JSONValue] = secretStore.sorted { $0.key < $1.key }
+                .filter { wanted == nil || $0.key.lowercased() == wanted }
+                .map { .object(["id": .string($0.value.id), "name": .string($0.key)]) }
+            return HTTPResponse(status: 200, body: JSONValue.object(["secrets": .array(entries)]).pythonDumpsData())
+        case ("POST", nil):
+            let body = try JSONValue(parsing: #require(request.httpBody)).objectValue
+            let name = try #require(body?["name"]?.stringValue)
+            let value = try #require(body?["value"]?.stringValue)
+            if secretStore[name] != nil { return HTTPResponse(status: 409) }
+            seedSecret(name, value: value)
+            let stored = try #require(secretStore[name])
+            return metadata(name, id: stored.id)
+        case let ("PATCH", id?):
+            guard let name = secretStore.first(where: { $0.value.id == id })?.key else {
+                return HTTPResponse(status: 404)
+            }
+            let patch = try JSONValue(parsing: #require(request.httpBody)).objectValue
+            let value = try #require(patch?["value"]?.stringValue)
+            secretStore[name] = (id, value)
+            return metadata(name, id: id)
+        case let ("DELETE", id?):
+            guard let name = secretStore.first(where: { $0.value.id == id })?.key else {
+                return HTTPResponse(status: 404)
+            }
+            secretStore[name] = nil
+            deletedSecrets.append(name)
+            return HTTPResponse(status: 204)
+        default:
+            return HTTPResponse(status: 405)
+        }
     }
 
     private func provider(_ request: URLRequest, url: URL) -> String {

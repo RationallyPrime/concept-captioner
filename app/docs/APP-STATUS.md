@@ -63,6 +63,10 @@ Published r2 images do not contain this repair round. See [RUNNING.md](RUNNING.m
   Pod starts retain active/current inputs and the last three resumable completed datasets;
   Resume restores a pruned Hub dataset only from its saved exact revision. Pod-side step
   validation refuses a total at or below the saved checkpoint step.
+- **Pod credentials as RunPod secrets:** the Hub token and each pod's agent bearer are written
+  to the account's secret store before a computer is rented and reach the pod only as
+  `{{ RUNPOD_SECRET_… }}` references, so a pod listing never shows a token. The agent secret
+  is deleted when the computer is removed; unreferenced ones are pruned at launch.
 - **Shared project and cost controls:** CLI-compatible job/sidecar formats, project-contained
   custom skills, private Hub upload, local retrieval, budget/idle stop, launch reconciliation,
   and explicit handling of pending outputs before a computer is stopped.

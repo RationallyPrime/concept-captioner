@@ -214,13 +214,9 @@ final class GPUWorkspace {
             }
             let started = Date()
             self.agentToken = try Self.newAgentToken()
-            let created = try await provider.create(PodCreation(
-                name: PodNaming.name(project: self.projectFolder?.lastPathComponent ?? ""),
-                offer: offer, count: self.gpuCount,
-                image: self.imageName.replacingOccurrences(of: "{trainer}", with: self.trainer),
-                minCudaVersion: Self.minimumCUDA(self.trainer), volume: volume,
-                agentToken: self.agentToken, hubToken: self.hubToken
-            ))
+            // Credentials go to the account's secret store; the pod only ever sees placeholders.
+            let credentials = try await self.storeCredentials(provider)
+            let created = try await self.createPod(provider, offer: offer, volume: volume, credentials: credentials)
             self.pod = created
             self.plan = nil
             self.storage = nil
@@ -232,7 +228,7 @@ final class GPUWorkspace {
             self.saved = SavedPod(
                 pod: created, started: started, hourlyRate: max(created.cost, self.quotedHourlyRate),
                 budget: self.budget, trainer: self.trainer, runID: "", outputRepo: self.outputRepo,
-                idleMinutes: self.idleMinutes, volumeID: volume.id
+                idleMinutes: self.idleMinutes, volumeID: volume.id, agentSecret: credentials.agentSecret
             )
             self.connectAgent(created)
             self.lastActivity = Date()
@@ -496,6 +492,7 @@ extension GPUWorkspace {
         guard !hasRunningPod, let provider, let pod else { return }
         await perform {
             try await provider.terminate(id: pod.id)
+            let agentSecret = self.saved?.agentSecret ?? ""
             self.pod = nil
             self.saved = nil
             self.agent = nil
@@ -503,6 +500,8 @@ extension GPUWorkspace {
                 self.preferences.removeObject(forKey: Self.activePodKey)
                 try self.deleteAgentToken("pod.\(pod.id)")
             }
+            // A secret left behind is harmless once the pod is gone; launch pruning removes it.
+            if !agentSecret.isEmpty { try? await provider.deleteSecret(name: agentSecret) }
             self.message = "Computer removed. Your separate network storage remains in RunPod."
         }
     }
