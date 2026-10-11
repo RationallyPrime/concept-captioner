@@ -76,8 +76,11 @@ struct MappingView: View {
                                     symbol: "person.crop.rectangle.badge.checkmark"
                                 )
                             }
+                            // The photo gives way in a short window, so what a suggestion filled in stays in
+                            // view above the pinned Confirm bar.
                             PhotoView(url: image.url, faces: session.analyses[image.id]?.faces ?? [])
-                                .frame(height: 300).frame(maxWidth: .infinity)
+                                .containerRelativeFrame(.vertical) { height, _ in min(300, max(140, height * 0.38)) }
+                                .frame(maxWidth: .infinity)
                                 .background(StudioStyle.surface)
                             presentSubjects
                         }.padding(.leading, 20).padding(.bottom, 12)

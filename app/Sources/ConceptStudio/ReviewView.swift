@@ -218,6 +218,8 @@ struct ReviewView: View {
     }
 
     /// Runs model A, then model B, through the session's compare action; neither touches the saved caption.
+    /// Results are written only while the same single photo is still shown; picking another photo mid-run
+    /// abandons the comparison instead of labelling the old photo's captions with the new one.
     private func runComparison(id: String) {
         resultA = ""; resultB = ""
         comparing = true
@@ -228,6 +230,7 @@ struct ReviewView: View {
                 session.comparison = ""
                 session.compare(id: id, model: side.model, kind: side.kind)
                 await session.task?.value
+                guard session.reviewSelection == [id], session.selectedImageID == id else { return }
                 guard session.errorMessage == nil, !session.comparison.isEmpty else { return }
                 if index == 0 { resultA = session.comparison } else { resultB = session.comparison }
             }

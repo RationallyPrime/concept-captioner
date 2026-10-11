@@ -48,6 +48,17 @@ struct ConceptStudioApp: App {
     }
 }
 
+@MainActor
+extension StudioSession {
+    func goBack() {
+        if let earlier = (step ?? .images).stepBefore { step = earlier }
+    }
+
+    func goForward() {
+        if let later = (step ?? .images).stepAfter { step = later }
+    }
+}
+
 /// Go menu: Back and Next through the journey, and a direct shortcut to each screen.
 struct JourneyCommands: Commands {
     let session: StudioSession
@@ -55,10 +66,11 @@ struct JourneyCommands: Commands {
     var body: some Commands {
         CommandMenu("Go") {
             let current = session.step ?? .images
-            Button("Back") { session.step = current.stepBefore }
+            // The actions read the step when pressed, not when the menu body was last evaluated.
+            Button("Back") { session.goBack() }
                 .keyboardShortcut("[", modifiers: .command)
                 .disabled(session.project == nil || current.stepBefore == nil)
-            Button("Next") { session.step = current.stepAfter }
+            Button("Next") { session.goForward() }
                 .keyboardShortcut("]", modifiers: .command)
                 .disabled(session.project == nil || current.stepAfter == nil)
             Divider()

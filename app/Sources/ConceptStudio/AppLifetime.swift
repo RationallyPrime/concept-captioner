@@ -173,18 +173,30 @@ extension StudioSession {
 
     /// Runs `action` after the person agrees to discard unsaved caption edits, or at once if there are none.
     /// Every view-level New, Open, Open Recent and demo entry point goes through this.
+    ///
+    /// The drafts are not cleared here: the action can still refuse (a computer is running), be cancelled
+    /// (the folder chooser) or fail (a stale bookmark), and the edits must survive that. `releaseProject()`
+    /// clears them when the project really changes.
     func afterConfirmingDraftDiscard(_ action: @escaping @MainActor () -> Void) {
         guard let warning = captionDiscardWarning else { action(); return }
         Task {
             guard await ask(.discardCaptionDrafts(warning: warning)) == .confirm else { return }
-            discardAllCaptionDrafts()
-            action()
+            runWithDraftDiscardConfirmed(action)
         }
+    }
+
+    /// Runs the synchronous start of `action` with the discard already confirmed, then withdraws the
+    /// confirmation so it cannot leak to a later, unconfirmed action.
+    func runWithDraftDiscardConfirmed(_ action: @MainActor () -> Void) {
+        draftDiscardConfirmed = true
+        defer { draftDiscardConfirmed = false }
+        action()
     }
 
     /// Synchronous guard kept for session methods. Views confirm first through `afterConfirmingDraftDiscard`,
     /// so this only refuses (and asks) if a caller skipped that step.
     func confirmDiscardCaptionDrafts() -> Bool {
+        if draftDiscardConfirmed { return true }
         guard let warning = captionDiscardWarning else { return true }
         Task {
             guard await ask(.discardCaptionDrafts(warning: warning)) == .confirm else { return }
@@ -196,7 +208,6 @@ extension StudioSession {
 
     /// Asks what to do with unsaved edits and running work. `nil` means keep the project open.
     func decideClose(_ purpose: StudioClosePurpose) async -> StudioCloseDecision? {
-        let discardDrafts = captionDiscardWarning != nil
         if let warning = captionDiscardWarning {
             guard await ask(.discardCaptionDrafts(warning: warning)) == .confirm else { return nil }
         }
@@ -224,7 +235,8 @@ extension StudioSession {
             case .cancel: return nil
             }
         }
-        if discardDrafts { discardAllCaptionDrafts() }
+        // Drafts are left alone: `closeProject()` clears them through `releaseProject()` only once the
+        // project really closes, so a stop that cannot be confirmed keeps them.
         return decision
     }
 

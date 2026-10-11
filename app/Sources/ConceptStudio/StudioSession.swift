@@ -361,6 +361,10 @@ final class StudioSession {
     var reviewSelection: Set<String> = []
     /// The Monitor tab last shown.
     var monitorTab = MonitorTab.progress
+    /// True only while an action the person already confirmed discarding drafts for is starting.
+    /// `confirmDiscardCaptionDrafts()` reads it; the drafts themselves are cleared by `releaseProject()`
+    /// once the switch or close really happens, so a refused or cancelled action keeps them.
+    @ObservationIgnored var draftDiscardConfirmed = false
 
     // MARK: - End lane ui stored state
 }

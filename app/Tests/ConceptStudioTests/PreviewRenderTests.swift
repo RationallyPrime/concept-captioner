@@ -405,3 +405,130 @@ struct ViewLogicTests {
         #expect(await PhotoThumbnails.load(missing) == nil)
     }
 }
+
+/// The draft-discard and close decisions, driven through the window prompts with the offline demo.
+@Suite("close and switch decisions")
+@MainActor
+struct CloseDecisionTests {
+    /// An open demo project with one unsaved caption edit; `rent` also starts the demo computer.
+    private func demoSession(rent: Bool) async throws -> StudioSession {
+        let suite = "ConceptStudio.close." + UUID().uuidString
+        let preferences = try #require(UserDefaults(suiteName: suite))
+        let session = StudioSession(preferences: preferences)
+        session.useDemo()
+        await session.task?.value
+        let image = try #require(session.project?.images.first)
+        session.setCaptionDraft(CaptionDraft(text: "NORA7 edited by hand.", isFinal: false), for: image.id)
+        if rent {
+            await session.gpu.refreshOffers()
+            await session.gpu.rent()
+            #expect(session.gpu.hasRunningPod)
+        }
+        return session
+    }
+
+    private func cleanUp(_ session: StudioSession) async {
+        let directory = session.project?.directory
+        await session.gpu.stopEverything()
+        await session.closeProject()
+        if let directory { try? FileManager.default.removeItem(at: directory) }
+    }
+
+    /// Waits for a prompt other than `previous` and returns it.
+    private func nextPrompt(_ session: StudioSession, after previous: UUID? = nil) async -> StudioPrompt? {
+        for _ in 0 ..< 500 {
+            if let prompt = session.pendingPrompt, prompt.id != previous { return prompt }
+            await Task.yield()
+        }
+        return nil
+    }
+
+    @Test func aRefusedProjectSwitchKeepsTheDrafts() async throws {
+        let session = try await demoSession(rent: true)
+        session.afterConfirmingDraftDiscard { session.useDemo() }
+        let prompt = try #require(await nextPrompt(session))
+        guard case .discardCaptionDrafts = prompt.kind else { Issue.record("expected the discard prompt"); return }
+        session.answer(prompt, .confirm)
+        for _ in 0 ..< 500 where session.errorMessage == nil {
+            await Task.yield()
+        }
+        // The switch refused because the computer is running; the edits it would have discarded remain.
+        #expect(session.errorMessage?.contains("Stop the rented computer") == true)
+        #expect(session.unsavedCaptionCount == 1)
+        #expect(!session.draftDiscardConfirmed)
+        // The confirmation does not leak to a later action that skipped the prompt.
+        #expect(!session.confirmDiscardCaptionDrafts())
+        if let stray = await nextPrompt(session) { session.answer(stray, .cancel) }
+        #expect(session.unsavedCaptionCount == 1)
+        await cleanUp(session)
+    }
+
+    @Test func aConfirmedSwitchClearsTheDraftsOnlyWhenTheProjectChanges() async throws {
+        let session = try await demoSession(rent: false)
+        let before = session.project?.directory
+        session.afterConfirmingDraftDiscard { session.useDemo() }
+        let prompt = try #require(await nextPrompt(session))
+        session.answer(prompt, .confirm)
+        for _ in 0 ..< 500 where session.project?.directory == before || session.busy {
+            await Task.yield()
+        }
+        await session.task?.value
+        #expect(session.project?.directory != before)
+        #expect(session.unsavedCaptionCount == 0)
+        if let before { try? FileManager.default.removeItem(at: before) }
+        await cleanUp(session)
+    }
+
+    @Test func closeProjectNeverOffersKeepRunningAndCancelKeepsEverything() async throws {
+        let session = try await demoSession(rent: true)
+        async let decision = session.decideClose(.closeProject)
+        let discard = try #require(await nextPrompt(session))
+        session.answer(discard, .confirm)
+        let stop = try #require(await nextPrompt(session, after: discard.id))
+        guard case let .stopWork(work) = stop.kind else { Issue.record("expected the stop prompt"); return }
+        #expect(!work.offerKeepRunning)
+        #expect(stop.alternateTitle == nil)
+        session.answer(stop, .cancel)
+        #expect(await decision == nil)
+        #expect(session.project != nil)
+        #expect(session.gpu.hasRunningPod)
+        #expect(session.unsavedCaptionCount == 1)
+        await cleanUp(session)
+    }
+
+    @Test func quittingCanKeepTheComputerRunning() async throws {
+        let session = try await demoSession(rent: true)
+        async let decision = session.decideClose(.quit)
+        let discard = try #require(await nextPrompt(session))
+        session.answer(discard, .confirm)
+        let stop = try #require(await nextPrompt(session, after: discard.id))
+        #expect(stop.alternateTitle == "Keep the computer running")
+        session.answer(stop, .alternate)
+        #expect(await decision == .keepRunning)
+        // Keep running skips the pending-result question.
+        #expect(session.pendingPrompt == nil)
+        #expect(await session.carryOut(.keepRunning))
+        #expect(session.gpu.hasRunningPod)
+        #expect(session.gpu.pod != nil)
+        await cleanUp(session)
+    }
+
+    @Test func aConfirmedCloseStopsAndClearsTheDrafts() async throws {
+        let session = try await demoSession(rent: true)
+        let directory = session.project?.directory
+        async let decision = session.decideClose(.closeProject)
+        let discard = try #require(await nextPrompt(session))
+        session.answer(discard, .confirm)
+        let stop = try #require(await nextPrompt(session, after: discard.id))
+        session.answer(stop, .confirm)
+        let result = await decision
+        #expect(result == .stop(discardingPendingResult: false))
+        // Deciding alone discards nothing; carrying it out does, once the computer is confirmed stopped.
+        #expect(session.unsavedCaptionCount == 1)
+        if let result { #expect(await session.carryOut(result)) }
+        #expect(!session.gpu.hasRunningPod)
+        #expect(session.project == nil)
+        #expect(session.captionDrafts.isEmpty)
+        if let directory { try? FileManager.default.removeItem(at: directory) }
+    }
+}

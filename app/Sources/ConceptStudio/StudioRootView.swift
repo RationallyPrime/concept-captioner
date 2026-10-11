@@ -13,6 +13,7 @@ struct StudioRootView: View {
         .tint(StudioStyle.accent)
         .frame(minWidth: 980, minHeight: 680)
         .background(WindowCloseGuard(session: session))
+        .modifier(StudioSessionHooks(session: session))
         .modifier(StudioFailureAlert(session: session))
         .modifier(StudioPromptPresenter(session: session))
     }
@@ -204,9 +205,21 @@ struct StudioFailureAlert: ViewModifier {
                 Button("OK") { session.errorMessage = nil }
             }
         } message: { Text(session.errorMessage ?? "") }
-            .onChange(of: TrainingDestination(session), initial: true) { _, destination in
+    }
+}
+
+/// Keeps window-lifetime session state in step with what is open: where training results are saved, GPU
+/// failures routed to the one failure alert, and photo thumbnails dropped when the project changes.
+struct StudioSessionHooks: ViewModifier {
+    @Bindable var session: StudioSession
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: TrainingDestination(session), initial: true) { old, destination in
                 // Results without a Hub token are saved inside the open project.
                 session.gpu.projectFolder = destination.folder
+                // A reopened project may hold photos edited outside the app under the same names.
+                if old.folder != destination.folder { PhotoThumbnails.removeAll() }
             }
             .onChange(of: session.gpu.failure) { _, failure in
                 guard let failure else { return }

@@ -11,6 +11,7 @@ struct StudioSettingsView: View {
     @State private var preferencesNote = ""
     @State private var failure: String?
     @State private var testing = false
+    @Environment(\.openWindow) private var openWindow
 
     private let gateways = ["openrouter", "vercel", "gateway"]
     private let advanced = ["google", "anthropic", "openai", "vllm", "huggingface", "runpod"]
@@ -52,8 +53,12 @@ struct StudioSettingsView: View {
                             ? "Demo is on. No saved keys or network connections are used."
                             : "The offline demo walks through the whole journey without an account or spending."
                     ) {
-                        Button("Try the offline demo") { session.afterConfirmingDraftDiscard { session.useDemo() } }
-                            .disabled(session.busy || session.gpu.hasRunningPod || session.gpu.isBusy)
+                        Button("Try the offline demo") {
+                            // The discard prompt is attached to the studio window; bring it in front of Settings.
+                            openWindow(id: "studio")
+                            session.afterConfirmingDraftDiscard { session.useDemo() }
+                        }
+                        .disabled(session.busy || session.gpu.hasRunningPod || session.gpu.isBusy)
                         Text("Open or create a real project to leave demo mode.")
                             .font(.callout).foregroundStyle(StudioStyle.supportingText)
                     }
