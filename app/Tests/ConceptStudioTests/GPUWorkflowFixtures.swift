@@ -37,6 +37,9 @@ actor UnreachableAgentTransport: HTTPTransport {
     private var servedModel = "Qwen/Qwen3-VL-8B-Instruct"
     private var listedPods: [String] = []
     private var runFiles: [RunFile] = []
+    private var filesFail = false
+    private var listFails = false
+    private var hubAccount: String?
     private var history: [(Int, Double)] = []
     private(set) var stopCalls = 0
     private(set) var stoppedPods: [String] = []
@@ -59,6 +62,19 @@ actor UnreachableAgentTransport: HTTPTransport {
         runFiles = files
     }
 
+    func failFiles(_ fail: Bool) {
+        filesFail = fail
+    }
+
+    func failList(_ fail: Bool) {
+        listFails = fail
+    }
+
+    /// The account `GET huggingface.co/api/whoami-v2` reports; nil answers 401.
+    func signIn(_ account: String?) {
+        hubAccount = account
+    }
+
     func curve(_ points: [(Int, Double)]) {
         history = points
     }
@@ -76,6 +92,12 @@ actor UnreachableAgentTransport: HTTPTransport {
                 body: JSONValue.object(["data": .array([.object(["id": .string(servedModel)])])]).pythonDumpsData()
             )
         }
+        if url.host() == "huggingface.co" {
+            guard let hubAccount, request.value(forHTTPHeaderField: "Authorization") != nil else {
+                return HTTPResponse(status: 401)
+            }
+            return HTTPResponse(status: 200, body: JSONValue.object(["name": .string(hubAccount)]).pythonDumpsData())
+        }
         if url.host() != "api.runpod.io" {
             guard agentAvailable else { return HTTPResponse(status: 522) }
             agentRequests.append(request)
@@ -92,6 +114,9 @@ actor UnreachableAgentTransport: HTTPTransport {
                 return HTTPResponse(status: 503)
             }
             if url.deletingLastPathComponent().lastPathComponent == "test" { stopped = true }
+        }
+        if listFails, url.path().hasSuffix("/v2/pods"), request.httpMethod != "POST" {
+            return HTTPResponse(status: 500)
         }
         return HTTPResponse(status: 200, body: Data(provider(request, url: url).utf8))
     }
@@ -114,9 +139,9 @@ actor UnreachableAgentTransport: HTTPTransport {
             ]
         }
         if path.hasSuffix("/files") {
-            return ["files": .array(runFiles.map { .object([
-                "path": .string($0.path), "size": .int($0.size), "sha256": .string($0.sha256),
-            ]) })]
+            if filesFail { throw StudioError.message("listing failed") }
+            // The agent's shape (pod/agent artifacts.py): paths relative to the run's output/.
+            return try ["files": JSONValue(parsing: JSONEncoder().encode(runFiles))]
         }
         if path.hasSuffix("/log") { return ["lines": .array([.string("step 1 loss 0.5")])] }
         if path.hasSuffix("/events") { return ["scalars": .object([:])] }
@@ -172,10 +197,15 @@ actor CurveTransport: HTTPTransport {
 }
 
 actor FakeDownloader: FileDownloading {
-    let contents: [String: Data]
+    private var contents: [String: Data]
     private(set) var requests: [URLRequest] = []
 
     init(_ contents: [String: Data]) {
+        self.contents = contents
+    }
+
+    /// File bodies by last path component.
+    func serve(_ contents: [String: Data]) {
         self.contents = contents
     }
 

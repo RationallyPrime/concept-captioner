@@ -59,7 +59,9 @@ extension GPUWorkspace {
                 throw StudioError
                     .message("Publish your dataset first and choose a model with positive training steps and rank.")
             }
-            if let result = self.result, result.state == .pending {
+            // A pending result on other storage cannot be retrieved from here; it stays in the project's
+            // training record and is retrieved from a computer on that storage.
+            if let result = self.result, result.state == .pending, self.resultIsOnThisPod(result) {
                 throw StudioError.message(
                     "Save the trained LoRA from run \(result.runID) first (Retrieve now), then start another run."
                 )
@@ -80,6 +82,7 @@ extension GPUWorkspace {
             self.runID = "concept-" + UUID().uuidString.prefix(12).lowercased()
             self.points = []
             self.historyRunID = self.runID
+            await self.defaultOutputRepo()
             let destination: TrainingResult.Destination = self.canPushToHub && !self.outputRepo.isEmpty
                 ? .hub : .download
             try await agent.start(
@@ -103,6 +106,31 @@ extension GPUWorkspace {
                 ? "Training started. When it finishes, the LoRA is pushed to \(self.outputRepo)."
                 : "Training started. When it finishes, the LoRA is saved into this project’s results folder."
         }
+    }
+
+    /// Signed in to Hugging Face with no output repo chosen: push to `<account>/<project>-lora`
+    /// (private unless the user turned that off). If the account cannot be read, the result is
+    /// downloaded into the project instead, as for a user without a Hub account.
+    func defaultOutputRepo() async {
+        guard !demoMode, !hubToken.isEmpty, outputRepo.isEmpty,
+              let url = URL(string: "https://huggingface.co/api/whoami-v2") else { return }
+        var request = URLRequest(url: url, timeoutInterval: 20)
+        request.setValue("Bearer \(hubToken)", forHTTPHeaderField: "Authorization")
+        guard let response = try? await transport.send(request), response.status == 200,
+              let account = try? JSONValue(parsing: response.body).objectValue?["name"]?.stringValue,
+              !account.isEmpty, !account.contains("/") else { return }
+        outputRepo = "\(account)/\(Self.repoName(project: projectFolder?.lastPathComponent ?? ""))"
+    }
+
+    /// A Hub model name from the project folder: letters, digits, `-`, `_` and `.`, ending in `-lora`.
+    nonisolated static func repoName(project: String) -> String {
+        let allowed = Set("abcdefghijklmnopqrstuvwxyz0123456789-_.")
+        var cleaned = String(project.lowercased().map { allowed.contains($0) ? $0 : "-" }.prefix(80))
+        while cleaned.contains("--") || cleaned.contains("..") {
+            cleaned = cleaned.replacingOccurrences(of: "--", with: "-").replacingOccurrences(of: "..", with: ".")
+        }
+        cleaned = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: "-_."))
+        return (cleaned.isEmpty ? "concept" : cleaned) + "-lora"
     }
 
     private func prepareCaptionServerForTraining(_ agent: any PodAgent, plan: TrainingPlan) async throws {

@@ -96,7 +96,9 @@ final class GPUWorkspace {
     }
 
     /// The pod agent's bearer (also its vLLM key). Set only by renting, restoring or reconciling.
-    var agentToken = ""
+    private(set) var agentToken = ""
+    /// A failure the window alert should show even when the GPU screen is not open.
+    var failure: String?
 
     @ObservationIgnored let transport: any HTTPTransport
     @ObservationIgnored let preferences: UserDefaults
@@ -184,6 +186,12 @@ final class GPUWorkspace {
         }
     }
 
+    /// Reads a pod's agent token from the Keychain; an unreadable token leaves the provider-level
+    /// budget and idle stop working.
+    func restoreAgentToken(podID: String) {
+        agentToken = (try? readAgentToken("pod.\(podID)")) ?? ""
+    }
+
     func refreshOffers() async {
         await perform {
             guard let provider = self.provider else {
@@ -269,6 +277,7 @@ final class GPUWorkspace {
     private func refreshState() async {
         guard let provider, let current = pod, hasRunningPod else { return }
         let resultBefore = result
+        var agentAnswered = false
         do {
             try await enforceLimits()
             guard hasRunningPod else { return }
@@ -280,6 +289,7 @@ final class GPUWorkspace {
             }
             if plan == nil { plan = try await agent.plan() }
             let services = try await agent.services()
+            agentAnswered = true
             let active = services.contains { $0.active && !["tensorboard", "vllm"].contains($0.name) }
             if active { lastActivity = Date() }
             if let state = services.first(where: { $0.name.hasPrefix("trainer-") && $0.active })
@@ -288,7 +298,7 @@ final class GPUWorkspace {
                 if let id = state.runID { runID = id }
                 trainingState = state.state
             }
-            if !runID.isEmpty { try await updateProgress(agent) }
+            if !runID.isEmpty { try await updateProgress(agent, services: services) }
             // A result created while this refresh was in flight is judged on the next one.
             if !isBusy, result == resultBefore { try await settleResult(agent, services: services) }
         } catch is CancellationError {
@@ -297,19 +307,25 @@ final class GPUWorkspace {
             message = error.localizedDescription
         }
         // A failed agent/proxy request must not suppress the provider-level idle stop, but a
-        // finished LoRA that is neither pushed nor downloaded keeps the computer up.
-        if hasRunningPod, !isBusy, !resultNeedsSaving,
+        // finished LoRA that is neither pushed nor downloaded keeps the computer up, and so does a
+        // run the agent still answers for whose result has not been settled yet.
+        if hasRunningPod, !isBusy, !resultNeedsSaving, !(agentAnswered && resultUnsettled),
            Date().timeIntervalSince(lastActivity) >= Double(idleMinutes * 60) {
             await stopEverything()
             if !hasRunningPod { message = "Stopped the idle computer to avoid further GPU charges." }
         }
     }
 
-    private func updateProgress(_ agent: any PodAgent) async throws {
+    private func updateProgress(_ agent: any PodAgent, services: [AgentService]) async throws {
         if historyRunID != runID {
-            historyRunID = runID
+            // TensorBoard is started by train(); after an agent restart it is down until started again.
+            if !services.contains(where: { $0.name == "tensorboard" && $0.active }) {
+                try? await agent.start("tensorboard", gpus: [], params: ["logdir": .string("/workspace/runs")])
+            }
+            // Retried on every refresh until the full curve arrives.
             if let history = try? await agent.history(runID: runID), !history.isEmpty {
                 merge(history)
+                historyRunID = runID
             }
         }
         if let point = try await agent.latest(runID: runID) { merge([point]) }
@@ -438,12 +454,6 @@ extension GPUWorkspace {
         persist()
         message = "Spending limit raised to \(newBudget.formatted(.currency(code: "USD")))."
         return true
-    }
-
-    /// True when a finished LoRA sits on this pod's volume and has been neither pushed nor saved.
-    var resultNeedsSaving: Bool {
-        guard let result, result.state == .pending, hasRunningPod else { return false }
-        return resultIsOnThisPod(result)
     }
 
     /// Stops the pod. Refuses, with a message, while a finished LoRA is unsaved unless

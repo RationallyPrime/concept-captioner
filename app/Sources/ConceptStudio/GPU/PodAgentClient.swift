@@ -42,13 +42,43 @@ struct TrainingPoint: Identifiable, Codable, Equatable {
     let loss: Double
 }
 
-/// One file of a finished run, as the agent's `GET /runs/{id}/files` lists it.
+/// One file of a finished run, as the agent's `GET /runs/{id}/files` lists it (POD-SPEC 2.10):
+/// `{"path", "size", "sha256", "modified_at"}`, with `modified_at` an ISO 8601 UTC timestamp.
 struct RunFile: Codable, Equatable {
-    /// Relative to the run directory, `/`-separated.
+    /// Relative to the run's output directory (`/workspace/runs/<id>/output/`), `/`-separated.
     let path: String
     let size: Int
     let sha256: String
-    var mtime: Double?
+    var modifiedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case path, size, sha256
+        case modifiedAt = "modified_at"
+    }
+
+    init(path: String, size: Int, sha256: String, modifiedAt: Date? = nil) {
+        self.path = path
+        self.size = size
+        self.sha256 = sha256
+        self.modifiedAt = modifiedAt
+    }
+
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        path = try values.decode(String.self, forKey: .path)
+        size = try values.decode(Int.self, forKey: .size)
+        sha256 = try values.decode(String.self, forKey: .sha256)
+        let stamp = try values.decodeIfPresent(String.self, forKey: .modifiedAt)
+        modifiedAt = stamp.flatMap { try? Date($0, strategy: .iso8601) }
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(path, forKey: .path)
+        try values.encode(size, forKey: .size)
+        try values.encode(sha256, forKey: .sha256)
+        try values.encodeIfPresent(modifiedAt?.formatted(.iso8601), forKey: .modifiedAt)
+    }
 }
 
 protocol PodAgent: Sendable {
@@ -263,7 +293,7 @@ actor DemoPodAgent: PodAgent {
 
     func runFiles(runID: String) -> [RunFile] {
         let digest = SHA256.hash(data: lora).map { String(format: "%02x", $0) }.joined()
-        return [RunFile(path: "output/\(runID).safetensors", size: lora.count, sha256: digest)]
+        return [RunFile(path: "\(runID)/\(runID).safetensors", size: lora.count, sha256: digest, modifiedAt: Date())]
     }
 
     func download(runID: String, path: String, to destination: URL) throws {

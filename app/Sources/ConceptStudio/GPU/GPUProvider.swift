@@ -67,8 +67,21 @@ struct RentedPod: Identifiable, Codable {
 
     /// Pods this app creates are named `ConceptStudio-<project>`; earlier builds used the bare prefix.
     var isFromThisApp: Bool {
-        guard let name else { return false }
-        return name == PodNaming.prefix || name.hasPrefix(PodNaming.prefix + "-")
+        name.map(PodNaming.isFromThisApp) ?? false
+    }
+}
+
+/// One element of `GET /v2/pods`. Other pods on the account need not match `RentedPod` (a CPU pod
+/// has no `gpu`), so the name is read first and only this app's pods are decoded in full.
+private struct PodListEntry: Decodable {
+    private struct Named: Decodable { let name: String? }
+
+    let name: String?
+    let pod: Result<RentedPod, any Error>
+
+    init(from decoder: any Decoder) throws {
+        name = try? Named(from: decoder).name
+        pod = Result(catching: { try RentedPod(from: decoder) })
     }
 }
 
@@ -85,6 +98,10 @@ enum PodPort {
 
 enum PodNaming {
     static let prefix = "ConceptStudio"
+
+    static func isFromThisApp(_ name: String) -> Bool {
+        name == prefix || name.hasPrefix(prefix + "-")
+    }
 
     static func name(project: String) -> String {
         let allowed = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
@@ -111,7 +128,8 @@ protocol GPUProvider: Sendable {
     func volumes() async throws -> [GPUVolume]
     func create(_ request: PodCreation) async throws -> RentedPod
     func status(id: String) async throws -> RentedPod
-    /// Every pod on the account this app created (named `ConceptStudio…`), any status.
+    /// Every pod on the account this app created (named `ConceptStudio…`), any status. Throws when
+    /// the account cannot be listed or one of this app's pods cannot be read.
     func list() async throws -> [RentedPod]
     func stop(id: String) async throws
     func terminate(id: String) async throws
@@ -176,7 +194,7 @@ struct RunPodProvider: GPUProvider {
             let hasNextPage: Bool
         }
         struct Page: Decodable {
-            let pods: [RentedPod]
+            let pods: [PodListEntry]
             let pagination: Pagination?
         }
         var pods: [RentedPod] = []
@@ -185,7 +203,9 @@ struct RunPodProvider: GPUProvider {
             var query = [URLQueryItem(name: "limit", value: "200")]
             if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
             let page = try await JSONDecoder().decode(Page.self, from: call("pods", query: query))
-            pods += page.pods.filter(\.isFromThisApp)
+            for entry in page.pods where entry.name.map(PodNaming.isFromThisApp) == true {
+                try pods.append(entry.pod.get())
+            }
             guard page.pagination?.hasNextPage == true, let next = page.pagination?.nextCursor else { break }
             cursor = next
         }

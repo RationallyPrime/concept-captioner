@@ -63,18 +63,26 @@ enum RunArtifacts {
         return [final] + others
     }
 
-    /// Newest by modification time when the agent reports it, else the un-numbered final file,
-    /// else the highest step number in the name.
+    /// Newest by modification time (the agent's `modified_at`); on a tie, or when a time is
+    /// missing, the un-numbered final file beats a checkpoint and a later step beats an earlier one.
+    /// Run ids end in hex digits (`concept-1a2b3c4d-567`), so only an `_`-separated run of digits
+    /// (ai-toolkit's `<name>_000001750`) counts as a step number.
     static func newest(_ weights: [RunFile]) -> RunFile? {
-        if weights.allSatisfy({ $0.mtime != nil }), let latest = weights.max(by: { $0.mtime! < $1.mtime! }) {
-            return latest
+        let timed = weights.allSatisfy { $0.modifiedAt != nil }
+        return weights.max { left, right in
+            if timed, left.modifiedAt != right.modifiedAt { return left.modifiedAt! < right.modifiedAt! }
+            return rank(left) < rank(right)
         }
-        func step(_ file: RunFile) -> Int? {
-            let stem = ((file.path as NSString).lastPathComponent as NSString).deletingPathExtension
-            let digits = stem.reversed().prefix { $0.isNumber }
-            return digits.count >= 3 ? Int(String(digits.reversed())) : nil
-        }
-        return weights.first { step($0) == nil } ?? weights.max { (step($0) ?? 0) < (step($1) ?? 0) }
+    }
+
+    /// `(1, 0)` for an un-numbered file, `(0, step)` for `<name>_<step>` with three or more digits.
+    private static func rank(_ file: RunFile) -> (Int, Int) {
+        let stem = ((file.path as NSString).lastPathComponent as NSString).deletingPathExtension
+        guard let separator = stem.lastIndex(of: "_") else { return (1, 0) }
+        let digits = stem[stem.index(after: separator)...]
+        let isStep = digits.count >= 3 && digits.allSatisfy { $0.isASCII && $0.isNumber }
+        guard isStep, let step = Int(digits) else { return (1, 0) }
+        return (0, step)
     }
 
     static func sha256(of url: URL) throws -> String {
@@ -88,11 +96,21 @@ enum RunArtifacts {
     }
 }
 
-/// The app-only training file inside a project folder, `<project>/.conceptstudio/training.json`.
-/// It is never published and is not part of job.yaml.
+/// The app-only training file inside a project folder, `<project>/.conceptstudio/training.json`:
+/// the project's training results only. It is never published and is not part of job.yaml. The
+/// output repo and its privacy live in the project's app state (`ProjectAppState.trainingOutput`),
+/// which the session hands to `outputRepo` and `privateResult`.
 struct ProjectTrainingRecord: Codable, Equatable {
-    var outputRepo = ""
     var results: [TrainingResult] = []
+
+    init(results: [TrainingResult] = []) {
+        self.results = results
+    }
+
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        results = try values.decodeIfPresent([TrainingResult].self, forKey: .results) ?? []
+    }
 
     static func url(in project: URL) -> URL {
         project.appendingPathComponent(".conceptstudio/training.json")
@@ -156,7 +174,18 @@ extension GPUWorkspace {
     /// lost to a crash between create and save, reset defaults, another Mac) and puts the newest
     /// under the budget and idle guards; the rest are listed in `strayPods`.
     func reconcile() async {
-        guard let provider, let found = try? await provider.list() else { return }
+        guard let provider else { return }
+        let found: [RentedPod]
+        do {
+            found = try await provider.list()
+        } catch {
+            reconciled = false // the next configure (key or settings change) tries again
+            let warning = "Could not check your RunPod account for computers this app left running "
+                + "(\(error.localizedDescription)). Open the RunPod console to make sure nothing is billing."
+            message = warning
+            failure = warning
+            return
+        }
         let running = found.filter(\.isRunning)
         if pod == nil, let adopted = running.first {
             saved = SavedPod(
@@ -164,7 +193,7 @@ extension GPUWorkspace {
                 runID: "", outputRepo: outputRepo, idleMinutes: idleMinutes, volumeID: adopted.volumeID ?? ""
             )
             pod = adopted
-            agentToken = (try? readAgentToken("pod.\(adopted.id)")) ?? ""
+            restoreAgentToken(podID: adopted.id)
             connectAgent(adopted)
             lastActivity = Date()
             persist()
@@ -218,6 +247,19 @@ extension GPUWorkspace {
         default:
             return
         }
+    }
+
+    /// True when a finished LoRA sits on this pod's volume and has been neither pushed nor saved.
+    var resultNeedsSaving: Bool {
+        guard let result, result.state == .pending, hasRunningPod else { return false }
+        return resultIsOnThisPod(result)
+    }
+
+    /// True while the latest run on this pod's volume has not been settled (still training, or its
+    /// trainer exited and the check of its files has not succeeded yet).
+    var resultUnsettled: Bool {
+        guard let result, result.state == .training, hasRunningPod else { return false }
+        return resultIsOnThisPod(result)
     }
 
     func resultIsOnThisPod(_ result: TrainingResult) -> Bool {
@@ -342,7 +384,6 @@ extension GPUWorkspace {
     func loadProjectRecord() {
         guard let projectFolder else { return }
         let record = ProjectTrainingRecord.load(from: projectFolder)
-        if outputRepo.isEmpty { outputRepo = record.outputRepo }
         if result == nil {
             result = record.results.last { [.training, .pending].contains($0.state) }
         }
@@ -351,7 +392,6 @@ extension GPUWorkspace {
     func saveProjectRecord() {
         guard !demoMode, let projectFolder else { return }
         var record = ProjectTrainingRecord.load(from: projectFolder)
-        record.outputRepo = outputRepo
         if let result {
             record.results.removeAll { $0.runID == result.runID }
             record.results.append(result)
