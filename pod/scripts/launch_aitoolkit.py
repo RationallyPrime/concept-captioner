@@ -90,6 +90,7 @@ _TOP_KEYS = frozenset(
         "hub",
         "hf_token",
         "extra",
+        "resume",
     }
 )
 _REQUIRED_KEYS = ("run_id", "dataset", "triggers", "base_model")
@@ -255,6 +256,9 @@ def validate_run_config(raw: Any, workspace: Path | None = None) -> dict[str, An
         errors.append("extra: must be an object")
         extra = {}
     cfg["extra"] = extra
+    cfg["resume"] = raw.get("resume", False)
+    if not isinstance(cfg["resume"], bool):
+        errors.append("resume: must be true or false")
     if errors:
         raise ConfigError("; ".join(errors))
     return cfg

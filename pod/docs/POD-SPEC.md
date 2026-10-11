@@ -15,7 +15,7 @@ pod/
   agent/        Python package "podagent": FastAPI control agent (port 8800)
   podctl/       Python package "podctl": terminal client over the agent's HTTP API
   images/       Dockerfiles (base, aitoolkit, ltx, fake), entrypoint, compose for fake mode
-  scripts/      pull_dataset.py, push_lora.py, launch_aitoolkit.py, launch_ltx.py
+  scripts/      pull_dataset.py, push_lora.py, launch_aitoolkit.py, launch_ltx.py, generate_results.py
   docs/         this spec, POD-STATUS.md
 ```
 
@@ -214,7 +214,7 @@ nonzero code), `exited` (exited on its own with code 0; what a finished `pull-da
 completed training run looks like), `stuck` (a stop's SIGKILL did not end the child within 3 s:
 uninterruptible sleep in the driver, Xid fault; `pid` is still set, the GPUs stay booked, a later
 poll files it as `stopped` once it is gone). `params` never echoes secrets (`hf_token`,
-`api_key` are redacted to `"***"`). `run_id` is set for the two trainers and `push-lora`.
+`api_key` are redacted to `"***"`). `run_id` is set for the trainers, generators and `push-lora`.
 
 `group_alive` is set when the direct child has exited (`failed` / `exited` / `stopped`) but its
 process group has not: a trainer whose launch wrapper died, vLLM engine workers after the API
@@ -223,7 +223,7 @@ set; the agent SIGTERMs the group at the exit, SIGKILLs it 5 s later if it is st
 clears the flag once the group is empty. A start of the same service while `group_alive` is
 `409 already_running` (detail `{"group_alive": true}`); a `stop` SIGKILLs the group at once.
 
-- `GET /services` → `{"services": [state, …]}` for all six names, idle ones included.
+- `GET /services` → `{"services": [state, …]}` for all catalog names, idle ones included.
 - `GET /services/{name}` → state. `404` for an unknown name.
 - `POST /services/{name}/start` → `201` + state. Body:
   `{"gpus": [1, 2], "params": {…}}`. `gpus` defaults to `[]`; services with `gpus: 0` reject a
@@ -402,6 +402,15 @@ Clients verify `size` and `sha256` from 2.10 after the download (`podctl pull` d
 a pod: that the RunPod proxy's 100 s limit applies to the start of the response and not to a
 multi-gigabyte body that is still flowing.
 
+### 2.12 `GET /runs/{id}/config`
+
+Authenticated run snapshot: `{"run_id": "…", "config": {…}, "dataset": {"repo_id": "…",
+"revision": "<resolved commit>", "count": 4}}`. `config` is the saved `run.json` with
+top-level `hf_token` and `api_key` removed. `dataset` comes from the captured dataset
+manifest. A missing manifest gives an empty dataset object; this is not an invented revision.
+The native app stores this snapshot, curves, checkpoint listing, result destination and
+available cost estimates in the project's private `.conceptstudio/training.json`.
+
 ## 3. Service catalog
 
 `podagent.catalog.CATALOG: dict[str, ServiceSpec]`. A `ServiceSpec` has:
@@ -482,10 +491,16 @@ resume when the trainer supports it; otherwise they overwrite — see 4.3). The 
 Params (`PullDatasetParams`): `repo_id` (str, `^[\w.-]+/[\w.-]+$`), `name` (str, dataset folder
 name, `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`; default: repo name), `split` (`train`), `revision`
 (null), `image_column` (`image`), `caption_column` (`caption`), `id_column` (null),
-`hf_token` (null). argv:
+`hf_token` (null), `only_metadata` (false). argv:
 `[/opt/venvs/agent/bin/python, /opt/pod/scripts/pull_dataset.py, --repo, <repo_id>, --to, /workspace/datasets/<name>,
 --split, …, --image-column, …, --caption-column, …, (--revision, …), (--id-column, …)]`.
 log `/workspace/logs/pull-dataset.log`. Exit 0 = dataset ready at `/workspace/datasets/<name>`.
+
+The native app sends `only_metadata: true` and its last published commit revision. This
+requires `metadata.jsonl` and copies exactly its listed media and matching `.txt`/`.json`
+sidecars, including approved MP4 clips. Unlisted repository media is not a training target.
+The generic CLI default remains false. The dataset manifest records the resolved Hub commit;
+the trainer copies that manifest into its run folder for later run-history reads.
 
 ### 3.5 `push-lora` — GPUs 0
 
@@ -494,6 +509,33 @@ Params (`PushLoraParams`): `run_id`, `repo_id`, `private` (true), `include_sampl
 `[/opt/venvs/agent/bin/python, /opt/pod/scripts/push_lora.py, --run-dir, /workspace/runs/<id>, --repo, <repo_id>,
 (--private), (--no-samples), (--all-checkpoints), (--commit-message, …)]`.
 log `/workspace/logs/push-lora.log`. Exit 0 = the model repo has the LoRA.
+
+### 3.6 `generate-aitoolkit` and `generate-ltx` — GPUs 1
+
+These fixed services run `generate_results.py` in the corresponding trainer interpreter;
+they expose no port and use the same supervisor/GPU reservation as training. Parameters:
+new `run_id`, existing `source_run_id`, `checkpoint` relative to that source run's `output/`,
+`prompts` (1–6), `seeds` (1–4 unsigned 32-bit integers), `width`/`height` (64–2048,
+multiples of 32), `inference_steps` (1–100), `guidance_scale` (0–20), `num_frames` (8n+1,
+up to 257), and `frame_rate` (positive, at most 60). Defaults are 512×512, 20 steps,
+guidance 4, one frame and 24 fps. FLUX requires one frame. Prompt `--` overrides are
+rejected so both outputs receive identical settings.
+
+Only `black-forest-labs/FLUX.1-dev` on AI Toolkit and `Lightricks/LTX-2` on LTX are
+implemented. Other families return `422 invalid_params` before creating a generation run.
+The checkpoint must be a regular, non-symlink `.safetensors` output of the source run.
+The generation keeps its own `generation.json`, `trainer.log` and `output/comparison.json`.
+Each prompt/seed row names a base output and a LoRA output; real inference must produce both
+files before the manifest says `complete`. Failed runs retain their available files and
+manifest state. Existing authenticated run-file list/download endpoints serve all outputs.
+
+FLUX uses the pinned AI Toolkit `StableDiffusion`, `ModelConfig`, `GenerateImageConfig`
+and explicit flowmatch scheduler. It loads the base and then the selected LoRA fused before
+quantization. LTX uses the pinned official `ltx_pipelines.ti2vid_one_stage` CLI with fixed
+FP8 casting and CPU offload; only the trained side receives `--lora <checkpoint> 1.0`.
+The app defaults to 49 frames for LTX, offering 17/49/97/129 at 24 fps. Those settings are
+request choices, not evidence of capacity on every GPU. Offline source verification and
+actual GPU execution are recorded separately in POD-STATUS.
 
 ## 4. Run config and the launch wrappers
 
@@ -514,6 +556,7 @@ log `/workspace/logs/push-lora.log`. Exit 0 = the model repo has the LoRA.
   "batch_size": 1,
   "gradient_accumulation": 1,
   "seed": 42,
+  "resume": false,
   "save_every": 250,
   "sample_every": 250,
   "sample_prompts": ["NORA7 woman, studio portrait, soft key light"],
@@ -538,6 +581,7 @@ log `/workspace/logs/push-lora.log`. Exit 0 = the model repo has the LoRA.
 | `batch_size` | no | 1 | |
 | `gradient_accumulation` | no | 1 | |
 | `seed` | no | 42 | |
+| `resume` | no | false | true opts into saved settings/checkpoint validation before service start; it keeps the same run ID and dataset |
 | `save_every` / `sample_every` | no | 250 / 250 | 0 disables samples |
 | `sample_prompts` | no | `[]` | each should contain a trigger; the wrapper does not enforce it |
 | `hub` | no | null | `repo_id`, `private` (true), `push_on_finish` (false → push is a separate `push-lora` start) |
@@ -660,6 +704,37 @@ writing `<run>/preprocessed/`. `train.py <run>/config.yaml` consumes:
 The wrapper deep-merges `extra` last; `extra.preprocess` configures preparation only and is
 omitted from the native training config. Actual checkpoints were written under
 `<run>/output/checkpoints/`; the wrapper's event scraper writes `<run>/tensorboard/`.
+
+**Approved video targets.** The app sends `extra.preprocess.buckets_from_media: true`
+instead of a fixed video bucket. The shared preprocess policy accepts only a boolean and
+rejects combining it with `resolution_buckets`. Before downloading a model or launching
+preprocessing, the wrapper counts each approved clip's actual decoded frames with `ffprobe`
+and derives its `width×height×frames` bucket. Video dimensions must be multiples of 32,
+frame counts 8n+1 from 9 through 257. Still images add the ordinary square one-frame bucket.
+The native segment editor exports and re-counts that exact segment, preserves sample timing
+and audio, and fits the full picture into a 32-aligned aspect-preserving canvas before
+captioning. Common HD footage can therefore use 512×288 or 288×512, rather than an unseen
+square center crop. Changing the target requires approval, captioning and publishing again.
+The included memory-saving training preset skips audio optimization; video/audio bytes in
+the approved target are retained. This is a visual/motion LoRA path, not an audio-training proof.
+
+Custom explicit video buckets remain possible through the agent. Their preflight applies
+the pinned preprocessor's actual bucket selection (aspect difference, then frame count,
+then area among fitting buckets) and refuses any choice that would truncate frames or
+change the approved clip's aspect ratio. No temporal subsampling flag is exposed.
+
+**Repeat and Resume.** Repeat prefills editable native settings and the saved dataset
+revision, then creates a new run and dataset folder. Resume sends `resume: true` with the
+same run ID; dataset, model, triggers, rank/alpha, learning rate, resolution, batch size,
+accumulation, seed and `extra` must match the saved run. It requires a checkpoint; LTX also
+requires the matching `training_state_step_<digits>.pt`. The pinned LTX trainer restores
+scheduler/RNG/step from its default minimal state; full optimizer state requires upstream's
+full-state option. AI Toolkit finds the newest matching save by creation time, restores
+LoRA weights and `training_info.step`, and loads `optimizer.pt` when available. Neither
+path promises bit-identical continuation. The established start/restart API remains
+available without the stricter Resume opt-in. Historical records are project-owned; the
+global pod record retains billing/pending-output custody and cannot import a comparison
+into another project's history or results folder.
 
 ## 5. GPU inventory backend
 

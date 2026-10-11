@@ -878,22 +878,22 @@ def test_ltx_dry_run_fails_without_captioned_media(
     assert "no captioned media" in capsys.readouterr().out
 
 
-def test_ltx_warns_on_videos_with_stills_bucket(
+def test_ltx_refuses_video_with_stills_bucket_then_exports_approved_clip(
     workspace: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     faces = workspace / "datasets" / "faces"
     (faces / "clip.mp4").write_bytes(b"\x00")
     (faces / "clip.txt").write_text("IVAN9 man walks through a doorway", encoding="utf-8")
     run_json = write_run_json(workspace, ltx_run_config(workspace))
-    assert ltx.main(["--config", str(run_json), "--dry-run"]) == 0
+    assert ltx.main(["--config", str(run_json), "--dry-run"]) == 2
     out = capsys.readouterr().out
-    assert "warning: 1 video item(s)" in out and "1024x1024x1" in out
-    entries = json.loads((workspace / "runs" / RUN_ID / "dataset.json").read_text())
-    assert str(faces / "clip.mp4") in [e["media_path"] for e in entries]
+    assert "Video training needs an explicit" in out
+    assert not (workspace / "runs" / RUN_ID / "dataset.json").exists()
     extra = {"preprocess": {"resolution_buckets": "768x768x49"}}
     write_run_json(workspace, ltx_run_config(workspace, extra=extra))
     assert ltx.main(["--config", str(run_json), "--dry-run"]) == 0
-    assert "warning:" not in capsys.readouterr().out
+    entries = json.loads((workspace / "runs" / RUN_ID / "dataset.json").read_text())
+    assert str(faces / "clip.mp4") in [e["media_path"] for e in entries]
 
 
 def test_ltx_disables_validation_without_prompts(workspace: Path) -> None:
@@ -1528,3 +1528,84 @@ def test_ltx_preprocess_failure_stops_run(
     out = capsys.readouterr().out
     assert "boom\n" in out and "preprocessing exited with code 7" in out
     assert "Loading config..." not in out  # the trainer never started
+
+
+@pytest.mark.parametrize("count", [17, 49])
+def test_ltx_approved_video_cannot_be_shortened_by_bucket(workspace, monkeypatch, count):
+    cfg = ltx_run_config(
+        workspace, extra={"preprocess": {"resolution_buckets": "512x512x33;512x512x1"}}
+    )
+    entries = [
+        {"media_path": str(workspace / "datasets/faces/approved.mp4"), "caption": "NORA7 walks"}
+    ]
+
+    def probe(frames):
+        return json.dumps(
+            {"streams": [{"nb_read_frames": str(frames), "width": 512, "height": 512}]}
+        )
+
+    monkeypatch.setattr(
+        ltx.subprocess,
+        "run",
+        lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, probe(count), ""),
+    )
+    with pytest.raises(ltx.ConfigError, match=f"has {count} frames"):
+        ltx.check_video_lengths(entries, cfg)
+    monkeypatch.setattr(
+        ltx.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, probe(33), "")
+    )
+    ltx.check_video_lengths(entries, cfg)
+
+
+def test_ltx_video_bucket_must_preserve_approved_frame_aspect(workspace, monkeypatch):
+    cfg = ltx_run_config(
+        workspace, extra={"preprocess": {"resolution_buckets": "512x512x33;512x512x1"}}
+    )
+    entries = [
+        {"media_path": str(workspace / "datasets/faces/approved.mp4"), "caption": "NORA7 walks"}
+    ]
+    response = json.dumps({"streams": [{"nb_read_frames": "33", "width": 1920, "height": 1080}]})
+    monkeypatch.setattr(
+        ltx.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, response, "")
+    )
+    with pytest.raises(ltx.ConfigError, match="same aspect ratio"):
+        ltx.check_video_lengths(entries, cfg)
+    cfg["extra"]["preprocess"]["resolution_buckets"] = "512x288x33;512x512x1"
+    ltx.check_video_lengths(entries, cfg)
+
+
+def test_ltx_derives_exact_buckets_from_approved_video_and_still_targets(workspace, monkeypatch):
+    cfg = ltx_run_config(
+        workspace,
+        resolution=[768],
+        extra={"preprocess": {"buckets_from_media": True, "args": ["--vae-tiling"]}},
+    )
+    entries = [
+        {"media_path": str(workspace / "approved.mp4"), "caption": "NORA7 walks"},
+        {"media_path": str(workspace / "still.png"), "caption": "NORA7"},
+    ]
+    response = json.dumps({"streams": [{"nb_read_frames": "49", "width": 512, "height": 288}]})
+    monkeypatch.setattr(
+        ltx.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, response, "")
+    )
+    ltx.check_video_lengths(entries, cfg)
+    assert cfg["extra"]["preprocess"] == {
+        "resolution_buckets": "512x288x49;768x768x1",
+        "args": ["--vae-tiling"],
+    }
+
+
+@pytest.mark.parametrize("width,height,count", [(510, 288, 33), (512, 288, 32), (512, 288, 265)])
+def test_ltx_refuses_unapproved_dimensions_or_frame_count(
+    workspace, monkeypatch, width, height, count
+):
+    cfg = ltx_run_config(workspace, extra={"preprocess": {"buckets_from_media": True}})
+    entries = [{"media_path": str(workspace / "approved.mp4"), "caption": "NORA7 walks"}]
+    response = json.dumps(
+        {"streams": [{"nb_read_frames": str(count), "width": width, "height": height}]}
+    )
+    monkeypatch.setattr(
+        ltx.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, response, "")
+    )
+    with pytest.raises(ltx.ConfigError, match="Approve its training segment in Images"):
+        ltx.check_video_lengths(entries, cfg)

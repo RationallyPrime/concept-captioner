@@ -129,6 +129,7 @@ _TOP_KEYS = frozenset(
         "hub",
         "hf_token",
         "extra",
+        "resume",
     }
 )
 _REQUIRED_KEYS = ("run_id", "dataset", "triggers", "base_model")
@@ -294,6 +295,9 @@ def validate_run_config(raw: Any, workspace: Path | None = None) -> dict[str, An
         errors.append("extra: must be an object")
         extra = {}
     cfg["extra"] = extra
+    cfg["resume"] = raw.get("resume", False)
+    if not isinstance(cfg["resume"], bool):
+        errors.append("resume: must be true or false")
     if errors:
         raise ConfigError("; ".join(errors))
     return cfg
@@ -695,9 +699,22 @@ DEFAULT_LTX_DIR = "/opt/ltx-2"
 LTX_PREPROCESS_ENV = "LTX_PREPROCESS_SCRIPT"
 LTX_TRAIN_ENV = "LTX_TRAIN_SCRIPT"
 MEDIA_SUFFIXES = frozenset(
-    {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".mp4", ".mov", ".webm", ".mkv"}
+    {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+        ".bmp",
+        ".tif",
+        ".tiff",
+        ".mp4",
+        ".mov",
+        ".m4v",
+        ".webm",
+        ".mkv",
+    }
 )
-VIDEO_SUFFIXES = frozenset({".mp4", ".mov", ".webm", ".mkv"})
+VIDEO_SUFFIXES = frozenset({".mp4", ".mov", ".m4v", ".webm", ".mkv"})
 PREPROCESS_KEY = "preprocess"  # the one `extra` key that is not a trainer config key
 # model.<key> -> process_dataset.py flag. The preprocessor loads the same files as the trainer
 # (text embeddings and latents), so both phases read them from the merged `model` block.
@@ -818,6 +835,98 @@ def preprocess_options(cfg: dict[str, Any]) -> tuple[str, list[str]]:
 def explicit_bucket(cfg: dict[str, Any]) -> bool:
     options = cfg["extra"].get(PREPROCESS_KEY)
     return isinstance(options, dict) and options.get("resolution_buckets") is not None
+
+
+def buckets_from_media(cfg: dict[str, Any]) -> bool:
+    options = cfg["extra"].get(PREPROCESS_KEY)
+    return isinstance(options, dict) and options.get("buckets_from_media", False)
+
+
+def check_video_lengths(entries: list[dict[str, str]], cfg: dict[str, Any]) -> None:
+    """Require the pinned preprocessor to consume the entire approved clip.
+
+    Its bucket choice minimizes aspect difference, then favors more frames and area,
+    among buckets that fit. Any smaller winning bucket would silently truncate the clip.
+    Temporal subsampling is not exposed by our preprocess allowlist (the default is 1).
+    """
+    buckets = [
+        tuple(map(int, bucket.split("x"))) for bucket in preprocess_options(cfg)[0].split(";")
+    ]
+    derive = buckets_from_media(cfg)
+    derived: set[tuple[int, int, int]] = set()
+    for entry in entries:
+        media = Path(entry["media_path"])
+        if media.suffix.lower() not in VIDEO_SUFFIXES:
+            size = max(cfg["resolution"])
+            derived.add((size, size, 1))
+            continue
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-count_frames",
+                "-show_entries",
+                "stream=nb_read_frames,width,height",
+                "-of",
+                "json",
+                str(media),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        try:
+            stream = json.loads(result.stdout)["streams"][0]
+            count, width, height = (
+                int(stream[key]) for key in ("nb_read_frames", "width", "height")
+            )
+            if result.returncode != 0 or count < 1 or width < 1 or height < 1:
+                raise ValueError("invalid video stream")
+        except (ValueError, KeyError, IndexError, TypeError):
+            raise ConfigError(f"Cannot count frames in approved clip {media.name}") from None
+        if derive:
+            if width % 32 or height % 32 or count < 9 or count > 257 or count % 8 != 1:
+                raise ConfigError(
+                    f"Approved clip {media.name} is {width}x{height} with {count} frames. "
+                    "Approve its training segment in Images: dimensions must be multiples of 32 "
+                    "and the frame count must be 8n+1 from 9 through 257."
+                )
+            derived.add((width, height, count))
+            continue
+        eligible = [bucket for bucket in buckets if bucket[2] <= count]
+        chosen = min(
+            eligible,
+            key=lambda b: (
+                abs(math.log(width / height) - math.log(b[0] / b[1])),
+                -b[2],
+                -b[0] * b[1],
+            ),
+            default=None,
+        )
+        if chosen is None or chosen[2] != count:
+            sizes = sorted({b[2] for b in buckets if b[2] > 1})
+            raise ConfigError(
+                f"Approved clip {media.name} has {count} frames; its selected training bucket would "
+                f"use {chosen[2] if chosen else 0}. Reselect a segment with exactly one configured "
+                f"video frame count {sizes}, or set a matching bucket. Clips are never truncated."
+            )
+        if chosen[0] * height != chosen[1] * width:
+            raise ConfigError(
+                f"Approved clip {media.name} is {width}x{height}, but its training bucket is "
+                f"{chosen[0]}x{chosen[1]}. Approve a fitted training segment in Images before "
+                "captioning and publishing, or configure a bucket with the same aspect ratio. "
+                "The trainer must not crop unseen content."
+            )
+    if derive:
+        options = dict(cfg["extra"][PREPROCESS_KEY])
+        options.pop("buckets_from_media")
+        options["resolution_buckets"] = ";".join(
+            f"{w}x{h}x{frames}" for w, h, frames in sorted(derived)
+        )
+        cfg["extra"][PREPROCESS_KEY] = options
 
 
 def model_args(model: dict[str, Any]) -> list[str]:
@@ -1016,6 +1125,18 @@ def main(argv: list[str] | None = None) -> int:
         )
         if not entries:
             raise ConfigError(f"no captioned media in {cfg['dataset']['path']}")
+        videos = sum(Path(e["media_path"]).suffix.lower() in VIDEO_SUFFIXES for e in entries)
+        if videos:
+            buckets = preprocess_options(cfg)[0].split(";")
+            if not buckets_from_media(cfg) and (
+                not explicit_bucket(cfg) or not any(int(b.split("x")[2]) > 1 for b in buckets)
+            ):
+                raise ConfigError(
+                    "Video training needs an explicit extra.preprocess.resolution_buckets with "
+                    "more than one frame (8n+1). The still-image bucket would discard motion."
+                )
+            if not args.dry_run:
+                check_video_lengths(entries, cfg)
         native = build_native_config(cfg, run_dir)
         pre_cmd = preprocess_argv(run_dir, cfg)
     except (OSError, ValueError) as exc:
@@ -1039,12 +1160,6 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(entries, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
     say(f"wrote {dataset_json}: {len(entries)} items, {skipped} without a caption skipped")
-    videos = sum(Path(e["media_path"]).suffix.lower() in VIDEO_SUFFIXES for e in entries)
-    if videos and not explicit_bucket(cfg):
-        say(
-            f"warning: {videos} video item(s) but the resolution bucket is the stills default "
-            f"({preprocess_options(cfg)[0]}); set extra.preprocess.resolution_buckets to WxHxF"
-        )
     config_yaml = run_dir / "config.yaml"
     write_yaml(config_yaml, native, YAML_HEADER)
     say(f"wrote {config_yaml}")

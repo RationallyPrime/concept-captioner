@@ -53,10 +53,17 @@ def check_preprocess(options: Any) -> tuple[str | None, list[str]]:
         return None, []
     if not isinstance(options, dict):
         raise ValueError("extra.preprocess: must be an object")
-    unknown = sorted(set(options) - {"resolution_buckets", "args"})
+    unknown = sorted(set(options) - {"resolution_buckets", "buckets_from_media", "args"})
     if unknown:
         raise ValueError("extra.preprocess: unknown keys: " + ", ".join(unknown))
     override = options.get("resolution_buckets")
+    from_media = options.get("buckets_from_media", False)
+    if not isinstance(from_media, bool):
+        raise ValueError("extra.preprocess.buckets_from_media: must be a boolean")
+    if from_media and override is not None:
+        raise ValueError(
+            "extra.preprocess: choose buckets_from_media or resolution_buckets, not both"
+        )
     if override is not None and (
         not isinstance(override, str) or not BUCKET_RE.fullmatch(override)
     ):

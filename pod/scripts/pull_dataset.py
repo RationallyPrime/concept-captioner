@@ -49,7 +49,7 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".m4v"})
 TABULAR_SUFFIXES = frozenset({".parquet", ".arrow"})
 METADATA_NAMES = ("metadata.jsonl", "metadata.csv")  # jsonl wins when a folder has both
 ID_KEYS = ("file_name", "filename", "image_id", "id", "name")
@@ -63,6 +63,7 @@ SNAPSHOT_PATTERNS: tuple[str, ...] = (
     *(f"*{suffix}" for suffix in sorted(IMAGE_SUFFIXES)),
     *(f"*{suffix.upper()}" for suffix in sorted(IMAGE_SUFFIXES)),
     "*.txt",
+    "*.json",
     *(f"*{name}" for name in METADATA_NAMES),
 )
 
@@ -262,12 +263,16 @@ def metadata_files(snapshot: Path, split: str | None) -> list[Path]:
     return chosen
 
 
-def collect_imagefolder(snapshot: Path, *, split: str | None, caption_column: str) -> list[Entry]:
+def collect_imagefolder(
+    snapshot: Path, *, split: str | None, caption_column: str, only_metadata: bool = False
+) -> list[Entry]:
     """Entries for every image in the snapshot: metadata rows first, then unlisted images."""
     entries: list[Entry] = []
     seen: set[Path] = set()
     caption_keys = (caption_column, "caption", "text")
     metadata = metadata_files(snapshot, split)
+    if only_metadata and not metadata:
+        raise PullError("This training dataset needs metadata listing its included media.")
     for meta in metadata:
         for row in read_metadata(meta):
             raw = row.get("file_name")
@@ -287,9 +292,18 @@ def collect_imagefolder(snapshot: Path, *, split: str | None, caption_column: st
                     f"{meta}: {raw!r} is not an image ({' '.join(sorted(IMAGE_SUFFIXES))})"
                 )
             caption = caption_of(row, caption_keys) or sidecar_caption(source)
-            entries.append(Entry(file_name=flatten(raw), source=source, caption=caption))
+            entries.append(
+                Entry(
+                    file_name=flatten(raw),
+                    source=source,
+                    caption=caption,
+                    record=source.with_suffix(".json").read_text(encoding="utf-8")
+                    if source.with_suffix(".json").is_file()
+                    else None,
+                )
+            )
             seen.add(source)
-    for root in [meta.parent for meta in metadata] or [snapshot]:
+    for root in [] if only_metadata else [meta.parent for meta in metadata] or [snapshot]:
         for path in sorted(root.rglob("*")):
             if (
                 path.suffix.lower() not in IMAGE_SUFFIXES
@@ -300,7 +314,16 @@ def collect_imagefolder(snapshot: Path, *, split: str | None, caption_column: st
                 continue
             seen.add(path)
             name = flatten(path.relative_to(root).as_posix())
-            entries.append(Entry(file_name=name, source=path, caption=sidecar_caption(path)))
+            entries.append(
+                Entry(
+                    file_name=name,
+                    source=path,
+                    caption=sidecar_caption(path),
+                    record=path.with_suffix(".json").read_text(encoding="utf-8")
+                    if path.with_suffix(".json").is_file()
+                    else None,
+                )
+            )
     return entries
 
 
@@ -390,6 +413,7 @@ def build_manifest(
         "repo_id": args.repo,
         "revision": sha or args.revision,
         "requested_revision": args.revision,
+        "only_metadata": getattr(args, "only_metadata", False),
         "split": args.split,
         "convention": convention,
         "image_column": args.image_column,
@@ -486,6 +510,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--caption-column", default="caption")
     parser.add_argument("--id-column", default=None)
     parser.add_argument(
+        "--only-metadata",
+        action="store_true",
+        help="train only media listed by metadata; require it",
+    )
+    parser.add_argument(
         "--job-path", default="concept-captioner/job.yaml", help="job.yaml path in the repo"
     )
     parser.add_argument(
@@ -514,7 +543,10 @@ def run(args: argparse.Namespace, hub: Hub | None) -> int:
         if convention == IMAGEFOLDER:
             snapshot = hub.snapshot(args.repo, revision, list(SNAPSHOT_PATTERNS))
             entries: Iterable[Entry] = collect_imagefolder(
-                snapshot, split=args.split, caption_column=args.caption_column
+                snapshot,
+                split=args.split,
+                caption_column=args.caption_column,
+                only_metadata=args.only_metadata,
             )
         else:
             rows = hub.load_dataset(

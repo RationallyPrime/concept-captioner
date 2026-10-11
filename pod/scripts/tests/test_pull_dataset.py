@@ -664,3 +664,33 @@ def test_help_runs_isolated_without_heavy_imports():
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "[]"
+
+
+def test_metadata_only_pull_keeps_exact_approved_video_and_sidecars(tmp_path):
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "approved.mp4").write_bytes(b"exact selected clip bytes")
+    (snapshot / "approved.txt").write_text("NORA7 walks through a room")
+    (snapshot / "approved.json").write_text('{"source":"human"}')
+    (snapshot / "excluded.png").write_bytes(b"stale unrelated photo")
+    (snapshot / "metadata.jsonl").write_text(
+        '{"file_name":"approved.mp4","caption":"NORA7 walks through a room"}\n'
+    )
+    entries = pull.collect_imagefolder(
+        snapshot, split="train", caption_column="caption", only_metadata=True
+    )
+    out = tmp_path / "pulled"
+    pull.write_entries(entries, out)
+    assert [e.file_name for e in entries] == ["approved.mp4"]
+    assert (out / "approved.mp4").read_bytes() == b"exact selected clip bytes"
+    assert (out / "approved.txt").read_text() == "NORA7 walks through a room"
+    assert (out / "approved.json").read_text() == '{"source":"human"}'
+    assert not (out / "excluded.png").exists()
+
+
+def test_metadata_only_pull_refuses_unlisted_training_media(tmp_path):
+    (tmp_path / "clip.mp4").write_bytes(b"video")
+    with pytest.raises(pull.PullError, match="metadata"):
+        pull.collect_imagefolder(
+            tmp_path, split="train", caption_column="caption", only_metadata=True
+        )

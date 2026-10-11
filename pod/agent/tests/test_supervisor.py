@@ -384,6 +384,7 @@ def test_transfer_exits_zero(sup: Supervisor, settings: Settings) -> None:
         "caption_column": "caption",
         "id_column": None,
         "hf_token": "***",
+        "only_metadata": False,
     }
     text = Path(state.log_path).read_text()
     assert "transfer complete" in text and "hf_secret_abc" not in text

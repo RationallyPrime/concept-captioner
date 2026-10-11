@@ -421,12 +421,7 @@ def test_every_error_uses_the_one_envelope(client: TestClient, settings: Setting
     assert in_use(client) == ["vllm", None]
     states = {s["name"]: s["state"] for s in client.get("/services").json()["services"]}
     assert states == {
-        "vllm": "running",
-        "tensorboard": "running",
-        "trainer-aitoolkit": "idle",
-        "trainer-ltx": "idle",
-        "pull-dataset": "idle",
-        "push-lora": "idle",
+        name: "running" if name in {"vllm", "tensorboard"} else "idle" for name in SERVICE_NAMES
     }
 
 
@@ -651,7 +646,7 @@ def test_topology_four_gpus_reserves_gpu_zero_and_allows_override(
 def test_services_lists_every_catalog_name_idle(client: TestClient) -> None:
     services = client.get("/services").json()["services"]
     assert [s["name"] for s in services] == list(SERVICE_NAMES)
-    assert len(services) == 6
+    assert len(services) == len(SERVICE_NAMES)
     for state in services:
         assert set(state) == STATE_KEYS
         assert state["state"] == "idle"

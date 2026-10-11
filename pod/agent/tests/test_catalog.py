@@ -19,6 +19,7 @@ from podagent.catalog import (
     FAKE_EXTRA_FLAGS,
     SERVICE_NAMES,
     VLLM_EXTRA_FLAGS,
+    GenerationParams,
     LtxRunConfig,
     PullDatasetParams,
     PushLoraParams,
@@ -72,6 +73,8 @@ def test_catalog_contract() -> None:
         "trainer-ltx",
         "pull-dataset",
         "push-lora",
+        "generate-aitoolkit",
+        "generate-ltx",
     )
     expected = {
         "vllm": ((1, 1), 8000, VllmParams),
@@ -80,6 +83,8 @@ def test_catalog_contract() -> None:
         "trainer-ltx": ((1, ANY), None, LtxRunConfig),
         "pull-dataset": ((0, 0), None, PullDatasetParams),
         "push-lora": ((0, 0), None, PushLoraParams),
+        "generate-aitoolkit": ((1, 1), None, GenerationParams),
+        "generate-ltx": ((1, 1), None, GenerationParams),
     }
     for name, (gpus, port, model) in expected.items():
         spec = CATALOG[name]

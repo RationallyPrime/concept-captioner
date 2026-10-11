@@ -42,6 +42,8 @@ from pydantic import (
 from pydantic_core import InitErrorDetails, PydanticCustomError
 from typing_extensions import TypedDict
 
+from .artifacts import resolve_run_file
+from .errors import AgentError
 from .ltx_rules import LTX_HUB_MODEL, LTX_HUB_REVISION, check_preprocess
 from .settings import Paths, Settings
 
@@ -322,6 +324,7 @@ class RunConfig(ServiceParams):
     hub: HubTarget | None = None
     hf_token: Secret = None
     extra: dict[str, Any] = {}
+    resume: bool = False
 
     @field_validator("triggers")
     @classmethod
@@ -400,6 +403,7 @@ class PullDatasetParams(ServiceParams):
     caption_column: Column = "caption"
     id_column: Column | None = None
     hf_token: Secret = None
+    only_metadata: bool = False
 
     @field_validator("split")
     @classmethod
@@ -436,6 +440,39 @@ class PushLoraParams(ServiceParams):
     @classmethod
     def _commit_message(cls, value: str | None) -> str | None:
         return None if value is None else _text(value, "commit_message")
+
+
+class GenerationParams(ServiceParams):
+    """One matched base/LoRA batch, from a checkpoint already on this storage."""
+
+    run_id: str = Field(pattern=RUN_ID_PATTERN)
+    source_run_id: str = Field(pattern=RUN_ID_PATTERN)
+    checkpoint: str = Field(min_length=1)
+    prompts: list[str] = Field(min_length=1, max_length=6)
+    seeds: list[Annotated[int, Field(ge=0, le=2**32 - 1)]] = Field(min_length=1, max_length=4)
+    width: int = Field(default=512, ge=64, le=2048, multiple_of=32)
+    height: int = Field(default=512, ge=64, le=2048, multiple_of=32)
+    inference_steps: int = Field(default=20, ge=1, le=100)
+    guidance_scale: float = Field(default=4, ge=0, le=20)
+    num_frames: int = Field(default=1, ge=1, le=257)
+    frame_rate: float = Field(default=24, gt=0, le=60)
+
+    @field_validator("prompts")
+    @classmethod
+    def _prompts(cls, value: list[str]) -> list[str]:
+        if any(not p.strip() or "\x00" in p or "--" in p or len(p) > 4000 for p in value):
+            raise ValueError(
+                "prompts must be non-blank, at most 4000 characters and contain no '--' overrides"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _distinct_run(self) -> GenerationParams:
+        if self.run_id == self.source_run_id:
+            raise ValueError("generation must have its own run_id")
+        if self.num_frames % 8 != 1:
+            raise ValueError("num_frames must be 8n+1")
+        return self
 
 
 # --- the second validation step: checks that need the workspace layout --------------------------
@@ -568,7 +605,94 @@ def parse_params(
     model = CATALOG[name].params_model
     params = model.model_validate(dict(raw), context={"fake": fake})
     validate(params, paths)
+    if isinstance(params, RunConfig):
+        _validate_training_start(name, params, paths)
+    elif isinstance(params, GenerationParams):
+        _validate_generation(name, params, paths)
     return params
+
+
+def _invalid(model: ServiceParams, reason: str) -> None:
+    raise ValidationError.from_exception_data(
+        type(model).__name__,
+        [
+            {
+                "type": PydanticCustomError("run_state", "{reason}", {"reason": reason}),
+                "loc": ("run_id",),
+                "input": model.run_id,
+            }
+        ],
+    )
+
+
+def _validate_training_start(name: str, params: RunConfig, paths: Paths) -> None:
+    run_dir = paths.run_dir(params.run_id)
+    previous = run_dir / RUN_JSON
+    if not params.resume:
+        # Preserve the existing start/restart contract. The native Resume action opts into
+        # stricter checkpoint/settings validation; Repeat always allocates a new run_id.
+        return
+    if not previous.is_file():
+        _invalid(params, "No saved run to resume on this storage")
+    old = type(params).model_validate_json(previous.read_text())
+    immutable = (
+        "dataset",
+        "triggers",
+        "profile",
+        "base_model",
+        "learning_rate",
+        "rank",
+        "alpha",
+        "resolution",
+        "batch_size",
+        "gradient_accumulation",
+        "seed",
+        "extra",
+    )
+    changed = [key for key in immutable if getattr(old, key) != getattr(params, key)]
+    if changed:
+        _invalid(
+            params,
+            "Resume preserves the saved settings. Use Repeat to change: " + ", ".join(changed),
+        )
+    if name == "trainer-aitoolkit":
+        if "training_folder" in params.extra or "config" in params.extra:
+            _invalid(
+                params,
+                "Resume supports the wrapper's default checkpoint layout. Use Repeat for custom layouts.",
+            )
+        weights = list((run_dir / "output" / params.run_id).glob(f"{params.run_id}*.safetensors"))
+        weights = [
+            p for p in weights if not any(s in p.name for s in ("_LoRA", "_refiner", "_t2i", "_cn"))
+        ]
+    else:
+        weights = list((run_dir / "output").rglob("*.safetensors"))
+    if not weights:
+        _invalid(params, "No trainer checkpoint is available to resume")
+    latest = max(weights, key=lambda p: (p.stat().st_mtime_ns, str(p)))
+    if name == "trainer-ltx":
+        match = re.search(r"step_(\d+)", latest.name)
+        state = latest.parent / f"training_state_step_{match.group(1)}.pt" if match else None
+        if state is None or not state.is_file():
+            _invalid(
+                params, "LTX resume needs the matching training_state_step file on this storage"
+            )
+
+
+def _validate_generation(name: str, params: GenerationParams, paths: Paths) -> None:
+    if paths.run_dir(params.run_id).exists():
+        _invalid(params, "Choose a new generation run_id; existing outputs are kept")
+    source = paths.run_dir(params.source_run_id)
+    try:
+        cfg = json.loads((source / RUN_JSON).read_text())
+        resolve_run_file(params.source_run_id, source, params.checkpoint)
+    except (OSError, ValueError, AgentError) as error:
+        _invalid(params, f"The source run or checkpoint is unavailable: {error}")
+    supported = "black-forest-labs/FLUX.1-dev" if name == "generate-aitoolkit" else LTX_HUB_MODEL
+    if cfg.get("base_model") != supported or not params.checkpoint.endswith(".safetensors"):
+        _invalid(params, f"This generation path supports {supported} checkpoints only")
+    if name == "generate-aitoolkit" and params.num_frames != 1:
+        _invalid(params, "FLUX generation produces images; num_frames must be 1")
 
 
 # --- the spec and its builders ---------------------------------------------------------------
@@ -732,6 +856,34 @@ def _trainer_prepare(params: ServiceParams, paths: Paths) -> None:
     tmp = run_dir / f"{RUN_JSON}.tmp"
     tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     os.replace(tmp, run_dir / RUN_JSON)
+    manifest = Path(cfg.dataset.path) / "manifest.json"
+    if manifest.is_file():
+        # Keep the actual resolved Hub revision beside the run, even if the dataset is repulled.
+        (run_dir / "dataset-manifest.json").write_text(manifest.read_text(), encoding="utf-8")
+
+
+def _generation_prepare(params: ServiceParams, paths: Paths) -> None:
+    cfg = _as(params, GenerationParams)
+    run_dir = paths.run_dir(cfg.run_id)
+    run_dir.mkdir(parents=True, exist_ok=False)
+    (run_dir / "generation.json").write_text(
+        json.dumps(cfg.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def _generation_argv(trainer: str) -> Callable[[ServiceParams, list[int], Paths], list[str]]:
+    def build(params: ServiceParams, _gpus: list[int], paths: Paths) -> list[str]:
+        p = _as(params, GenerationParams)
+        return [
+            paths.venv_bin(trainer, "python"),
+            str(paths.scripts / "generate_results.py"),
+            "--trainer",
+            trainer,
+            "--config",
+            str(paths.run_dir(p.run_id) / "generation.json"),
+        ]
+
+    return build
 
 
 def _pull_dataset_argv(params: ServiceParams, _gpus: list[int], paths: Paths) -> list[str]:
@@ -756,6 +908,8 @@ def _pull_dataset_argv(params: ServiceParams, _gpus: list[int], paths: Paths) ->
         argv += ["--revision", p.revision]
     if p.id_column is not None:
         argv += ["--id-column", p.id_column]
+    if p.only_metadata:
+        argv.append("--only-metadata")
     return argv
 
 
@@ -854,5 +1008,20 @@ CATALOG: dict[str, ServiceSpec] = {
         run_id=_params_run_id,
     ),
 }
+
+for _trainer in ("aitoolkit", "ltx"):
+    _name = f"generate-{_trainer}"
+    CATALOG[_name] = ServiceSpec(
+        name=_name,
+        params_model=GenerationParams,
+        gpus=(1, 1),
+        port=None,
+        argv=_generation_argv(_trainer),
+        cwd=_run_dir,
+        log_path=_trainer_log,
+        env=_trainer_env,
+        prepare=_generation_prepare,
+        run_id=_params_run_id,
+    )
 
 SERVICE_NAMES: tuple[str, ...] = tuple(CATALOG)

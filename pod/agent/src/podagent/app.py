@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import contextlib
 import inspect
+import json
 import os
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -405,6 +406,25 @@ def create_app(settings: Settings | None = None, backend: GpuBackend | None = No
     def events(run_id: str) -> dict[str, Any]:
         logdir = run_dir_or_404(run_id) / "tensorboard"
         return summarize_run(run_id, logdir).model_dump(mode="json")
+
+    @app.get("/runs/{run_id}/config")
+    def run_config(run_id: str) -> dict[str, Any]:
+        run_dir = run_dir_or_404(run_id)
+        path = run_dir / "run.json"
+        if not path.is_file():
+            raise NotFound(f"no training config for run {run_id!r}")
+        config = json.loads(path.read_text())
+        for key in ("hf_token", "api_key"):
+            config.pop(key, None)
+        manifest = run_dir / "dataset-manifest.json"
+        dataset = json.loads(manifest.read_text()) if manifest.is_file() else {}
+        return {
+            "run_id": run_id,
+            "config": config,
+            "dataset": {
+                key: dataset[key] for key in ("repo_id", "revision", "count") if key in dataset
+            },
+        }
 
     @app.get("/runs/{run_id}/log")
     def run_log(run_id: str, tail: int = Query(default=200, ge=1, le=5000)) -> dict[str, Any]:
