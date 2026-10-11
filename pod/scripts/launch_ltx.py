@@ -5,23 +5,30 @@
 
 1. Validate run.json: an own copy of the RunConfig rules of POD-SPEC §4.1 (no podagent import).
    ``dataset.path`` must be an existing directory under ``<PODAGENT_WORKSPACE>/datasets``.
-2. Write ``<run>/dataset.json`` (one ``{"caption", "media_path"}`` per captioned image or video
+2. Prepare the Hub model when ``base_model`` is ``Lightricks/LTX-2`` (see "Model files"); a
+   failure exits ``EXIT_MODEL_PREPARATION`` (69) before any run file is written. Skipped by
+   ``--dry-run``.
+3. Write ``<run>/dataset.json`` (one ``{"caption", "media_path"}`` per captioned image or video
    in the dataset folder; media without a ``<stem>.<caption_ext>`` sidecar is skipped and
    counted) and ``<run>/config.yaml`` (the LTX-2 trainer config, ``extra`` deep-merged last).
    ``--dry-run`` stops here with exit 0.
-3. Preprocess: ``python <LTX>/scripts/process_dataset.py <run>/dataset.json --resolution-buckets
+4. Preprocess: ``python <LTX>/scripts/process_dataset.py <run>/dataset.json --resolution-buckets
    <max>x<max>x1 ... --model-path <model.model_path> --text-encoder-path
    <model.text_encoder_path> --output-dir <run>/preprocessed``, skipped when ``preprocessed/``
    is already populated unless ``--reprocess``. A nonzero exit ends the run with that code. The
    model arguments are read back from the merged ``model`` block of the config (``model_args``),
    so whatever ``extra.model`` changes, the preprocessor and the trainer load the same files.
-4. Train: ``python <LTX>/scripts/train.py <run>/config.yaml`` (VERIFY), output tee'd to stdout
+5. Train: ``python <LTX>/scripts/train.py <run>/config.yaml`` (VERIFY), output tee'd to stdout
    (the agent points it at ``<run>/trainer.log``; ``\\r`` redraws become lines) and scraped for
    ``loss`` / ``lr`` / ``step`` into ``<run>/tensorboard/`` as ``scraped/loss`` and
    ``scraped/lr`` through ``torch.utils.tensorboard.SummaryWriter`` when importable.
-5. On exit 0 with ``hub.push_on_finish``, run the sibling ``push_lora.py`` (agent venv).
-6. Exit with the trainer's code; when the trainer succeeded but the push did not, with the
+6. On exit 0 with ``hub.push_on_finish``, run the sibling ``push_lora.py`` (agent venv).
+7. Exit with the trainer's code; when the trainer succeeded but the push did not, with the
    push's code, so a nonzero exit always means something did not land.
+
+Exit codes of the wrapper itself: ``2`` invalid run config (nothing written), ``69`` model
+preparation failed (Hub unreachable, gated, licence not accepted, disk full; nothing written).
+Any other code is the preprocessor's, the trainer's or the push's.
 
 The run directory is the directory holding run.json. ``extra`` merges into the config document
 root (``{"optimization": {"optimizer_type": "adamw"}}``); mappings merge recursively, lists and
@@ -34,8 +41,9 @@ and appends allowlisted arguments to the preprocess command. Paths, columns and 
 remain fixed by the wrapper; switches take no value and numeric options use --flag=value.
 
 Model files. ``base_model: Lightricks/LTX-2`` automatically prepares its unified checkpoint
-and mirrored Gemma assets in ``<workspace>/models/ltx-2`` before preprocessing. The dry run
-only writes those planned paths and downloads nothing. Alternatively, ``base_model`` may be
+and mirrored Gemma assets in ``<workspace>/models/ltx-2`` before preprocessing, from the Hub
+revision pinned in the shared rule file (``LTX_HUB_REVISION``), never the moving main branch.
+The dry run only writes those planned paths and downloads nothing. Alternatively, ``base_model`` may be
 a checkpoint ``.safetensors`` under the workspace (``/workspace/models/...``) and becomes
 ``model.model_path``; the Gemma text encoder is a second path the RunConfig has no field for,
 so it comes from ``extra.model.text_encoder_path`` (a directory for a unified checkpoint, a
@@ -61,7 +69,10 @@ paths), ``POD_AGENT_PYTHON`` (interpreter for push_lora.py; default
 run.json, passed to children through the environment only).
 
 Standard library only at import time; PyYAML writes config.yaml when importable, else a small
-emitter here does. The block between the ``shared`` markers is byte-identical in
+emitter here does. The LTX rules shared with the agent (preprocess allowlist, pinned Hub source)
+are read at import from ``../agent/src/podagent/ltx_rules.py`` with runpy, the same relative
+layout the image recreates under ``/opt/pod``; a missing copy therefore fails ``--help``, which
+the image build runs. The block between the ``shared`` markers is byte-identical in
 launch_aitoolkit.py (tests assert it): the scripts run under ``python -I``, so sibling imports
 are not available.
 """
@@ -700,15 +711,14 @@ TEXT_ENCODER_HINT = (
     "LTX-2 needs the Gemma text encoder as a second path (a directory for a unified checkpoint, "
     "a packed .safetensors for a split pack); set extra.model.text_encoder_path"
 )
-LTX_HUB_MODEL = "Lightricks/LTX-2"
-LTX_HUB_CHECKPOINT = "ltx-2-19b-dev.safetensors"
-LTX_HUB_FILES = (
-    LTX_HUB_CHECKPOINT,
-    "text_encoder/model*.safetensors",
-    "text_encoder/config.json",
-    "text_encoder/generation_config.json",
-    "tokenizer/*",
-)
+# One rule file for the API and this isolated wrapper (python -I: no podagent import).
+SHARED_RULES = Path(__file__).resolve().parents[1] / "agent" / "src" / "podagent" / "ltx_rules.py"
+_RULES = runpy.run_path(str(SHARED_RULES))
+LTX_HUB_MODEL: str = _RULES["LTX_HUB_MODEL"]
+LTX_HUB_REVISION: str = _RULES["LTX_HUB_REVISION"]
+LTX_HUB_CHECKPOINT: str = _RULES["LTX_HUB_CHECKPOINT"]
+LTX_HUB_FILES: tuple[str, ...] = tuple(_RULES["LTX_HUB_FILES"])
+EXIT_MODEL_PREPARATION = 69  # sysexits EX_UNAVAILABLE: the model source could not be prepared
 
 
 def resolve_hub_model(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -740,9 +750,13 @@ def download_hub_model(cfg: dict[str, Any]) -> None:
     from huggingface_hub import snapshot_download
 
     model_dir = workspace_root() / "models" / "ltx-2"
-    say(f"preparing {LTX_HUB_MODEL} in {model_dir}; existing files are reused")
+    say(
+        f"preparing {LTX_HUB_MODEL}@{LTX_HUB_REVISION[:12]} in {model_dir}; "
+        "existing files are reused"
+    )
     snapshot_download(
         repo_id=LTX_HUB_MODEL,
+        revision=LTX_HUB_REVISION,
         local_dir=str(model_dir),
         allow_patterns=list(LTX_HUB_FILES),
         token=cfg.get("hf_token") or os.environ.get("HF_TOKEN"),
@@ -793,11 +807,10 @@ def build_dataset_entries(dataset_dir: Path, caption_ext: str) -> tuple[list[dic
 
 def preprocess_options(cfg: dict[str, Any]) -> tuple[str, list[str]]:
     """Use the same stdlib-only validator as the API, including under ``python -I``."""
-    rules = runpy.run_path(
-        str(Path(__file__).resolve().parents[1] / "agent/src/podagent/ltx_preprocess.py")
-    )
     try:
-        return rules["preprocess_options"](cfg["extra"].get(PREPROCESS_KEY), max(cfg["resolution"]))
+        return _RULES["preprocess_options"](
+            cfg["extra"].get(PREPROCESS_KEY), max(cfg["resolution"])
+        )
     except ValueError as error:
         raise ConfigError(str(error)) from error
 
@@ -1008,6 +1021,19 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as exc:
         say(f"invalid run config {args.config}: {exc}")
         return 2
+    if not args.dry_run:
+        # Before any run file exists: a failed download must not leave a run that looks prepared.
+        try:
+            download_hub_model(source_cfg)
+        except Exception as error:
+            status = getattr(getattr(error, "response", None), "status_code", None)
+            detail = f" (HTTP {status})" if status is not None else ""
+            reason = " ".join(str(error).split())[:300]
+            say(
+                f"model preparation failed for {LTX_HUB_MODEL}@{LTX_HUB_REVISION[:12]}: "
+                f"{type(error).__name__}{detail}" + (f": {reason}" if reason else "")
+            )
+            return EXIT_MODEL_PREPARATION
     dataset_json = run_dir / "dataset.json"
     dataset_json.write_text(
         json.dumps(entries, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
@@ -1030,13 +1056,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         say("dry run: nothing started")
         return 0
-    try:
-        download_hub_model(source_cfg)
-    except Exception as error:
-        status = getattr(getattr(error, "response", None), "status_code", None)
-        detail = f" (HTTP {status})" if status is not None else ""
-        say(f"model preparation failed for {LTX_HUB_MODEL}: {type(error).__name__}{detail}")
-        return 1
     if needs_preprocess(run_dir, force=args.reprocess):
         (run_dir / "preprocessed").mkdir(exist_ok=True)
         code = tee(pre_cmd, cwd=run_dir, env=child_env(cfg), out=sys.stdout)

@@ -4,7 +4,11 @@ Programs the agent runs as child processes (POD-SPEC §3, §4.3, §7). They are 
 image at `/opt/pod/scripts/` and must stay standalone: argparse, standard library, plus
 `huggingface_hub`/`datasets`/`Pillow` (pull/push) or the trainer's own venv (launch wrappers).
 They never import `podagent`, and nothing heavy is imported at module level, so
-`python -I <script> --help` works from any interpreter.
+`python -I <script> --help` works from any interpreter. One exception to "standalone":
+`launch_ltx.py` reads the LTX rules it shares with the agent (preprocess allowlist, pinned
+LTX-2 Hub revision) from `../agent/src/podagent/ltx_rules.py` at import, by path with runpy.
+The image recreates that layout under `/opt/pod`, and the build's `--help` check fails if the
+copy is missing.
 
 | script | runs in | purpose |
 | --- | --- | --- |
@@ -95,6 +99,22 @@ creation), then one `upload_folder` of the run directory with these allow-patter
 Files keep their run-relative paths in the repo (`output/<name>/<name>.safetensors`); the card
 lists them. On success the repo URL is printed last and `<run>/push.json` records `repo_id`,
 `url`, `commit`, `run_id`, `files`, `pushed_at`. Token from `HF_TOKEN`.
+
+## Launch wrappers: exit codes (POD-SPEC §4.3)
+
+`launch_aitoolkit.py --config <run>/run.json` and `launch_ltx.py --config <run>/run.json`
+(`--dry-run` writes the native config and stops; `--reprocess` forces LTX preprocessing).
+
+| code | meaning |
+| --- | --- |
+| `0` | the trainer finished (and, with `hub.push_on_finish`, the push landed); with `--dry-run`, the config was written |
+| `2` | invalid run config, or `extra` tried to leave the workspace; one line says why, nothing is written |
+| `69` | `launch_ltx.py` only: preparing `base_model: Lightricks/LTX-2` from the Hub failed (unreachable, gated, licence not accepted, disk full). The line names the exception, the HTTP status when there is one, and its message. Nothing is written to the run directory, so a retry starts clean |
+| other | the preprocessor's (LTX), the trainer's or `push_lora.py`'s own code; a signal-killed trainer is `128 + signal` |
+
+`69` is sysexits' `EX_UNAVAILABLE`, chosen because no trainer or Python itself exits with it.
+The LTX download is pinned to `LTX_HUB_REVISION` in `ltx_rules.py`; changing it is a reviewed
+edit, never the Hub repo's moving `main`.
 
 ## Tests
 
