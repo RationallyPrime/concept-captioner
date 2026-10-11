@@ -13,13 +13,15 @@ struct VisionInspectorTests {
         let image = directory.appendingPathComponent("synthetic.png")
         try MediaEditor.png(MediaFixtures.image(width: 640, height: 512)).write(to: image)
         let task = Task {
-            try await VisionInspector().proposals(images: Array(repeating: image, count: 1000), references: [:])
+            try await VisionInspector().proposals(images: Array(repeating: image, count: 10000), references: [:])
         }
         try await Task.sleep(for: .milliseconds(50))
         let cancelledAt = ContinuousClock.now
         task.cancel()
         await #expect(throws: CancellationError.self) { try await task.value }
-        #expect(cancelledAt.duration(to: .now) < .seconds(2))
+        // The batch shares the serial Vision queue with other suites, so on a three-core CI runner the
+        // current request can wait behind theirs; ten thousand uncancelled images take far longer than this.
+        #expect(cancelledAt.duration(to: .now) < .seconds(10))
     }
 
     @Test(.timeLimit(.minutes(1)))
