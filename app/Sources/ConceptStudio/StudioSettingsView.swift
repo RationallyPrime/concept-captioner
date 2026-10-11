@@ -296,6 +296,17 @@ struct StudioSettingsView: View {
             defer { testing = false }
             do {
                 if session.demoMode { testNote = "Demo connection works locally; no key or network used."; return }
+                if session.endpointKind == "openai", session.openAIUsesChatGPT {
+                    let generation = session.chatGPTWorkGeneration
+                    await session.prepareChatGPTModels(duringConnectionTest: true)
+                    try Task.checkCancellation()
+                    guard generation == session.chatGPTWorkGeneration, !session.demoMode else {
+                        throw CancellationError()
+                    }
+                    if session.chatGPT.availableModels.isEmpty, let issue = session.chatGPT.errorMessage {
+                        throw StudioError.message(issue)
+                    }
+                }
                 let endpoint = try session.endpoint()
                 _ = try await endpoint.client.request(
                     instructions: "Return a Caption object with caption set to connected.",

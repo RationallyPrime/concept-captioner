@@ -124,7 +124,8 @@ checks and their limits are recorded in POD-STATUS.
 
 Owner acceptance and distribution still pending:
 
-- Live ChatGPT and OpenRouter consent and authenticated captioning under the owner's account.
+- OpenRouter browser consent and authenticated captioning remain unverified. The owner has
+  completed ChatGPT sign-in and saved a manual OpenRouter key; both loaded in the current app.
 - Native TensorBoard rendering during an actual run. Offline state and the live backend
   handshake are verified separately; no GPU was restarted solely for this UI check.
 - The owner's full morning walkthrough and first real dataset training run.
@@ -171,3 +172,31 @@ Built-in result generation supports FLUX.1-dev and LTX-2, not H3; actual video t
 uses LTX. Importing and faithfully continuing an externally trained H3 checkpoint and its
 specialized recipe is not established by the same-storage FLUX/LTX Resume proofs. These are
 concrete integration gaps, not likeness-quality findings. No family training was started.
+
+## ChatGPT connection follow-up, 2026-10-11
+
+The reported invalid-stream-event failure came from the primary checkout's stale app bundle,
+built before the `60469b4` raw-byte SSE repair. Rebuilding the usual preview location
+includes that framing repair. A live request then exposed a second issue in current source: the
+provider sent the complete caption in `response.output_item.done`, followed by a successful
+completion with `output: []`. The client now retains those indexed completed items and uses
+them when that final output array is empty. It still requires `response.completed`, preserves
+a nonempty final output, and rejects failed, incomplete, interrupted and refused responses. Native Settings confirmed the saved ChatGPT
+account has plan access and the OpenRouter key remains in Keychain.
+
+A fresh app restart also exposed an empty-model-catalog problem in Settings: testing the
+ChatGPT connection required visiting Captioning first. The connection test now prepares the
+selected account's model catalog inside its existing cancellable operation before resolving
+the client. It preserves the selected model and credentials and reports discovery errors.
+Gemini's existing local key was installed separately in the app's Keychain; no key values or
+account credentials are committed to the repository.
+
+The post-fix live check used the actual rebuilt `ChatGPTModelClient` with the owner's selected
+unexpired ChatGPT registration and one synthetic demo PNG. It received HTTP 200 and decoded a
+usable Caption from `gpt-6.1-sol` (2,067 input / 49 output tokens). This proves the production
+client's image/structured-output path; it is not a caption-quality evaluation or a native Runner
+sidecar-save check. The final Settings click remains an owner check after relaunch because
+computer-control access timed out. Focused gates passed 19 Core stream test methods and 23 app
+account test methods; both changes received independent source acceptance. The usual primary
+checkout preview is updated along with the worktree build. Development signing remains deferred
+at the owner's request.

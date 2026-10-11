@@ -78,11 +78,11 @@ extension StudioSession {
         cancel()
     }
 
-    func prepareChatGPTModels() async {
-        guard !demoMode, !busy, !Task.isCancelled, usesChatGPTForThisRun else { return }
+    func prepareChatGPTModels(duringConnectionTest: Bool = false) async {
+        guard !demoMode, !busy || duringConnectionTest, !Task.isCancelled, usesChatGPTForThisRun else { return }
         let generation = chatGPTWorkGeneration
         await chatGPT.load()
-        guard generation == chatGPTWorkGeneration, !demoMode, !busy,
+        guard generation == chatGPTWorkGeneration, !demoMode, !busy || duringConnectionTest,
               !Task.isCancelled, usesChatGPTForThisRun else { return }
         if chatGPTReady, chatGPT.availableModels.isEmpty {
             await chatGPT.refreshModels()

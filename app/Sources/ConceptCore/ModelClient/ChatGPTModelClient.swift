@@ -1,5 +1,6 @@
 // ChatGPT plan inference uses OAuth credentials and the fixed public Responses endpoint. The
-// plan route streams (`stream: true`); the reply is the terminal `response.completed` event.
+// plan route streams (`stream: true`); completed output items become a reply only after
+// `response.completed` confirms success.
 
 import Foundation
 
@@ -180,9 +181,10 @@ public struct ChatGPTModelClient: ModelClient {
     }
 
     private func completedReply(_ response: HTTPStreamResponse, mode: OutputMode) async throws -> ModelReply {
+        var completedItems: [Int: JSONValue] = [:]
         for try await event in response.events {
             try Task.checkCancellation()
-            if let reply = try terminalReply(event, response: response, mode: mode) {
+            if let reply = try terminalReply(event, response: response, mode: mode, completedItems: &completedItems) {
                 return reply
             }
         }
@@ -192,19 +194,33 @@ public struct ChatGPTModelClient: ModelClient {
     }
 
     /// The reply for a terminal success event, a thrown error for a terminal failure, nil for
-    /// everything else (created, in_progress, deltas, `[DONE]`, and a keep-alive whose data is empty).
+    /// everything else. Completed items are retained for streams whose terminal output is empty;
+    /// deltas and uncompleted items never supply a reply.
     private func terminalReply(
-        _ event: ServerSentEvent, response: HTTPStreamResponse, mode: OutputMode
+        _ event: ServerSentEvent, response: HTTPStreamResponse, mode: OutputMode,
+        completedItems: inout [Int: JSONValue]
     ) throws -> ModelReply? {
         guard event.data != "[DONE]", !event.data.isEmpty else { return nil }
         guard let envelope = try? JSONValue(parsing: Data(event.data.utf8)) else {
             throw ModelError.malformedReply("ChatGPT returned an invalid stream event. No caption was saved.")
         }
         switch envelope.field("type")?.stringValue ?? event.event ?? "" {
+        case "response.output_item.done":
+            guard let index = envelope.field("output_index")?.intValue, index >= 0,
+                  let item = envelope.field("item"), item.objectValue != nil else {
+                throw ModelError.malformedReply("ChatGPT returned an invalid completed output item.")
+            }
+            completedItems[index] = item
+            return nil
         case "response.completed":
-            guard let completed = envelope.field("response"),
+            guard var completed = envelope.field("response"),
                   completed.field("status")?.stringValue == "completed" else {
                 throw ModelError.malformedReply("ChatGPT completion event did not contain a completed response.")
+            }
+            if completed.field("output")?.arrayValue?.isEmpty == true, !completedItems.isEmpty,
+               var fields = completed.objectValue {
+                fields["output"] = .array(completedItems.keys.sorted().compactMap { completedItems[$0] })
+                completed = .object(fields)
             }
             return try OpenAIResponsesClient.parse(completed, mode: mode)
         case "response.failed", "error":

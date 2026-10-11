@@ -73,6 +73,9 @@ private final class ChatGPTStreamingProtocol: URLProtocol {
         let script = switch request.value(forHTTPHeaderField: "Authorization") {
         case "Bearer offline-full-stream": ChatGPTWire.realisticStream(ending: ChatGPTWire.completed())
         case "Bearer offline-failed-stream": ChatGPTWire.realisticStream(ending: ChatGPTWire.failed())
+        case "Bearer offline-empty-completion-stream":
+            (ChatGPTWire.event(ChatGPTWire.itemDone()) + ChatGPTWire.event(ChatGPTWire.completed(output: [])))
+                .joined(separator: "\n") + "\n"
         default: ChatGPTWire.event(ChatGPTWire.completed()).joined(separator: "\n") + "\n"
         }
         // HTTP chunk boundaries fall mid-JSON, mid-line and between the two newlines of an event
@@ -96,16 +99,22 @@ private enum ChatGPTWire {
     static let messages: [ChatMessage] = [
         .user([.text("Caption this image."), .image(data: Data([1, 2]), mediaType: "image/png")]),
     ]
+    static let message: JSONValue = .object([
+        "type": .string("message"), "role": .string("assistant"),
+        "status": .string("completed"), "phase": .string("final"),
+        "content": .array([.object(["type": .string("output_text"), "text": .string(caption)])]),
+    ])
 
-    static func completed(status: String = "completed") -> JSONValue {
+    static func itemDone(index: Int = 0, item: JSONValue = message) -> JSONValue {
+        .object(["type": .string("response.output_item.done"), "output_index": .int(index), "item": item])
+    }
+
+    static func completed(status: String = "completed", output: [JSONValue]? = nil) -> JSONValue {
         .object([
             "type": .string("response.completed"),
             "response": .object([
                 "status": .string(status), "model": .string("gpt-6.1-sol-served"),
-                "output": .array([.object([
-                    "type": .string("message"),
-                    "content": .array([.object(["type": .string("output_text"), "text": .string(caption)])]),
-                ])]),
+                "output": .array(output ?? [message]),
                 "usage": .object(["input_tokens": .int(8), "output_tokens": .int(13)]),
             ]),
         ])
@@ -204,6 +213,96 @@ struct ChatGPTModelClientTests {
         #expect(caught?.code == "server_error")
         #expect(caught?.status == 200)
         #expect(caught?.body.contains("The model failed.") == true)
+    }
+
+    @Test func completedItemsSupplyTheObservedEmptyTerminalOutput() async throws {
+        // The live ChatGPT plan stream has a complete output_item.done message, then
+        // response.completed with status=completed, output=[], model and usage.
+        let session = Self.offlineSession()
+        defer { session.invalidateAndCancel() }
+        let reply = try await ChatGPTWire.request(Self.offlineClient(
+            token: "offline-empty-completion-stream", session: session
+        ))
+        #expect(try JSONValue(parsing: reply.text).decode(Caption.self).caption == "NORA7 wears a jacket.")
+        #expect(reply.servedModel == "gpt-6.1-sol-served")
+        #expect(reply.usage == TokenUsage(inputTokens: 8, outputTokens: 13))
+    }
+
+    @Test func completedItemsKeepOutputIndexOrder() async throws {
+        func message(_ text: String) -> JSONValue {
+            .object(["type": .string("message"), "content": .array([
+                .object(["type": .string("output_text"), "text": .string(text)]),
+            ])])
+        }
+        let script = ChatGPTWire.event(ChatGPTWire.itemDone(index: 2, item: message("second")))
+            + ChatGPTWire.event(ChatGPTWire.itemDone(index: 0, item: message("first ")))
+            + ChatGPTWire.event(ChatGPTWire.completed(output: []))
+        let wire = ChatGPTStreamWire { _ in ChatGPTWire.response(script) }
+        let reply = try await ChatGPTWire.request(ChatGPTModelClient(
+            model: "gpt-6.1-sol", accessToken: { "oauth" }, transport: wire
+        ))
+        #expect(reply.text == "first second")
+    }
+
+    @Test(arguments: [false, true])
+    func fullTerminalOutputHasPrecedenceOverCompletedItems(refuses: Bool) async throws {
+        let refusal: JSONValue = .object(["type": .string("message"), "content": .array([
+            .object(["type": .string("refusal"), "refusal": .string("Cannot caption this.")]),
+        ])])
+        let earlier: JSONValue = .object(["type": .string("message"), "content": .array([
+            .object(["type": .string("output_text"), "text": .string("Earlier text")]),
+        ])])
+        let script = ChatGPTWire.event(ChatGPTWire.itemDone(item: earlier))
+            + ChatGPTWire.event(ChatGPTWire.completed(output: [refuses ? refusal : ChatGPTWire.message]))
+        let wire = ChatGPTStreamWire { _ in ChatGPTWire.response(script) }
+        let client = ChatGPTModelClient(model: "gpt-6.1-sol", accessToken: { "oauth" }, transport: wire)
+        if refuses {
+            let error = await #expect(throws: ModelError.self) { try await ChatGPTWire.request(client) }
+            #expect(error?.localizedDescription.contains("refusal: Cannot caption this.") == true)
+        } else {
+            let reply = try await ChatGPTWire.request(client)
+            #expect(reply.text == ChatGPTWire.caption)
+        }
+    }
+
+    @Test func completedItemRefusalRemainsARefusal() async throws {
+        let refusal: JSONValue = .object(["type": .string("message"), "content": .array([
+            .object(["type": .string("refusal"), "refusal": .string("Cannot caption this.")]),
+        ])])
+        let script = ChatGPTWire.event(ChatGPTWire.itemDone(item: refusal))
+            + ChatGPTWire.event(ChatGPTWire.completed(output: []))
+        let wire = ChatGPTStreamWire { _ in ChatGPTWire.response(script) }
+        let error = await #expect(throws: ModelError.self) {
+            try await ChatGPTWire.request(ChatGPTModelClient(
+                model: "gpt-6.1-sol", accessToken: { "oauth" }, transport: wire
+            ))
+        }
+        #expect(error?.localizedDescription.contains("refusal: Cannot caption this.") == true)
+    }
+
+    @Test func textDoneWithoutACompletedItemCannotSupplyTerminalOutput() async {
+        let script = ChatGPTWire.event(.object([
+            "type": .string("response.output_text.done"), "text": .string(ChatGPTWire.caption),
+        ])) + ChatGPTWire.event(ChatGPTWire.completed(output: []))
+        let wire = ChatGPTStreamWire { _ in ChatGPTWire.response(script) }
+        await #expect(throws: ModelError.self) {
+            try await ChatGPTWire.request(ChatGPTModelClient(
+                model: "gpt-6.1-sol", accessToken: { "oauth" }, transport: wire
+            ))
+        }
+    }
+
+    @Test(arguments: [JSONValue.null, .int(-1), .string("0")])
+    func malformedCompletedItemCannotSupplyTerminalOutput(index: JSONValue) async {
+        let script = ChatGPTWire.event(.object([
+            "type": .string("response.output_item.done"), "output_index": index, "item": ChatGPTWire.message,
+        ])) + ChatGPTWire.event(ChatGPTWire.completed(output: []))
+        let wire = ChatGPTStreamWire { _ in ChatGPTWire.response(script) }
+        await #expect(throws: ModelError.self) {
+            try await ChatGPTWire.request(ChatGPTModelClient(
+                model: "gpt-6.1-sol", accessToken: { "oauth" }, transport: wire
+            ))
+        }
     }
 
     @Test(arguments: [OutputMode.native, .prompted])
@@ -339,7 +438,7 @@ struct ChatGPTModelClientTests {
             "type": .string("response.output_text.delta"),
             "delta": .string(ChatGPTWire.caption),
         ])
-        var lines = ChatGPTWire.event(delta)
+        var lines = ChatGPTWire.event(delta) + ChatGPTWire.event(ChatGPTWire.itemDone())
         switch kind {
         case "response.failed":
             lines += ChatGPTWire.event(.object(["type": .string(kind), "response": .object([
@@ -439,10 +538,11 @@ struct ChatGPTModelClientTests {
         let client = ChatGPTModelClient(model: "gpt-6.1-sol", accessToken: { "oauth" }, transport: wire)
         let request = Task { try await ChatGPTWire.request(client) }
         await started.wait()
-        for line in ChatGPTWire.event(.object([
+        let script = ChatGPTWire.event(.object([
             "type": .string("response.output_text.delta"),
             "delta": .string(ChatGPTWire.caption),
-        ])) {
+        ])) + ChatGPTWire.event(ChatGPTWire.itemDone())
+        for line in script {
             continuation.yield(Data((line + "\n").utf8))
         }
         request.cancel()

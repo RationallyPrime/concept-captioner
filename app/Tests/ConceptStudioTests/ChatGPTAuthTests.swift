@@ -42,6 +42,39 @@ private final class ChatGPTFixture {
 @Suite("ChatGPT account lifecycle")
 @MainActor
 struct ChatGPTAuthTests {
+    @Test(arguments: ["ready", "cancelled", "invalidated"])
+    func welcomeConnectionTestPreparesModelsInsideItsRunGate(context: String) async throws {
+        let f = try ChatGPTFixture(saved: ChatGPTFixture.saved())
+        defer { f.cleanup() }
+        await f.manager.load()
+        let session = StudioSession(preferences: f.preferences, chatGPT: f.manager, secrets: MemorySecretStore())
+        session.endpointKind = "openai"
+        session.openAIUsesChatGPT = true
+        session.modelName = "gpt-fixture"
+        #expect(session.project == nil)
+        #expect(f.manager.availableModels.isEmpty)
+        var ready = false
+        session.perform("Testing captioning connection…") {
+            #expect(session.busy)
+            let generation = session.chatGPTWorkGeneration
+            await session.prepareChatGPTModels(duringConnectionTest: true)
+            if context == "invalidated" { session.chatGPTWorkGeneration += 1 }
+            try Task.checkCancellation()
+            guard generation == session.chatGPTWorkGeneration, !session.demoMode else {
+                throw CancellationError()
+            }
+            ready = try session.endpoint().client is ChatGPTModelClient
+        }
+        if context == "cancelled" { session.cancel() }
+        await session.task?.value
+        let discovered = await f.transport.requests.filter { $0.url?.path == "/v1/models" }
+        #expect(session.errorMessage == nil)
+        #expect(ready == (context == "ready"))
+        #expect(discovered.count == (context == "cancelled" ? 0 : 1))
+        #expect(session.project == nil)
+        #expect(session.modelName == "gpt-fixture")
+    }
+
     @Test func initializationIsIdleAndLoadingKeepsDistinctRegistrationsAndSelection() async throws {
         let f = try ChatGPTFixture(saved: ChatGPTFixture.saved())
         defer { f.cleanup() }
