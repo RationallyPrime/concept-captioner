@@ -236,13 +236,20 @@ extension StudioSession {
 extension StudioSession {
     // MARK: Rented computer
 
-    func updateTrainingProjectDefaults() {
+    func useCurrentTrainingDataset() {
+        gpu.repeatSourceRunID = ""
+        updateTrainingProjectDefaults(preservingTrainer: true)
+    }
+
+    func updateTrainingProjectDefaults(preservingTrainer: Bool = false) {
         guard gpu.repeatSourceRunID.isEmpty else { return }
         gpu.triggerWords = project?.job.triggers.joined(separator: ",") ?? ""
         gpu.profile = project?.job.profile ?? "flux-image"
         gpu.datasetRevision = projectState.datasetRevision
         gpu.datasetContainsVideo = project?.images.contains { Sources.isVideo(Sources.suffix(of: $0.id)) } ?? false
-        if !gpu.hasRunningPod { gpu.trainer = gpu.profile.hasPrefix("ltx-") ? "ltx" : "aitoolkit" }
+        if !preservingTrainer, !gpu.hasRunningPod {
+            gpu.trainer = gpu.profile.hasPrefix("ltx-") ? "ltx" : "aitoolkit"
+        }
     }
 
     func configureGPU() {

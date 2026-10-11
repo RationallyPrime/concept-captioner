@@ -273,8 +273,7 @@ struct GPUJourneyView: View {
                     + "the current remote dataset will be used."
                     : "The next run repeats a saved dataset revision. Settings above remain editable.")
                 Button("Use this project's current dataset instead") {
-                    workspace.repeatSourceRunID = ""
-                    workspace.datasetRevision = session.projectState.datasetRevision
+                    session.useCurrentTrainingDataset()
                 }
             }
             Divider()

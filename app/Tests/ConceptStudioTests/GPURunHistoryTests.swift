@@ -154,6 +154,74 @@ struct GPURunHistoryTests {
         #expect(secrets.readAccounts.count(where: { $0 == "runpod" }) == 1)
     }
 
+    @MainActor @Test(arguments: [false, true])
+    func currentDatasetSwitchRefreshesIncludedMediaAndPreservesEditedSettings(containsVideo: Bool) async throws {
+        let (preferences, suite) = try temporaryPreferences()
+        defer { preferences.removePersistentDomain(forName: suite) }
+        var project = try await makeDemoProject()
+        defer { try? FileManager.default.removeItem(at: project.directory) }
+        project.job = try Job(
+            profile: containsVideo ? "ltx-video" : "flux-image",
+            concepts: [Concept(trigger: "IVAN9", classNoun: "figure", targetConcept: .object)]
+        )
+        let clip = ProjectImage(url: project.imagesDirectory.appendingPathComponent("clip.mp4"))
+        if containsVideo { project.images.append(clip) } else { project.excludedImages.append(clip) }
+        let session = StudioSession(preferences: preferences, secrets: MemorySecretStore())
+        session.project = project
+        session.projectState.datasetRevision = "current-sha"
+        let agent = HistoryAgent()
+        session.gpu = makeWorkspace(GPUTransport(), preferences)
+        session.gpu.projectFolder = project.directory
+        let previous = fixtureRun(trainer: containsVideo ? "aitoolkit" : "ltx")
+        session.gpu.runHistory = [previous]
+        session.gpu.repeatSettings(from: previous)
+        session.gpu.trainer = "aitoolkit"
+        session.gpu.baseModel = "custom/edited-model"
+        session.gpu.steps = 400
+        session.gpu.rank = 8
+        session.gpu.learningRate = 0.0002
+        session.gpu.resolution = 768
+        session.gpu.seed = 314
+
+        session.useCurrentTrainingDataset()
+
+        #expect(session.gpu.repeatSourceRunID.isEmpty)
+        #expect(session.gpu.datasetRevision == "current-sha")
+        #expect(session.gpu.datasetContainsVideo == containsVideo)
+        #expect(session.gpu.profile == project.job.profile)
+        #expect(session.gpu.triggerWords == "IVAN9")
+        #expect(session.gpu.trainer == "aitoolkit")
+        #expect(session.gpu.baseModel == "custom/edited-model")
+        #expect(session.gpu.steps == 400)
+        #expect(session.gpu.rank == 8)
+        #expect(session.gpu.learningRate == 0.0002)
+        #expect(session.gpu.resolution == 768)
+        #expect(session.gpu.seed == 314)
+        session.gpu.pod = RentedPod(id: "offline-test", status: "RUNNING", cost: 1, gpu: .init(count: 2))
+        session.gpu.selectedVolume = previous.volumeID
+        session.gpu.agent = agent
+        await session.gpu.train(datasetRepo: "me/current-data")
+        if containsVideo {
+            #expect(await agent.starts.isEmpty)
+            #expect(session.gpu.message.contains("FLUX image training does not accept video clips"))
+        } else {
+            let starts = await agent.starts
+            let pull = try #require(starts.first { $0.service == "pull-dataset" })
+            #expect(pull.params["repo_id"] == .string("me/current-data"))
+            #expect(pull.params["revision"] == .string("current-sha"))
+            let train = try #require(starts.first { $0.service == "trainer-aitoolkit" })
+            #expect(train.params["profile"] == .string("flux-image"))
+            #expect(train.params["triggers"] == .array([.string("IVAN9")]))
+            #expect(train.params["base_model"] == .string("custom/edited-model"))
+            #expect(train.params["steps"] == .int(400))
+            #expect(train.params["rank"] == .int(8))
+            #expect(train.params["learning_rate"] == .double(0.0002))
+            #expect(train.params["resolution"] == .int(768))
+            #expect(train.params["seed"] == .int(314))
+            #expect(train.params["extra"]?.objectValue?["training_seed"] == .int(314))
+        }
+    }
+
     @MainActor @Test
     func stoppedPodDoesNotAccumulateRunCost() throws {
         let (preferences, suite) = try temporaryPreferences()
