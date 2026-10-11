@@ -385,6 +385,7 @@ final class StudioSession {
                 self.showChatGPTPlanNotice = false
                 self.gpu = self.makeGPUWorkspace(demoMode: true)
                 self.project = try await DemoProject.create(at: self.demoDirectory)
+                self.gpu.projectFolder = self.project?.directory
                 self.projectState = ProjectAppState(dataset: HubDestination(repo: "demo/concept-studio"))
                 self.selectedImageID = self.project?.images.first?.id
                 self.step = .images
@@ -407,6 +408,7 @@ final class StudioSession {
                 self.projectAccess = url
                 _ = url.startAccessingSecurityScopedResource()
                 self.project = try StudioProject.create(at: url)
+                self.gpu.projectFolder = self.project?.directory
                 self.projectState = ProjectAppState()
                 self.rememberRecent(url)
                 self.step = .images
@@ -428,6 +430,7 @@ final class StudioSession {
                 self.projectAccess = selected
                 _ = selected.startAccessingSecurityScopedResource()
                 self.project = try await StudioProject.open(at: selected)
+                self.gpu.projectFolder = self.project?.directory
                 self.projectState = ProjectAppState.load(from: selected)
                 self.rememberRecent(selected)
                 if let job = self.project?.job { self.applyJobChoices(job) }

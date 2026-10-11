@@ -1,15 +1,39 @@
 import ConceptCore
 import Foundation
 import Observation
+import Security
 
+/// The local record of the rented pod. Fields added after the first release decode with
+/// defaults, so a record written by an older build still restores (and stays under budget).
 struct SavedPod: Codable {
     var pod: RentedPod
     let started: Date
     let hourlyRate: Double
-    let budget: Double
+    var budget: Double
     var trainer: String
     var runID: String
     var outputRepo: String
+    var idleMinutes = 15
+    var volumeID = ""
+    var points: [TrainingPoint] = []
+    var result: TrainingResult?
+}
+
+extension SavedPod {
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        pod = try values.decode(RentedPod.self, forKey: .pod)
+        started = try values.decode(Date.self, forKey: .started)
+        hourlyRate = try values.decode(Double.self, forKey: .hourlyRate)
+        budget = try values.decode(Double.self, forKey: .budget)
+        trainer = try values.decode(String.self, forKey: .trainer)
+        runID = try values.decode(String.self, forKey: .runID)
+        outputRepo = try values.decode(String.self, forKey: .outputRepo)
+        idleMinutes = try values.decodeIfPresent(Int.self, forKey: .idleMinutes) ?? 15
+        volumeID = try values.decodeIfPresent(String.self, forKey: .volumeID) ?? ""
+        points = try values.decodeIfPresent([TrainingPoint].self, forKey: .points) ?? []
+        result = try values.decodeIfPresent(TrainingResult.self, forKey: .result)
+    }
 }
 
 @MainActor @Observable
@@ -20,9 +44,16 @@ final class GPUWorkspace {
     var selectedGPU = ""
     var selectedVolume = ""
     var gpuCount = 1
+    /// The limit for the next rental. While a pod runs, `activeBudget` is the one enforced.
     var budget = 10.0
-    var idleMinutes = 15
-    var pod: RentedPod?
+    var idleMinutes = 15 {
+        didSet { persist() }
+    }
+
+    var pod: RentedPod? {
+        didSet { sleepGuard.hold(!demoMode && pod?.isRunning == true) }
+    }
+
     var plan: TrainingPlan?
     var message = "Refresh available computers to see current prices."
     var isBusy = false
@@ -40,6 +71,12 @@ final class GPUWorkspace {
     var steps = 200
     var rank = 16
     var learningRate = 0.0001
+    /// Training resolution in pixels; one of `resolutionChoices`. Shown under Advanced.
+    var resolution = 512
+    /// Sample images during training. Off by default: sample generation is unverified (POD-SPEC 4.2).
+    var samplesEnabled = false
+    /// Model repos created for results are private unless the user turns this off.
+    var privateResult = true
     var runID = ""
     var outputRepo = ""
     var triggerWords = "NORA7"
@@ -49,21 +86,45 @@ final class GPUWorkspace {
     var points: [TrainingPoint] = []
     var logs = ""
     var trainingState = "Not started"
-    private(set) var agentToken = ""
+    /// The latest run's result and where it went.
+    var result: TrainingResult?
+    /// Running pods this app created that are not the one under its control (found on launch).
+    var strayPods: [RentedPod] = []
+    /// The open project; results without a Hub token are saved under `<project>/results/<run-id>/`.
+    var projectFolder: URL? {
+        didSet { loadProjectRecord() }
+    }
 
-    @ObservationIgnored private let transport: any HTTPTransport
-    @ObservationIgnored private let preferences: UserDefaults
-    @ObservationIgnored private let saveAgentToken: (String, String) throws -> Void
-    @ObservationIgnored private let readAgentToken: (String) throws -> String?
-    @ObservationIgnored private var provider: (any GPUProvider)?
-    @ObservationIgnored private var agent: (any PodAgent)?
-    @ObservationIgnored private var hubToken = ""
-    @ObservationIgnored private var imageName = ""
-    @ObservationIgnored private var saved: SavedPod?
-    @ObservationIgnored private var lastActivity = Date()
-    @ObservationIgnored private var monitorTask: Task<Void, Never>?
-    @ObservationIgnored private var operationTask: Task<Void, Never>?
-    @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    /// The pod agent's bearer (also its vLLM key). Set only by renting, restoring or reconciling.
+    private(set) var agentToken = ""
+    /// A failure the window alert should show even when the GPU screen is not open.
+    var failure: String?
+
+    @ObservationIgnored let transport: any HTTPTransport
+    @ObservationIgnored let preferences: UserDefaults
+    @ObservationIgnored let saveAgentToken: (String, String) throws -> Void
+    @ObservationIgnored let readAgentToken: (String) throws -> String?
+    @ObservationIgnored let deleteAgentToken: (String) throws -> Void
+    @ObservationIgnored let downloader: any FileDownloading
+    @ObservationIgnored let sleepGuard: SleepAssertion
+    @ObservationIgnored var provider: (any GPUProvider)?
+    @ObservationIgnored var agent: (any PodAgent)?
+    @ObservationIgnored var hubToken = ""
+    @ObservationIgnored var imageName = ""
+    @ObservationIgnored var saved: SavedPod?
+    @ObservationIgnored var lastActivity = Date()
+    @ObservationIgnored var monitorTask: Task<Void, Never>?
+    @ObservationIgnored var operationTask: Task<Void, Never>?
+    @ObservationIgnored var refreshTask: Task<Void, Never>?
+    @ObservationIgnored var retrievalTask: Task<Void, Never>?
+    @ObservationIgnored var lastAutomaticRetrieval = Date.distantPast
+    /// Minimum gap between automatic retrieval attempts after one fails.
+    @ObservationIgnored var automaticRetrievalInterval: TimeInterval = 60
+    @ObservationIgnored var historyRunID: String?
+    @ObservationIgnored var reconciled = false
+
+    static let activePodKey = "ConceptStudio.activePod"
+    static let pendingResultKey = "ConceptStudio.pendingResult"
 
     init(
         demoMode: Bool,
@@ -72,13 +133,20 @@ final class GPUWorkspace {
         readAgentToken: @escaping (String) throws -> String? = { try KeychainStore().read($0) },
         saveAgentToken: @escaping (String, String) throws -> Void = { token, account in
             try KeychainStore().save(token, account: account)
-        }
+        },
+        // KeychainStore.save with an empty value deletes the item (SecItemDelete).
+        deleteAgentToken: @escaping (String) throws -> Void = { try KeychainStore().save("", account: $0) },
+        downloader: any FileDownloading = URLSessionDownloader(),
+        keepAwake: SleepAssertion? = nil
     ) {
         self.demoMode = demoMode
         self.transport = transport
         self.preferences = preferences
         self.saveAgentToken = saveAgentToken
         self.readAgentToken = readAgentToken
+        self.deleteAgentToken = deleteAgentToken
+        self.downloader = downloader
+        sleepGuard = keepAwake ?? .system()
         if demoMode {
             provider = DemoGPUProvider()
             imageName = "demo"
@@ -92,7 +160,10 @@ final class GPUWorkspace {
         self.hubToken = hubToken
         self.imageName = imageName
         if let networkVolumeID { selectedVolume = networkVolumeID }
-        if pod == nil, let data = preferences.data(forKey: "ConceptStudio.activePod"),
+        if result == nil, let data = preferences.data(forKey: Self.pendingResultKey) {
+            result = try? JSONDecoder().decode(TrainingResult.self, from: data)
+        }
+        if pod == nil, let data = preferences.data(forKey: Self.activePodKey),
            let previous = try? JSONDecoder().decode(SavedPod.self, from: data) {
             saved = previous
             pod = previous.pod
@@ -100,7 +171,14 @@ final class GPUWorkspace {
             trainer = previous.trainer
             runID = previous.runID
             outputRepo = previous.outputRepo
+            points = previous.points
+            result = previous.result ?? result
+            idleMinutes = previous.idleMinutes
             watch()
+        }
+        if provider != nil, !reconciled {
+            reconciled = true
+            Task { await self.reconcile() }
         }
         if let pod, agent == nil {
             agentToken = try readAgentToken("pod.\(pod.id)") ?? ""
@@ -108,12 +186,18 @@ final class GPUWorkspace {
         }
     }
 
+    /// Reads a pod's agent token from the Keychain; an unreadable token leaves the provider-level
+    /// budget and idle stop working.
+    func restoreAgentToken(podID: String) {
+        agentToken = (try? readAgentToken("pod.\(podID)")) ?? ""
+    }
+
     func refreshOffers() async {
         await perform {
             guard let provider = self.provider else {
                 throw StudioError.message("Add your RunPod key in Settings, then refresh available computers.")
             }
-            async let offers = provider.offers(count: self.gpuCount)
+            async let offers = provider.offers(count: self.gpuCount, minCudaVersion: Self.minimumCUDA(self.trainer))
             async let volumes = provider.volumes()
             self.offers = try await offers
             self.volumes = try await volumes
@@ -146,10 +230,12 @@ final class GPUWorkspace {
                     )
             }
             let started = Date()
-            self.agentToken = UUID().uuidString + UUID().uuidString
+            self.agentToken = try Self.newAgentToken()
             let created = try await provider.create(PodCreation(
+                name: PodNaming.name(project: self.projectFolder?.lastPathComponent ?? ""),
                 offer: offer, count: self.gpuCount,
-                image: self.imageName.replacingOccurrences(of: "{trainer}", with: self.trainer), volume: volume,
+                image: self.imageName.replacingOccurrences(of: "{trainer}", with: self.trainer),
+                minCudaVersion: Self.minimumCUDA(self.trainer), volume: volume,
                 agentToken: self.agentToken, hubToken: self.hubToken
             ))
             self.pod = created
@@ -160,11 +246,9 @@ final class GPUWorkspace {
             self.logs = ""
             self.elapsedCost = 0
             self.saved = SavedPod(
-                pod: created,
-                started: started,
-                hourlyRate: max(created.cost, self.quotedHourlyRate),
-                budget: self.budget,
-                trainer: self.trainer, runID: "", outputRepo: self.outputRepo
+                pod: created, started: started, hourlyRate: max(created.cost, self.quotedHourlyRate),
+                budget: self.budget, trainer: self.trainer, runID: "", outputRepo: self.outputRepo,
+                idleMinutes: self.idleMinutes, volumeID: volume.id
             )
             self.connectAgent(created)
             self.lastActivity = Date()
@@ -192,6 +276,8 @@ final class GPUWorkspace {
 
     private func refreshState() async {
         guard let provider, let current = pod, hasRunningPod else { return }
+        let resultBefore = result
+        var agentAnswered = false
         do {
             try await enforceLimits()
             guard hasRunningPod else { return }
@@ -203,6 +289,7 @@ final class GPUWorkspace {
             }
             if plan == nil { plan = try await agent.plan() }
             let services = try await agent.services()
+            agentAnswered = true
             let active = services.contains { $0.active && !["tensorboard", "vllm"].contains($0.name) }
             if active { lastActivity = Date() }
             if let state = services.first(where: { $0.name.hasPrefix("trainer-") && $0.active })
@@ -210,116 +297,174 @@ final class GPUWorkspace {
                 if state.active { trainer = String(state.name.dropFirst("trainer-".count)) }
                 if let id = state.runID { runID = id }
                 trainingState = state.state
-                if !runID.isEmpty {
-                    if let point = try await agent.latest(runID: runID),
-                       !points.contains(where: { $0.step == point.step }) {
-                        points.append(point)
-                    }
-                    logs = try await agent.logs("trainer-\(trainer)")
-                }
             }
+            if !runID.isEmpty { try await updateProgress(agent, services: services) }
+            // A result created while this refresh was in flight is judged on the next one.
+            if !isBusy, result == resultBefore { try await settleResult(agent, services: services) }
         } catch is CancellationError {
             return
         } catch {
             message = error.localizedDescription
         }
-        // A failed agent/proxy request must not suppress the provider-level idle stop.
-        if hasRunningPod, !isBusy, Date().timeIntervalSince(lastActivity) >= Double(idleMinutes * 60) {
+        // A failed agent/proxy request must not suppress the provider-level idle stop, but a
+        // finished LoRA that is neither pushed nor downloaded keeps the computer up, and so does a
+        // run the agent still answers for whose result has not been settled yet.
+        if hasRunningPod, !isBusy, !resultNeedsSaving, !(agentAnswered && resultUnsettled),
+           Date().timeIntervalSince(lastActivity) >= Double(idleMinutes * 60) {
             await stopEverything()
             if !hasRunningPod { message = "Stopped the idle computer to avoid further GPU charges." }
         }
     }
 
+    private func updateProgress(_ agent: any PodAgent, services: [AgentService]) async throws {
+        if historyRunID != runID {
+            // TensorBoard is started by train(); after an agent restart it is down until started again.
+            if !services.contains(where: { $0.name == "tensorboard" && $0.active }) {
+                try? await agent.start("tensorboard", gpus: [], params: ["logdir": .string("/workspace/runs")])
+            }
+            // Retried on every refresh until the full curve arrives.
+            if let history = try? await agent.history(runID: runID), !history.isEmpty {
+                merge(history)
+                historyRunID = runID
+            }
+        }
+        if let point = try await agent.latest(runID: runID) { merge([point]) }
+        if let log = try? await agent.runLog(runID: runID) { logs = log }
+        persist()
+    }
+
+    private func merge(_ incoming: [TrainingPoint]) {
+        var byStep = Dictionary(points.map { ($0.step, $0) }, uniquingKeysWith: { first, _ in first })
+        for point in incoming {
+            byStep[point.step] = point
+        }
+        points = byStep.values.sorted { $0.step < $1.step }
+    }
+
+    func connectAgent(_ pod: RentedPod) {
+        historyRunID = nil
+        if demoMode {
+            agent = DemoPodAgent(count: pod.gpu.count)
+        } else if let provider {
+            agent = PodAgentClient(
+                baseURL: provider.url(for: pod, port: PodPort.agent), token: agentToken,
+                transport: transport, downloader: downloader
+            )
+        }
+    }
+
+    func persist() {
+        if var saved, let pod {
+            saved.pod = pod
+            saved.trainer = trainer
+            saved.runID = runID
+            saved.outputRepo = outputRepo
+            saved.idleMinutes = idleMinutes
+            saved.points = points
+            saved.result = result
+            self.saved = saved
+            if !demoMode, let data = try? JSONEncoder().encode(saved) {
+                preferences.set(data, forKey: Self.activePodKey)
+            }
+        }
+    }
+
+    func watch() {
+        monitorTask?.cancel()
+        monitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.refresh()
+                guard self?.hasRunningPod == true else { return }
+                do {
+                    try await Task.sleep(for: .seconds(self?.demoMode == true ? 1 : 5))
+                } catch { return }
+            }
+        }
+    }
+
+    func waitForService(_ name: String, allowStopped: Bool = false) async throws {
+        guard let agent else { return }
+        while true {
+            try Task.checkCancellation()
+            let service = try await agent.services().first(where: { $0.name == name })
+            if let service, !service.active {
+                guard service.state == "exited" || (allowStopped && service.state == "stopped") else {
+                    throw StudioError
+                        .message("\(name) did not finish. Read its logs and retry after correcting the cause.")
+                }
+                return
+            }
+            try await Task.sleep(for: .seconds(demoMode ? 0.1 : 2))
+        }
+    }
+
+    func perform(_ action: @escaping @MainActor () async throws -> Void) async {
+        guard !isBusy, !isStopping else { return }
+        isBusy = true
+        let work = Task {
+            defer { self.isBusy = false }
+            do {
+                try await action()
+            } catch is CancellationError {
+                self.message = "Action cancelled. Check the computer status before closing."
+            } catch { self.message = error.localizedDescription }
+        }
+        operationTask = work
+        await withTaskCancellationHandler {
+            await work.value
+        } onCancel: {
+            work.cancel()
+        }
+    }
+}
+
+// MARK: - Cost guards and stopping
+
+extension GPUWorkspace {
     func enforceLimits(now: Date = Date()) async throws {
         guard let saved, hasRunningPod else { return }
         elapsedCost = max(0, now.timeIntervalSince(saved.started)) / 3600 * saved.hourlyRate
         if elapsedCost >= saved.budget {
-            await stopEverything()
-            if !hasRunningPod { message = "Your spending limit was reached. The GPU is stopped." }
+            let stranded = resultNeedsSaving
+            await stopEverything(discardingPendingResult: true)
+            if !hasRunningPod {
+                message = "Your spending limit was reached. The GPU is stopped."
+                    + (stranded ? " Your trained LoRA stays on your network storage; rent a computer on the "
+                        + "same storage to retrieve it." : "")
+            }
         }
     }
 
-    func train(datasetRepo: String) async {
-        await perform {
-            guard let agent = self.agent, self.hasRunningPod else {
-                throw StudioError.message("Rent a training computer first, then return here.")
-            }
-            guard !datasetRepo.isEmpty, self.steps > 0, self.rank > 0, !self.baseModel.isEmpty else {
-                throw StudioError
-                    .message("Publish your dataset first and choose a model with positive training steps and rank.")
-            }
-            let servicesBeforeStart = try await agent.services()
-            guard !servicesBeforeStart.contains(where: { $0.name.hasPrefix("trainer-") && $0.active }) else {
-                throw StudioError.message("A training run is active. Stop it before starting another.")
-            }
-            let plan = try await agent.plan()
-            self.plan = plan
-            let dataset = "conceptstudio"
-            try await agent.start("pull-dataset", gpus: [], params: [
-                "repo_id": .string(datasetRepo), "name": .string(dataset),
-            ])
-            self.message = "Downloading your published photos and captions."
-            try await self.waitForService("pull-dataset")
-            if plan.mode == "sequential" {
-                let services = try await agent.services()
-                if services.contains(where: { $0.name == "vllm" && $0.active }) {
-                    try await agent.stop("vllm")
-                    try await self.waitForService("vllm", allowStopped: true)
-                }
-            } else if self.keepCaptionServer {
-                let services = try await agent.services()
-                if !services.contains(where: { $0.name == "vllm" && $0.active }) {
-                    try await agent.start("vllm", gpus: plan.caption?.gpus ?? [], params: self.captionStartParams)
-                }
-            }
-            self.runID = "concept-" + UUID().uuidString.prefix(12).lowercased()
-            self.points = []
-            let words = self.triggerWords.split(whereSeparator: { $0 == "," || $0.isWhitespace }).map(String.init)
-            var params: JSONObject = [
-                "run_id": .string(self.runID),
-                "dataset": .object(["path": .string("/workspace/datasets/\(dataset)")]),
-                "triggers": .array(words.map(JSONValue.string)), "profile": .string(self.profile),
-                "base_model": .string(self.baseModel), "steps": .int(self.steps), "rank": .int(self.rank),
-                "learning_rate": .double(self.learningRate), "resolution": .int(512),
-                "save_every": .int(min(250, self.steps)), "sample_every": .int(0),
-            ]
-            if self.trainer == "ltx" {
-                params["extra"] = .object(Self.ltxTrainingExtra)
-            }
-            if !self.outputRepo.isEmpty {
-                params["hub"] = .object([
-                    "repo_id": .string(self.outputRepo),
-                    "private": .bool(true),
-                    "push_on_finish": .bool(false),
-                ])
-            }
-            try await agent.start("trainer-\(self.trainer)", gpus: plan.train?.gpus ?? [], params: params)
-            self.persist()
-            let services = try await agent.services()
-            if !services.contains(where: { $0.name == "tensorboard" && $0.active }) {
-                try await agent.start("tensorboard", gpus: [], params: ["logdir": .string("/workspace/runs")])
-            }
-            self.trainingState = "running"
-            self.lastActivity = Date()
-            self.message = "Training started. Open Monitor to watch progress."
-        }
+    /// The spending limit enforced on the running pod.
+    var activeBudget: Double? {
+        hasRunningPod ? saved?.budget : nil
     }
 
-    func publishResult() async {
-        await perform {
-            guard let agent = self.agent, !self.outputRepo.isEmpty, !self.runID.isEmpty else {
-                throw StudioError.message("Enter a destination model repository and finish a training run first.")
-            }
-            try await agent.start("push-lora", gpus: [], params: [
-                "run_id": .string(self.runID), "repo_id": .string(self.outputRepo), "private": .bool(true),
-            ])
-            try await self.waitForService("push-lora")
-            self.message = "Your LoRA was uploaded to your model repository. You can now stop the computer."
+    /// Raises the running pod's limit. The caller confirms with the user first; lowering is refused
+    /// because it could stop the pod the moment it is applied.
+    @discardableResult
+    func raiseBudget(to newBudget: Double) -> Bool {
+        guard var saved, hasRunningPod, newBudget.isFinite, newBudget > saved.budget else {
+            message = "Enter a spending limit above the current one."
+            return false
         }
+        saved.budget = newBudget
+        self.saved = saved
+        budget = newBudget
+        persist()
+        message = "Spending limit raised to \(newBudget.formatted(.currency(code: "USD")))."
+        return true
     }
 
-    func stopEverything() async {
+    /// Stops the pod. Refuses, with a message, while a finished LoRA is unsaved unless
+    /// `discardingPendingResult` is set (the budget sets it; the run stays on the volume).
+    func stopEverything(discardingPendingResult: Bool = false) async {
         guard !isStopping else { return }
+        if !discardingPendingResult, resultNeedsSaving, let result {
+            message = "Your trained LoRA from run \(result.runID) is not saved yet. Retrieve it first, or stop "
+                + "anyway: it stays on your network storage and is retrieved from the next computer on that storage."
+            return
+        }
         isStopping = true
         defer { isStopping = false }
         operationTask?.cancel()
@@ -361,93 +506,38 @@ final class GPUWorkspace {
             try await provider.terminate(id: pod.id)
             self.pod = nil
             self.saved = nil
+            self.agent = nil
             if !self.demoMode {
-                self.preferences.removeObject(forKey: "ConceptStudio.activePod")
-                try self.saveAgentToken("", "pod.\(pod.id)")
+                self.preferences.removeObject(forKey: Self.activePodKey)
+                try self.deleteAgentToken("pod.\(pod.id)")
             }
             self.message = "Computer removed. Your separate network storage remains in RunPod."
-        }
-    }
-
-    private func connectAgent(_ pod: RentedPod) {
-        agent = demoMode ? DemoPodAgent(count: pod.gpu.count)
-            : PodAgentClient(baseURL: pod.agentURL, token: agentToken, transport: transport)
-    }
-
-    private func persist() {
-        guard !demoMode, var saved, let pod else { return }
-        saved.pod = pod
-        saved.trainer = trainer
-        saved.runID = runID
-        saved.outputRepo = outputRepo
-        self.saved = saved
-        if let data = try? JSONEncoder().encode(saved) {
-            preferences.set(data, forKey: "ConceptStudio.activePod")
-        }
-    }
-
-    private func watch() {
-        monitorTask?.cancel()
-        monitorTask = Task { [weak self] in
-            while !Task.isCancelled {
-                await self?.refresh()
-                guard self?.hasRunningPod == true else { return }
-                do {
-                    try await Task.sleep(for: .seconds(self?.demoMode == true ? 1 : 5))
-                } catch { return }
-            }
-        }
-    }
-
-    private func waitForService(_ name: String, allowStopped: Bool = false) async throws {
-        guard let agent else { return }
-        while true {
-            try Task.checkCancellation()
-            let service = try await agent.services().first(where: { $0.name == name })
-            if let service, !service.active {
-                guard service.state == "exited" || (allowStopped && service.state == "stopped") else {
-                    throw StudioError
-                        .message("\(name) did not finish. Read its logs and retry after correcting the cause.")
-                }
-                return
-            }
-            try await Task.sleep(for: .seconds(demoMode ? 0.1 : 2))
-        }
-    }
-
-    private func perform(_ action: @escaping @MainActor () async throws -> Void) async {
-        guard !isBusy, !isStopping else { return }
-        isBusy = true
-        let work = Task {
-            defer { self.isBusy = false }
-            do {
-                try await action()
-            } catch is CancellationError {
-                self.message = "Action cancelled. Check the computer status before closing."
-            } catch { self.message = error.localizedDescription }
-        }
-        operationTask = work
-        await withTaskCancellationHandler {
-            await work.value
-        } onCancel: {
-            work.cancel()
         }
     }
 }
 
 extension GPUWorkspace {
     static let minimumGPUMemoryGB = 32
-    private static let ltxTrainingExtra: JSONObject = [
-        "optimization": .object(["optimizer_type": .string("adamw8bit")]),
-        "acceleration": .object([
-            "quantization": .string("int8-quanto"),
-            "load_text_encoder_in_8bit": .bool(true),
-            "offload_optimizer_during_validation": .bool(true),
-        ]),
-        "preprocess": .object(["args": .array([
-            .string("--load-text-encoder-in-8bit"), .string("--vae-tiling"), .string("--skip-audio"),
-        ])]),
-    ]
+    nonisolated static let resolutionChoices = [512, 768, 1024]
+
+    /// Host CUDA floor per trainer image, from pod/images/README.md "CUDA and drivers": the
+    /// ai-toolkit image carries cu130 wheels and the LTX image cu132 wheels, both needing an R580+
+    /// driver, which RunPod reports as CUDA 13.0. The base image alone (vLLM cu129 on CUDA 12.8.1)
+    /// would run on 12.x, but the app only rents trainer images.
+    nonisolated static let minimumCUDAByTrainer = ["aitoolkit": "13.0", "ltx": "13.0"]
+
+    nonisolated static func minimumCUDA(_ trainer: String) -> String {
+        minimumCUDAByTrainer[trainer] ?? "13.0"
+    }
+
+    /// 256 random bits from the system CSPRNG, hex encoded: the pod agent's bearer and vLLM key.
+    nonisolated static func newAgentToken() throws -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+            throw StudioError.message("Your Mac could not generate a key for the computer. Try again.")
+        }
+        return bytes.map { String(format: "%02x", $0) }.joined()
+    }
 
     func noteActivity() {
         lastActivity = Date()
@@ -468,8 +558,19 @@ extension GPUWorkspace {
         }
     }
 
+    /// The pod's control agent, as the provider exposes its port.
+    var agentURL: URL? {
+        guard let pod, let provider else { return nil }
+        return provider.url(for: pod, port: PodPort.agent)
+    }
+
     var tensorBoardURL: URL? {
-        pod?.agentURL.appendingPathComponent("tensorboard/")
+        agentURL?.appendingPathComponent("tensorboard/")
+    }
+
+    var captionEndpoint: URL? {
+        guard let pod, pod.isRunning, let provider else { return nil }
+        return provider.url(for: pod, port: PodPort.inference).appendingPathComponent("v1")
     }
 
     var hasRunningPod: Bool {
@@ -480,76 +581,19 @@ extension GPUWorkspace {
         ["running", "stuck"].contains(trainingState)
     }
 
-    var captionEndpoint: URL? {
-        guard let pod, pod.isRunning else { return nil }
-        return URL(string: "https://\(pod.id)-8000.proxy.runpod.net/v1")
+    /// Whether the user has given the app a Hub token that training can push with.
+    var canPushToHub: Bool {
+        demoMode || !hubToken.isEmpty
     }
 
-    private var captionStartParams: JSONObject {
-        [
-            "model": .string(captionModel), "max_model_len": .int(16384), "max_num_seqs": .int(2),
-            "gpu_memory_utilization": .double(0.85),
-            "extra_args": .array([.string("--enforce-eager"), .string("--max-num-batched-tokens=4096")]),
-        ]
+    /// The network volume mounted at /workspace on the current pod.
+    var currentVolumeID: String {
+        if let volume = saved?.volumeID, !volume.isEmpty { return volume }
+        return pod?.volumeID ?? selectedVolume
     }
 
-    func startCaptioning() async -> Bool {
-        var ready = false
-        await perform {
-            guard let agent = self.agent, self.hasRunningPod else {
-                throw StudioError.message("Rent a computer before starting its caption model.")
-            }
-            let plan = try await agent.plan()
-            self.plan = plan
-            let services = try await agent.services()
-            if plan.mode == "sequential",
-               services.contains(where: { $0.name.hasPrefix("trainer-") && $0.active }) {
-                throw StudioError.message("Finish training before captioning on this single-GPU computer.")
-            }
-            if !services.contains(where: { $0.name == "vllm" && $0.active }) {
-                try await agent.start("vllm", gpus: plan.caption?.gpus ?? [], params: self.captionStartParams)
-            }
-            self.lastActivity = Date()
-            self.message = "The caption model is starting. Large models can take several minutes to download."
-            if !self.demoMode {
-                try await self.waitForCaptionModel()
-            }
-            ready = true
-            self.message = "The caption model is ready. You can now caption with this computer."
-        }
-        return ready
-    }
-
-    private func waitForCaptionModel() async throws {
-        guard let endpoint = captionEndpoint else {
-            throw StudioError.message("Your captioning computer is stopped. Rent or start one first.")
-        }
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: .seconds(600))
-        while clock.now < deadline {
-            try Task.checkCancellation()
-            var request = URLRequest(url: endpoint.appendingPathComponent("models"), timeoutInterval: 15)
-            request.setValue("Bearer \(agentToken)", forHTTPHeaderField: "Authorization")
-            do {
-                let response = try await transport.send(request)
-                if response.status == 200,
-                   let models = try JSONValue(parsing: response.body).objectValue?["data"]?.arrayValue,
-                   models.contains(where: { $0.objectValue?["id"]?.stringValue == captionModel }) {
-                    return
-                }
-                if [401, 403].contains(response.status) {
-                    throw StudioError.message("This computer rejected its captioning key. Stop it and rent a new one.")
-                }
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch let error as StudioError {
-                throw error
-            } catch {
-                // The inference server may not yet be listening while model weights download.
-            }
-            try await Task.sleep(for: .seconds(2))
-        }
-        throw StudioError
-            .message("The caption model is still not ready. Check the computer’s logs or stop it before retrying.")
+    /// Whether the Mac is being kept awake for the running pod.
+    var keepsMacAwake: Bool {
+        sleepGuard.isHeld
     }
 }

@@ -1,95 +1,8 @@
 import ConceptCore
 @testable import ConceptStudio
+import CryptoKit
 import Foundation
 import Testing
-
-private actor GPUTransport: HTTPTransport {
-    var requests: [URLRequest] = []
-    let body: Data
-
-    init(_ json: String = "{}") {
-        body = Data(json.utf8)
-    }
-
-    func send(_ request: URLRequest) async throws -> HTTPResponse {
-        requests.append(request)
-        return HTTPResponse(status: 200, body: body)
-    }
-}
-
-private actor UnreachableAgentTransport: HTTPTransport {
-    private var stopped = false
-    private var failedFirstStop: Bool
-    private let agentAvailable: Bool
-    private let inferenceReady: Bool
-    private let gpuCount: Int
-    private var services: [String: String] = [:]
-    private var servedModel = "Qwen/Qwen3-VL-8B-Instruct"
-    private(set) var stopCalls = 0
-    private(set) var inferenceRequests: [URLRequest] = []
-    private(set) var starts: [URLRequest] = []
-
-    init(failFirstStop: Bool = false, agentAvailable: Bool = false, inferenceReady: Bool = false, gpuCount: Int = 1) {
-        failedFirstStop = !failFirstStop
-        self.agentAvailable = agentAvailable
-        self.inferenceReady = inferenceReady
-        self.gpuCount = gpuCount
-    }
-
-    func send(_ request: URLRequest) async throws -> HTTPResponse {
-        let url = try #require(request.url)
-        if url.host()?.contains("-8000.") == true {
-            inferenceRequests.append(request)
-            return HTTPResponse(
-                status: inferenceReady ? 200 : 503,
-                body: JSONValue.object(["data": .array([.object(["id": .string(servedModel)])])]).pythonDumpsData()
-            )
-        }
-        if url.host() != "api.runpod.io" {
-            guard agentAvailable else { return HTTPResponse(status: 522) }
-            if url.lastPathComponent == "start" {
-                starts.append(request)
-                let service = url.deletingLastPathComponent().lastPathComponent
-                guard services[service] != "running" else { return HTTPResponse(status: 409) }
-                services[service] = service == "pull-dataset" ? "exited" : "running"
-                if service == "vllm" {
-                    servedModel = try JSONValue(parsing: #require(request.httpBody))
-                        .objectValue?["params"]?.objectValue?["model"]?.stringValue ?? servedModel
-                }
-            }
-            let reply: JSONObject = if url.lastPathComponent == "plan" {
-                [
-                    "mode": .string(gpuCount == 1 ? "sequential" : "concurrent"),
-                    "caption": .object(["gpus": .array([.int(0)])]),
-                    "train": .object(["gpus": .array([.int(gpuCount == 1 ? 0 : 1)])]),
-                ]
-            } else {
-                ["services": .array(services.map { .object(["name": .string($0.key), "state": .string($0.value)]) })]
-            }
-            return HTTPResponse(status: 200, body: JSONValue.object(reply).pythonDumpsData())
-        }
-        let json: String
-        if url.path().contains("catalog/gpus") {
-            json = #"{"gpus":[{"id":"test","name":"Test GPU","memory":80,"secure":true,"#
-                + #""price":{"secure":1},"maxCount":{"secure":4},"#
-                + #""dataCenters":[{"id":"EU-IS-1","availability":"HIGH"}]}]}"#
-        } else if url.path().hasSuffix("network-volumes") {
-            json = #"{"networkVolumes":[{"id":"test","name":"Test","size":100,"dataCenter":"EU-IS-1"}]}"#
-        } else {
-            if url.path().hasSuffix("action") {
-                stopCalls += 1
-                if !failedFirstStop {
-                    failedFirstStop = true
-                    return HTTPResponse(status: 503)
-                }
-                stopped = true
-            }
-            json = "{\"id\":\"test\",\"status\":\"\(stopped ? "EXITED" : "RUNNING")\",\"cost\":1,"
-                + "\"gpu\":{\"count\":\(gpuCount)}}"
-        }
-        return HTTPResponse(status: 200, body: Data(json.utf8))
-    }
-}
 
 @Suite("GPU workflow")
 struct GPUWorkflowTests {
@@ -107,13 +20,10 @@ struct GPUWorkflowTests {
 
     @MainActor @Test(arguments: [false, true], ["aitoolkit", "ltx"])
     func concurrentTrainingStartsOrReusesCaptionServer(_ captionEarlier: Bool, trainerName: String) async throws {
-        let suite = "GPUWorkflowTests." + UUID().uuidString
-        let preferences = try #require(UserDefaults(suiteName: suite))
+        let (preferences, suite) = try temporaryPreferences()
         defer { preferences.removePersistentDomain(forName: suite) }
         let transport = UnreachableAgentTransport(agentAvailable: true, inferenceReady: true, gpuCount: 2)
-        let workspace = GPUWorkspace(
-            demoMode: false, transport: transport, preferences: preferences, saveAgentToken: { _, _ in }
-        )
+        let workspace = makeWorkspace(transport, preferences)
         try workspace.configure(runpodKey: "provider-only", hubToken: "hub-only", imageName: "test")
         workspace.gpuCount = 2
         workspace.trainer = trainerName
@@ -132,7 +42,10 @@ struct GPUWorkflowTests {
         #expect(body?["gpus"] == .array([.int(1)]))
         let params = try #require(body?["params"]?.objectValue)
         #expect(params["resolution"]?.intValue == 512)
+        #expect(params["sample_every"]?.intValue == 0)
         #expect(params["rank"]?.intValue == 16)
+        // Signed in, but the Hub account could not be read (whoami 401): downloaded, not pushed.
+        #expect(params["hub"] == nil)
         if trainerName == "ltx" {
             #expect(params["base_model"]?.stringValue == "Lightricks/LTX-2")
             let extra = try #require(params["extra"]?.objectValue)
@@ -148,6 +61,7 @@ struct GPUWorkflowTests {
             #expect(params["extra"] == nil)
         }
         #expect(workspace.trainingState == "running")
+        #expect(workspace.result?.state == .training)
         await workspace.stopEverything()
     }
 
@@ -228,42 +142,34 @@ struct GPUWorkflowTests {
 
     @MainActor @Test
     func restoredBudgetStillStopsWhenAgentKeyCannotBeRead() async throws {
-        let suite = "GPUWorkflowTests." + UUID().uuidString
-        let preferences = try #require(UserDefaults(suiteName: suite))
+        let (preferences, suite) = try temporaryPreferences()
         defer { preferences.removePersistentDomain(forName: suite) }
         let saved = SavedPod(
             pod: RentedPod(id: "test", status: "RUNNING", cost: 1, gpu: .init(count: 1)),
             started: Date().addingTimeInterval(-7200), hourlyRate: 1, budget: 1,
             trainer: "aitoolkit", runID: "previous-run", outputRepo: "test/model"
         )
-        try preferences.set(JSONEncoder().encode(saved), forKey: "ConceptStudio.activePod")
+        try preferences.set(JSONEncoder().encode(saved), forKey: GPUWorkspace.activePodKey)
         let transport = UnreachableAgentTransport()
-        let workspace = GPUWorkspace(
-            demoMode: false, transport: transport, preferences: preferences,
-            readAgentToken: { _ in throw StudioError.message("Keychain unavailable") },
-            saveAgentToken: { _, _ in }
+        let workspace = makeWorkspace(
+            transport, preferences, readAgentToken: { _ in throw StudioError.message("Keychain unavailable") }
         )
         #expect(throws: StudioError.self) {
             try workspace.configure(runpodKey: "test", hubToken: "test", imageName: "test")
         }
         #expect(workspace.hasRunningPod)
         #expect(workspace.runID == "previous-run")
-        for _ in 0 ..< 100 where workspace.hasRunningPod {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await waitUntil { !workspace.hasRunningPod }
         #expect(workspace.pod?.status == "EXITED")
         #expect(await transport.stopCalls == 1)
     }
 
     @MainActor @Test(arguments: [true, false])
     func captionReadinessUsesItsOwnKeyAndCanBeCancelled(_ ready: Bool) async throws {
-        let suite = "GPUWorkflowTests." + UUID().uuidString
-        let preferences = try #require(UserDefaults(suiteName: suite))
+        let (preferences, suite) = try temporaryPreferences()
         defer { preferences.removePersistentDomain(forName: suite) }
         let transport = UnreachableAgentTransport(agentAvailable: true, inferenceReady: ready)
-        let workspace = GPUWorkspace(
-            demoMode: false, transport: transport, preferences: preferences, saveAgentToken: { _, _ in }
-        )
+        let workspace = makeWorkspace(transport, preferences)
         try workspace.configure(runpodKey: "provider-only", hubToken: "hub-only", imageName: "test")
         await workspace.refreshOffers()
         await workspace.rent()
@@ -285,13 +191,10 @@ struct GPUWorkflowTests {
 
     @MainActor @Test
     func idleStopStillRunsWhenAgentReturns522() async throws {
-        let suite = "GPUWorkflowTests." + UUID().uuidString
-        let preferences = try #require(UserDefaults(suiteName: suite))
+        let (preferences, suite) = try temporaryPreferences()
         defer { preferences.removePersistentDomain(forName: suite) }
         let transport = UnreachableAgentTransport()
-        let workspace = GPUWorkspace(
-            demoMode: false, transport: transport, preferences: preferences, saveAgentToken: { _, _ in }
-        )
+        let workspace = makeWorkspace(transport, preferences)
         try workspace.configure(runpodKey: "test", hubToken: "test", imageName: "test")
         await workspace.refreshOffers()
         await workspace.rent()
@@ -307,21 +210,17 @@ struct GPUWorkflowTests {
 
     @MainActor @Test
     func budgetWatchSurvivesFailedKeychainAndEmergencyStop() async throws {
-        let suite = "GPUWorkflowTests." + UUID().uuidString
-        let preferences = try #require(UserDefaults(suiteName: suite))
+        let (preferences, suite) = try temporaryPreferences()
         defer { preferences.removePersistentDomain(forName: suite) }
         let transport = UnreachableAgentTransport(failFirstStop: true)
-        let workspace = GPUWorkspace(
-            demoMode: false, transport: transport, preferences: preferences,
-            saveAgentToken: { _, _ in throw StudioError.message("Keychain unavailable") }
+        let workspace = makeWorkspace(
+            transport, preferences, saveAgentToken: { _, _ in throw StudioError.message("Keychain unavailable") }
         )
         try workspace.configure(runpodKey: "test", hubToken: "test", imageName: "test")
         await workspace.refreshOffers()
         workspace.budget = 0.000000001
         await workspace.rent()
-        for _ in 0 ..< 100 where workspace.hasRunningPod {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await waitUntil { !workspace.hasRunningPod }
         #expect(workspace.pod?.status == "EXITED")
         #expect(await transport.stopCalls >= 2)
     }
@@ -352,6 +251,7 @@ struct GPUWorkflowTests {
         }
         #expect(!workspace.points.isEmpty)
         #expect(workspace.trainingState == "exited")
+        #expect(workspace.result?.state == .pushed(repo: "demo/result"))
         await workspace.publishResult()
         #expect(workspace.message.contains("uploaded"))
         await workspace.stopEverything()
@@ -370,8 +270,45 @@ struct GPUWorkflowTests {
         #expect(workspace.message.contains("spending limit"))
     }
 
+    @MainActor @Test
+    func theBudgetCanOnlyBeRaisedWhileRunning() async throws {
+        let workspace = GPUWorkspace(demoMode: true)
+        await workspace.refreshOffers()
+        workspace.budget = 5
+        #expect(!workspace.raiseBudget(to: 10))
+        await workspace.rent()
+        #expect(!workspace.raiseBudget(to: 4))
+        #expect(!workspace.raiseBudget(to: .infinity))
+        #expect(workspace.activeBudget == 5)
+        #expect(workspace.raiseBudget(to: 10))
+        #expect(workspace.activeBudget == 10)
+        // $1.50/hour: six hours is $9, under the raised limit; seven is $10.50, over it.
+        try await workspace.enforceLimits(now: Date().addingTimeInterval(6 * 3600))
+        #expect(workspace.hasRunningPod)
+        try await workspace.enforceLimits(now: Date().addingTimeInterval(7 * 3600))
+        #expect(!workspace.hasRunningPod)
+    }
+
     @Test
-    func creationUsesV2GPUFieldsAndOnlyAuthenticatedPublishedPorts() async throws {
+    func captionServerSettingsComeFromTheMeasuredTable() {
+        let measured = GPUWorkspace.captionServerSettings(for: "Qwen/Qwen3-VL-8B-Instruct")
+        #expect(measured.maxNumSeqs == 2)
+        #expect(GPUWorkspace.captionServerSettings(for: "someone/unmeasured") == measured)
+        #expect(measured.params(model: "someone/unmeasured")["model"]?.stringValue == "someone/unmeasured")
+    }
+
+    @Test
+    func podNamesCarryTheProject() {
+        #expect(PodNaming.name(project: "My Project!") == "ConceptStudio-My-Project")
+        #expect(PodNaming.name(project: "") == "ConceptStudio")
+        #expect(RentedPod(id: "a", status: "RUNNING", cost: 0, gpu: .init(count: 1), name: "ConceptStudio")
+            .isFromThisApp)
+        #expect(!RentedPod(id: "a", status: "RUNNING", cost: 0, gpu: .init(count: 1), name: "ConceptStudioX")
+            .isFromThisApp)
+    }
+
+    @Test(arguments: ["aitoolkit", "ltx"])
+    func creationUsesV2GPUFieldsAndOnlyAuthenticatedPublishedPorts(_ trainer: String) async throws {
         let transport = GPUTransport(#"{"id":"pod1","status":"STARTING","cost":1,"gpu":{"count":2}}"#)
         let provider = RunPodProvider(key: "runpod-key", transport: transport)
         let offer = GPUOffer(
@@ -383,8 +320,9 @@ struct GPUWorkflowTests {
             maxCount: .init(secure: 4),
             availability: "HIGH"
         )
-        _ = try await provider.create(PodCreation(
-            offer: offer, count: 2, image: "own/image:verified",
+        let pod = try await provider.create(PodCreation(
+            name: PodNaming.name(project: "nora"), offer: offer, count: 2, image: "own/image:verified",
+            minCudaVersion: GPUWorkspace.minimumCUDA(trainer),
             volume: GPUVolume(id: "volume", name: "Data", size: 100, dataCenter: "EU-IS-1"),
             agentToken: "agent-key", hubToken: "hub-key"
         ))
@@ -392,12 +330,18 @@ struct GPUWorkflowTests {
         #expect(request.url?.absoluteString == "https://api.runpod.io/v2/pods")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer runpod-key")
         let body = try JSONValue(parsing: #require(request.httpBody)).objectValue
+        #expect(body?["name"]?.stringValue == "ConceptStudio-nora")
         #expect(body?["gpu"]?.objectValue?["count"]?.intValue == 2)
+        // Both trainer images carry CUDA 13 wheels and need an R580+ (CUDA 13.0) host driver.
         #expect(body?["gpu"]?.objectValue?["minCudaVersion"]?.stringValue == "13.0")
         #expect(body?["gpu"]?.objectValue?["minRamPerGpu"]?.intValue == 60)
         #expect(body?["ports"]?.arrayValue?.compactMap(\.stringValue) == ["8800/http", "8000/http"])
         #expect(body?["mounts"]?.objectValue?["network"]?.arrayValue?.first?.objectValue?["path"]?.stringValue
             == "/workspace")
         #expect(body?["env"]?.objectValue?["HF_TOKEN"]?.stringValue == "hub-key")
+        #expect(provider.url(for: pod, port: PodPort.agent).absoluteString == "https://pod1-8800.proxy.runpod.net")
+        _ = try? await provider.offers(count: 1, minCudaVersion: GPUWorkspace.minimumCUDA(trainer))
+        let query = try #require(await transport.requests.last?.url?.query())
+        #expect(query.contains("minCudaVersion=13.0"))
     }
 }
