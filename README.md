@@ -165,6 +165,33 @@ from `--id-column`, else `file_name`/`id`, else the row index; map them in `job.
 Locator sentences ("the woman on the left") are how the captioner binds a trigger to a face. They are never
 guessed; an unmapped sample is `needs_mapping` and costs no model call. `--dry-run` lists them.
 
+## Project folder
+
+The CLI and the macOS app in `app/` (ConceptStudio) use one project layout on disk:
+
+```
+my-project/
+  job.yaml              the job file
+  images/               training images, each with its sidecars
+    0001.png
+    0001.txt            the caption
+    0001.json           the response record (models, critic verdict, or source: human)
+  skill/                optional: a custom skill, copied in; job.yaml says skill: ./skill
+  references/           app only: one reference face per trigger; never published
+  results/<run-id>/     app only: a trained LoRA, when it was downloaded rather than pushed
+```
+
+Either tool can pick up where the other left off: `concept-captioner run job.yaml --images images
+--out images`, run from the project folder, captions the same project the app opens, and each
+reads the captions and records the other wrote. Neither overwrites a record with
+`source: human`. The job file, skill directory, profile files and response record are the
+shared contract; neither side adds fields the other cannot read. Publishing from the app pushes
+the images and sidecars to the dataset root with `concept-captioner/job.yaml`; reference faces
+never leave the Mac.
+
+Where things stand: [app](app/docs/APP-STATUS.md), [Swift core](app/docs/CORE-STATUS.md),
+[pod](pod/docs/POD-STATUS.md).
+
 ## What happens per image
 
 1. The captioner gets the instructions and the image (resized under provider limits and re-encoded, which
