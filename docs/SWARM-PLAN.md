@@ -127,8 +127,8 @@ preserving custom overrides. The native provider performed the final stop, and a
 task-created pods were independently confirmed EXITED. The latest billing read returns
 $1.431296959 for the pods and $1.489630294 including posted network storage; the retained
 network volume costs $14/month. The GUI-control connection remains an external blocker.
-The local narrative history, decision sheets and exact-tree receipt live in the
-sibling notes repository; that repository must not be published before the walkthrough.
+Historical narrative drafts live in the sibling notes repository. They are deferred under
+the re-stage rule in `CODEX-HANDOFF.md` and are not part of current acceptance work.
 The five-image comparison configs had independent offline acceptance,
 but Hákon rejected that dataset as too small; neither treatment was trained. That proposed
 comparison is superseded, not ready to run.
@@ -147,7 +147,5 @@ open-weights inference path has already been demonstrated separately. Complete t
 app and pod handoff work now. Tiny trainer runs establish execution, curves and transfers,
 not caption-policy effectiveness or LoRA quality.
 
-Then prepare the second repository's proposed narrative commits from v0.1.0, each building and
-passing its tests, ending in a tree identical to the verified one, with the required one-page
-decision sheet per commit. Walk those sheets with Hákon before publishing that repository.
-This repository remains the exploration record.
+Re-staging follows the owner-triggered rule in `CODEX-HANDOFF.md`; do not schedule it as an
+automatic next step after implementation or verification.
