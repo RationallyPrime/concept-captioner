@@ -217,3 +217,31 @@ since, so five runs were hanging during this review. The app tests use an in-mem
 store, so the Keychain is not the blocker; most app tests are main-actor bound, so the likely
 cause is the main thread not being serviced on the runner. Next step: add `timeout-minutes`
 to the job, and take a process sample on the runner to find the blocked thread.
+
+## Owner decisions on the items above, 2026-10-11 afternoon
+
+1. **APP-BRIEF.** Restore the five tagged owner decisions and the removed rules verbatim, with an
+   "implemented" note per item; keep the overnight additions beside them. Assigned to Ari.
+2. **Mixed image-and-clip Hub datasets.** Python reads imagefolder repos by file name, as Swift
+   does. Assigned to Ari.
+3. **Video routes.** A clip goes to any route that can carry it. CORE-SPEC gets a per-route table:
+   Gemini inline; OpenRouter and vLLM as a video content part; OpenAI and Anthropic refused
+   before any network call. Swift adds the video part to the OpenAI-compatible client. Python
+   sends to Gemini and OpenRouter through pydantic-ai today and refuses vLLM with a clear message
+   until pydantic-ai carries video on the OpenAI-compatible chat route (no hand-rolled adapter).
+   One size guard on both sides: compute the request size, compare with that route's limit,
+   refuse before sending.
+4. **Caption schema and mapping.** The `usable` description becomes category-neutral in both
+   `schemas.py` and `Schemas.swift` ("unusable when the declared training target cannot be found
+   in the sample"), with CORE-SPEC updated. The app shows the mapping step only for concepts
+   that need a locator (identity, object, character); style and motion map to the whole target
+   automatically. The job file is unchanged.
+5. **Images.** One clean build of all three images from HEAD on cx53, tagged, becomes the release
+   the app defaults to, replacing the overlaid r2.
+6. **Stopped pods.** Audited and terminated the same afternoon (receipt in the private notes);
+   the owner rotates the Hub token that was on the two proof pods. GPUProvider should pass the
+   Hub token as a RunPod secret reference rather than a literal.
+7. **Volume cleanup.** No timer. A validated catalog step at the start of every training or
+   generation run prunes dataset folders of completed runs, keeping the current run and the last
+   few resumable ones; Resume re-pulls from the pinned Hub revision when its folder is gone. The
+   app shows volume usage and offers an explicit clean-up action.
