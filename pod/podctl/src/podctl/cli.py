@@ -1,8 +1,9 @@
-"""``podctl`` command line (POD-SPEC §8): one subcommand per agent endpoint plus two sugars.
+"""``podctl`` command line (POD-SPEC §8): one subcommand per agent endpoint plus sugars.
 
 Exit codes: 0 success, 1 agent error (the envelope is printed to stderr; also a ``--wait`` that
-ends in state ``failed``), 2 usage, 3 connection failure (transport error or a gateway answering
-for a pod that is not up yet), 130 interrupted.
+ends in state ``failed``, and a pulled file whose size or SHA-256 does not match the listing),
+2 usage, 3 connection failure (transport error or a gateway answering for a pod that is not up
+yet), 130 interrupted.
 
 Output: a compact table or key/value listing by default; ``--json`` prints the raw response,
 one JSON document per line. ``--follow`` and ``--wait`` poll every ``POLL_INTERVAL_S`` seconds
@@ -13,6 +14,8 @@ module-level names so tests can replace them.
 from __future__ import annotations
 
 import argparse
+import fnmatch
+import hashlib
 import json
 import os
 import sys
@@ -25,7 +28,7 @@ from typing import Any
 import httpx
 
 from . import __version__
-from .client import AgentAPIError, AgentClient, AgentUnreachable
+from .client import AgentAPIError, AgentClient, AgentUnreachable, TransferMismatch
 
 EXIT_OK, EXIT_AGENT_ERROR, EXIT_USAGE, EXIT_CONNECTION = 0, 1, 2, 3
 EXIT_INTERRUPTED = 130
@@ -142,6 +145,42 @@ def build_parser() -> argparse.ArgumentParser:
 
     events = sub.add_parser("events", help="GET /runs/RUN_ID/events")
     events.add_argument("run_id")
+
+    files = sub.add_parser("files", help="GET /runs/RUN_ID/files: the run's output files")
+    files.add_argument("run_id")
+
+    pull = sub.add_parser(
+        "pull",
+        help="download a run's output files (GET /runs/RUN_ID/files/PATH), verified by SHA-256",
+    )
+    pull.add_argument("run_id")
+    pull.add_argument(
+        "--to", type=Path, default=None, help="destination directory (default ./RUN_ID)"
+    )
+    selection = pull.add_mutually_exclusive_group()
+    selection.add_argument(
+        "--include",
+        action="append",
+        metavar="GLOB",
+        help="only paths matching GLOB (repeatable), e.g. '*.safetensors'",
+    )
+    selection.add_argument(
+        "--latest",
+        action="store_true",
+        help="only the newest *.safetensors (push-lora's rule for the final LoRA)",
+    )
+
+    tensorboard = sub.add_parser(
+        "tensorboard", help="GET /tensorboard/PATH through the agent's TensorBoard proxy"
+    )
+    tensorboard.add_argument(
+        "path", nargs="?", default="data/runs", help="path under /tensorboard/ (default data/runs)"
+    )
+    tensorboard.add_argument(
+        "--session",
+        action="store_true",
+        help="POST /tensorboard-session first, then fetch with only its cookie, as a browser does",
+    )
 
     train = sub.add_parser("train", help="start trainer-<TRAINER> with a run config file as params")
     train.add_argument("trainer", choices=TRAINERS)
@@ -350,6 +389,17 @@ def fmt_logs(payload: dict[str, Any]) -> str:
     return "\n".join(payload.get("lines") or [])
 
 
+def fmt_files(payload: dict[str, Any]) -> str:
+    files = payload.get("files") or []
+    if not files:
+        return f"no output files in {fmt_scalar(payload.get('root'))}"
+    rows = [
+        [item.get("path"), item.get("size"), item.get("sha256"), item.get("modified_at")]
+        for item in files
+    ]
+    return fmt_table(("PATH", "SIZE", "SHA256", "MODIFIED"), rows)
+
+
 # --- output -----------------------------------------------------------------------------
 
 
@@ -503,6 +553,85 @@ def cmd_events(client: AgentClient, args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_files(client: AgentClient, args: argparse.Namespace) -> int:
+    emit(client.run_files(args.run_id), raw=args.json, render=fmt_files)
+    return EXIT_OK
+
+
+def local_target(root: Path, relative: str) -> Path:
+    """Where listed file ``relative`` lands under ``root``; never outside it."""
+    parts = relative.split("/")
+    if "\x00" in relative or any(part in {"", ".", ".."} for part in parts):
+        raise UsageError(f"the agent listed an unsafe path {relative!r}; refusing to write it")
+    return root.joinpath(*parts)
+
+
+def _already_there(path: Path, size: int, sha256: str) -> bool:
+    if not path.is_file() or path.stat().st_size != size:
+        return False
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1 << 20):
+            digest.update(chunk)
+    return digest.hexdigest() == sha256
+
+
+def select_files(files: list[dict[str, Any]], args: argparse.Namespace) -> list[dict[str, Any]]:
+    if args.latest:
+        weights = [item for item in files if str(item.get("path", "")).endswith(".safetensors")]
+        return (
+            [max(weights, key=lambda item: (item.get("modified_at") or "", item["path"]))]
+            if weights
+            else []
+        )
+    if args.include:
+        return [
+            item
+            for item in files
+            if any(fnmatch.fnmatchcase(item["path"], pattern) for pattern in args.include)
+        ]
+    return files
+
+
+def cmd_pull(client: AgentClient, args: argparse.Namespace) -> int:
+    listing = client.run_files(args.run_id)
+    root: Path = args.to if args.to is not None else Path(args.run_id)
+    chosen = select_files(list(listing.get("files") or []), args)
+    if not chosen:
+        note(f"nothing to pull from run {args.run_id} ({fmt_scalar(listing.get('root'))})")
+        return EXIT_AGENT_ERROR if args.latest or args.include else EXIT_OK
+    pulled: list[dict[str, Any]] = []
+    for item in chosen:
+        target = local_target(root, item["path"])
+        size, sha256 = int(item["size"]), str(item["sha256"])
+        if _already_there(target, size, sha256):
+            note(f"{item['path']}: already here, verified")
+        else:
+            note(f"{item['path']}: {size} bytes")
+            client.download_run_file(args.run_id, item["path"], target, sha256=sha256, size=size)
+        pulled.append({**item, "local_path": str(target)})
+    if args.json:
+        emit({"run_id": args.run_id, "to": str(root), "files": pulled}, raw=True)
+    else:
+        for item in pulled:
+            print(item["local_path"])
+    return EXIT_OK
+
+
+def cmd_tensorboard(client: AgentClient, args: argparse.Namespace) -> int:
+    session = None
+    if args.session:
+        session = client.tensorboard_session()
+        note(
+            f"TensorBoard session until {session.get('expires_at')}; fetching with its cookie only"
+        )
+    response = client.tensorboard(args.path, session=session)
+    sys.stdout.write(response.text)
+    if response.text and not response.text.endswith("\n"):
+        sys.stdout.write("\n")
+    return EXIT_OK
+
+
 def cmd_train(client: AgentClient, args: argparse.Namespace) -> int:
     text = _read_text(args.config, source="--config")
     config = load_json_object(text, source=f"--config {args.config}")
@@ -526,6 +655,9 @@ COMMANDS: dict[str, Callable[[AgentClient, argparse.Namespace], int]] = {
     "stop": cmd_stop,
     "logs": cmd_logs,
     "events": cmd_events,
+    "files": cmd_files,
+    "pull": cmd_pull,
+    "tensorboard": cmd_tensorboard,
     "train": cmd_train,
     "caption-up": cmd_caption_up,
 }
@@ -552,6 +684,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_USAGE
     except AgentAPIError as error:
         print_error(error, raw=args.json)
+        return EXIT_AGENT_ERROR
+    except TransferMismatch as error:
+        note(f"error: {error}")
         return EXIT_AGENT_ERROR
     except AgentUnreachable as error:
         note(f"cannot reach the agent at {args.url}: {error}")
