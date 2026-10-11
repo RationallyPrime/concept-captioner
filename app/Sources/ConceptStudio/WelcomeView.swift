@@ -124,7 +124,7 @@ struct WelcomeView: View {
                 HStack(spacing: 12) {
                     Image(systemName: "server.rack").foregroundStyle(StudioStyle.accent)
                     Text(pod.id).fontWeight(.medium).textSelection(.enabled)
-                    Text("\(pod.status.capitalized) · \(StudioStyle.money(pod.cost)) per hour")
+                    Text("\(pod.status.capitalized) · \(StudioMoney.perHour(pod.cost))")
                         .foregroundStyle(StudioStyle.supportingText).monospacedDigit()
                     Spacer()
                     Button("Stop", systemImage: "stop.circle") { Task { await session.gpu.stopStrayPod(id: pod.id) } }
@@ -135,9 +135,9 @@ struct WelcomeView: View {
     }
 
     private var retainedCost: String {
-        let spent = "\(StudioStyle.money(session.gpu.elapsedCost)) estimated since creation"
+        let spent = "\(StudioMoney.format(session.gpu.elapsedCost)) estimated since creation"
         guard let rate = session.gpu.pod?.cost, rate > 0 else { return spent }
-        return "\(StudioStyle.money(rate)) per hour · \(spent)"
+        return "\(StudioMoney.perHour(rate)) · \(spent)"
     }
 
     private var recentProjects: some View {

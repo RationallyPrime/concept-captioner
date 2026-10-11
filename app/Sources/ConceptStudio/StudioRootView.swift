@@ -108,7 +108,7 @@ struct StudioRootView: View {
                 .disabled(session.gpu.isStopping)
                 .help("Cancel work and stop the rented computer.")
                 if session.gpu.hasRunningPod {
-                    Text("GPU spend · \(StudioStyle.money(session.gpu.elapsedCost))")
+                    Text("GPU spend · \(StudioMoney.format(session.gpu.elapsedCost))")
                         .font(.callout.weight(.medium)).monospacedDigit()
                 }
                 Spacer(minLength: 8)

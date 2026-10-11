@@ -1,42 +1,59 @@
 import ConceptCore
 import SwiftUI
 
-/// Provider vocabulary and default model ids for every view. Lane app-contract moves this table into
-/// StudioEndpointChoices.swift; at integration the views read that table instead.
-enum ModelChoices {
-    static let providers = ["openrouter", "vercel", "gateway/anthropic", "google", "anthropic", "openai", "vllm"]
+// MARK: - Integration seam for lane app-contract (DELETE at integration)
 
-    /// The model offered when a provider is chosen and the model field is empty or still holds the
-    /// previous provider's default. `nil` for OpenAI with a ChatGPT plan, whose models come from the plan.
-    static func defaultModel(for kind: String, chatGPTPlan: Bool = false) -> String? {
-        switch kind {
-        case "google": "gemini-3.8-flash"
-        case "anthropic", "gateway/anthropic": "claude-sonnet-4-6"
-        case "openai": chatGPTPlan ? nil : "gpt-5.2"
-        case "vllm": "Qwen/Qwen3-VL-8B-Instruct"
-        default: "google/gemini-3.8-flash"
+/// Mirrors lane app-contract's `ProviderChoices` (StudioEndpointChoices.swift on fix/app-contract): provider
+/// vocabulary and default models in one table. After both lanes merge the duplicate declaration fails to
+/// compile and this copy is deleted; the views already call the shared names.
+enum ProviderChoices {
+    struct Provider: Equatable, Identifiable {
+        let kind: String
+        let title: String
+        let defaultModel: String
+        var id: String {
+            kind
         }
     }
 
-    /// The model to show after switching from `old` to `new`: a typed model is never replaced.
-    static func model(afterSwitchingFrom old: String, to new: String, current: String, chatGPTPlan: Bool) -> String {
-        let replaceable = current.isEmpty || current == defaultModel(for: old, chatGPTPlan: chatGPTPlan)
-        guard replaceable, let model = defaultModel(for: new, chatGPTPlan: chatGPTPlan) else { return current }
-        return model
+    static let all: [Provider] = [
+        Provider(kind: "openrouter", title: "OpenRouter gateway", defaultModel: "google/gemini-3.8-flash"),
+        Provider(kind: "vercel", title: "Vercel AI Gateway", defaultModel: "google/gemini-3.8-flash"),
+        Provider(kind: "gateway/anthropic", title: "Pydantic AI Gateway", defaultModel: "claude-sonnet-4-6"),
+        Provider(kind: "google", title: "Google Gemini", defaultModel: "gemini-3.8-flash"),
+        Provider(kind: "anthropic", title: "Anthropic Claude", defaultModel: "claude-sonnet-4-6"),
+        Provider(kind: "openai", title: "OpenAI", defaultModel: "gpt-5.2"),
+        Provider(kind: "vllm", title: "My pod / custom server", defaultModel: "Qwen/Qwen3-VL-8B-Instruct"),
+    ]
+
+    static let defaultKind = "openrouter"
+
+    static var kinds: [String] {
+        all.map(\.kind)
     }
 
     static func title(_ kind: String) -> String {
-        [
-            "openrouter": "OpenRouter gateway",
-            "vercel": "Vercel AI Gateway",
-            "gateway/anthropic": "Pydantic AI Gateway",
-            "google": "Google Gemini",
-            "anthropic": "Anthropic Claude",
-            "openai": "OpenAI",
-            "vllm": "My pod / custom server",
-        ][kind] ?? kind
+        all.first { $0.kind == kind }?.title ?? kind
+    }
+
+    static func defaultModel(for kind: String) -> String {
+        all.first { $0.kind == kind }?.defaultModel ?? ""
+    }
+
+    static func model(
+        afterSwitchingFrom old: String,
+        to new: String,
+        current: String,
+        previousDefault: String? = nil,
+        newDefault: String? = nil
+    ) -> String {
+        let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        let untouched = trimmed.isEmpty || trimmed == (previousDefault ?? defaultModel(for: old))
+        return untouched ? (newDefault ?? defaultModel(for: new)) : current
     }
 }
+
+// MARK: - End seam
 
 struct CaptioningView: View {
     @Bindable var session: StudioSession
@@ -51,7 +68,7 @@ struct CaptioningView: View {
                 ) {
                     Form {
                         Picker("Account", selection: $session.endpointKind) {
-                            ForEach(ModelChoices.providers, id: \.self) { Text(ModelChoices.title($0)).tag($0) }
+                            ForEach(ProviderChoices.kinds, id: \.self) { Text(ProviderChoices.title($0)).tag($0) }
                         }.disabled(session.busy)
                         if session.endpointKind == "openai", session.openAIUsesChatGPT, !session.demoMode {
                             ChatGPTModelPicker(
@@ -83,7 +100,7 @@ struct CaptioningView: View {
                     if session.useCritic {
                         Form {
                             Picker("Reviewer account", selection: $session.criticKind) {
-                                ForEach(ModelChoices.providers, id: \.self) { Text(ModelChoices.title($0)).tag($0) }
+                                ForEach(ProviderChoices.kinds, id: \.self) { Text(ProviderChoices.title($0)).tag($0) }
                             }.disabled(session.busy)
                             if session.criticKind == "openai", session.openAIUsesChatGPT, !session.demoMode {
                                 ChatGPTModelPicker(
@@ -227,16 +244,26 @@ struct CaptioningView: View {
             Task { await session.prepareChatGPTModels() }
         }
         .onChange(of: session.openAIUsesChatGPT) { _, _ in session.rememberChoices() }
-        .onChange(of: session.endpointKind) { old, kind in
-            if kind == "vllm", session.usingPodCaptioner {
-                session.modelName = session.gpu.captionModel
-            } else {
-                session.modelName = ModelChoices.model(
-                    afterSwitchingFrom: old, to: kind, current: session.modelName,
-                    chatGPTPlan: session.openAIUsesChatGPT
-                )
-            }
+        .onChange(of: session.endpointKind) { old, new in
+            session.modelName = model(afterSwitchingFrom: old, to: new, current: session.modelName)
         }
+        .onChange(of: session.criticKind) { old, new in
+            session.criticModel = model(afterSwitchingFrom: old, to: new, current: session.criticModel)
+        }
+    }
+
+    /// A typed model is kept; a provider default is offered only for an empty or untouched field. OpenAI on a
+    /// ChatGPT plan takes its models from the plan. (Lane app-contract's `providerChanged(from:to:)`.)
+    private func model(afterSwitchingFrom old: String, to new: String, current: String) -> String {
+        guard !(new == "openai" && session.openAIUsesChatGPT) else { return current }
+        let podModel = { (kind: String) in
+            kind == "vllm" && session.usingPodCaptioner ? session.gpu.captionModel : ProviderChoices
+                .defaultModel(for: kind)
+        }
+        return ProviderChoices.model(
+            afterSwitchingFrom: old, to: new, current: current,
+            previousDefault: podModel(old), newDefault: podModel(new)
+        )
     }
 
     private var captionAction: some View {

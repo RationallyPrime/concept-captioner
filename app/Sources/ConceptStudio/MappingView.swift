@@ -69,9 +69,6 @@ struct MappingView: View {
                     if let image = selectedImage {
                         VStack(alignment: .leading, spacing: 20) {
                             Text(image.id).font(.title3.weight(.semibold)).textSelection(.enabled)
-                            PhotoView(url: image.url, faces: session.analyses[image.id]?.faces ?? [])
-                                .frame(height: 300).frame(maxWidth: .infinity)
-                                .background(StudioStyle.surface)
                             if fromSuggestion {
                                 StudioNotice(
                                     "Filled in from a suggestion. Check every subject against this photo, "
@@ -79,6 +76,9 @@ struct MappingView: View {
                                     symbol: "person.crop.rectangle.badge.checkmark"
                                 )
                             }
+                            PhotoView(url: image.url, faces: session.analyses[image.id]?.faces ?? [])
+                                .frame(height: 300).frame(maxWidth: .infinity)
+                                .background(StudioStyle.surface)
                             presentSubjects
                         }.padding(.leading, 20).padding(.bottom, 12)
                     } else {

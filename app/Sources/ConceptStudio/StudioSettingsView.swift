@@ -135,7 +135,7 @@ struct StudioSettingsView: View {
             subtitle: "Tests the choices on Captioning. Live tests use the selected account’s allowance."
         ) {
             Form {
-                LabeledContent("Account", value: ModelChoices.title(session.endpointKind))
+                LabeledContent("Account", value: ProviderChoices.title(session.endpointKind))
                 LabeledContent("Model", value: session.modelName)
                     .textSelection(.enabled)
                 if session.endpointKind == "openai" {
@@ -197,7 +197,7 @@ struct StudioSettingsView: View {
         case "gateway": "Pydantic AI Gateway"
         case "huggingface": "Hugging Face write token"
         case "runpod": "RunPod"
-        default: ModelChoices.title(kind)
+        default: ProviderChoices.title(kind)
         }
     }
 

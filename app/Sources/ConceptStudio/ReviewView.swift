@@ -18,8 +18,6 @@ extension FocusedValues {
 
 struct ReviewView: View {
     @Bindable var session: StudioSession
-    /// Native list selection: one photo opens its editor; ⌘- or ⇧-click selects several to re-caption.
-    @State private var selection: Set<String> = []
     @State private var sideA = ComparisonChoice(kind: "", model: "")
     @State private var sideB = ComparisonChoice(kind: "", model: "")
     @State private var resultA = ""
@@ -35,6 +33,12 @@ struct ReviewView: View {
         session.project?.images ?? []
     }
 
+    /// Native list selection: one photo opens its editor; ⌘- or ⇧-click selects several to re-caption.
+    /// Ids from another project (the selection outlives a project switch) are ignored.
+    private var selection: Set<String> {
+        session.reviewSelection.intersection(images.map(\.id))
+    }
+
     private var selectedImages: [ProjectImage] {
         images.filter { selection.contains($0.id) }
     }
@@ -47,7 +51,7 @@ struct ReviewView: View {
                     Text("⌘- or ⇧-click to select several").font(.caption)
                         .foregroundStyle(StudioStyle.supportingText)
                 }.padding(.horizontal, 8)
-                List(images, selection: $selection) { image in
+                List(images, selection: $session.reviewSelection) { image in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(image.id).lineLimit(2).truncationMode(.middle)
                         if session.hasUnsavedCaption(for: image) {
@@ -79,16 +83,16 @@ struct ReviewView: View {
         }
         .focusedSceneValue(\.captionSaveAction, saveAction)
         .onAppear {
-            if selection.isEmpty, let id = session.selectedImageID { selection = [id] }
+            if selection.isEmpty, let id = session.selectedImageID { session.reviewSelection = [id] }
             if sideA.kind.isEmpty { sideA = ComparisonChoice(kind: session.endpointKind, model: session.modelName) }
             if sideB.kind.isEmpty { sideB = ComparisonChoice(kind: session.endpointKind, model: "") }
         }
-        .onChange(of: selection) { _, ids in
+        .onChange(of: session.reviewSelection) { _, ids in
             if ids.count == 1, let id = ids.first { session.selectedImageID = id }
             resultA = ""; resultB = ""
         }
         .onChange(of: session.selectedImageID) { _, id in
-            if let id, selection.count <= 1, !selection.contains(id) { selection = [id] }
+            if let id, selection.count <= 1, !selection.contains(id) { session.reviewSelection = [id] }
         }
     }
 
@@ -188,7 +192,7 @@ struct ReviewView: View {
             Text(title).font(.headline)
             Form {
                 Picker("Account", selection: choice.kind) {
-                    ForEach(ModelChoices.providers, id: \.self) { Text(ModelChoices.title($0)).tag($0) }
+                    ForEach(ProviderChoices.kinds, id: \.self) { Text(ProviderChoices.title($0)).tag($0) }
                 }
                 if choice.wrappedValue.kind == "openai", session.openAIUsesChatGPT, !session.demoMode {
                     ChatGPTModelPicker(title: "Model", model: choice.model, models: session.chatGPT.availableModels)
@@ -198,16 +202,16 @@ struct ReviewView: View {
             }.formStyle(.columns)
         }
         .onChange(of: choice.wrappedValue.kind) { old, new in
-            choice.wrappedValue.model = ModelChoices.model(
-                afterSwitchingFrom: old, to: new, current: choice.wrappedValue.model,
-                chatGPTPlan: session.openAIUsesChatGPT
+            guard !(new == "openai" && session.openAIUsesChatGPT) else { return }
+            choice.wrappedValue.model = ProviderChoices.model(
+                afterSwitchingFrom: old, to: new, current: choice.wrappedValue.model
             )
         }
     }
 
     private func result(_ choice: ComparisonChoice, text: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("\(ModelChoices.title(choice.kind)) · \(choice.model)").font(.headline).lineLimit(2)
+            Text("\(ProviderChoices.title(choice.kind)) · \(choice.model)").font(.headline).lineLimit(2)
             Text(text.isEmpty ? "Waiting…" : text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(text.isEmpty ? StudioStyle.supportingText : .primary)
         }.frame(maxWidth: .infinity, alignment: .leading)

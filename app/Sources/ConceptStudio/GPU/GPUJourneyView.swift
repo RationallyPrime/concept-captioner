@@ -2,6 +2,16 @@ import AppKit
 import Charts
 import SwiftUI
 
+enum MonitorTab: String, CaseIterable, Identifiable {
+    case progress = "Progress"
+    case tensorBoard = "TensorBoard"
+    case log = "Training log"
+
+    var id: Self {
+        self
+    }
+}
+
 struct GPUJourneyView: View {
     let session: StudioSession
     @Bindable var workspace: GPUWorkspace
@@ -9,28 +19,13 @@ struct GPUJourneyView: View {
     /// The journey footer already shows spend and Stop everything; the Welcome sheet does not.
     var showsSpendControls = true
     @State private var confirmTermination = false
-    @State private var monitorTab = MonitorTab.progress
     @State private var newBudget: Double?
 
-    enum MonitorTab: String, CaseIterable, Identifiable {
-        case progress = "Progress"
-        case tensorBoard = "TensorBoard"
-        case log = "Training log"
-
-        var id: Self {
-            self
-        }
-    }
-
-    init(
-        session: StudioSession, step: StudioStep, showsSpendControls: Bool = true,
-        monitorTab: MonitorTab = .progress
-    ) {
+    init(session: StudioSession, step: StudioStep, showsSpendControls: Bool = true) {
         self.session = session
         workspace = session.gpu
         self.step = step
         self.showsSpendControls = showsSpendControls
-        _monitorTab = State(initialValue: monitorTab)
     }
 
     private var datasetRepo: String {
@@ -77,7 +72,7 @@ struct GPUJourneyView: View {
             if workspace.isBusy || workspace.isStopping { ProgressView().controlSize(.small) }
             if showsSpendControls, workspace.hasRunningPod {
                 VStack(alignment: .trailing, spacing: 8) {
-                    Text("GPU spend · \(StudioStyle.money(workspace.elapsedCost))")
+                    Text("GPU spend · \(StudioMoney.format(workspace.elapsedCost))")
                         .font(.headline).monospacedDigit()
                     Button(workspace.isStopping ? "Stopping…" : "Stop everything", systemImage: "stop.circle") {
                         session.requestStopEverything()
@@ -149,13 +144,13 @@ struct GPUJourneyView: View {
             Form {
                 if workspace.quotedHourlyRate > 0 || workspace.hasRunningPod {
                     LabeledContent("Computer price") {
-                        Text("\(StudioStyle.money(workspace.pod?.cost ?? workspace.quotedHourlyRate)) / hour")
+                        Text(StudioMoney.perHour(workspace.pod?.cost ?? workspace.quotedHourlyRate))
                             .font(.headline).monospacedDigit()
                     }
                 }
                 if workspace.hasRunningPod {
                     LabeledContent("Spending limit") {
-                        Text(StudioStyle.money(workspace.activeBudget ?? workspace.budget)).monospacedDigit()
+                        Text(StudioMoney.format(workspace.activeBudget ?? workspace.budget)).monospacedDigit()
                     }
                     TextField("Raise the limit to (USD)", value: $newBudget, format: .number)
                 } else {
@@ -172,7 +167,7 @@ struct GPUJourneyView: View {
                     .font(.callout).foregroundStyle(StudioStyle.supportingText)
             }
             Button(workspace.quotedHourlyRate > 0
-                ? "Rent computer · \(StudioStyle.money(workspace.quotedHourlyRate))/hour"
+                ? "Rent computer · \(StudioMoney.perHour(workspace.quotedHourlyRate))"
                 : "Choose a computer first") {
                     Task { await workspace.rent() }
                 }
@@ -228,7 +223,11 @@ struct GPUJourneyView: View {
                     trainerPicker
                     TextField("Starting model", text: $workspace.baseModel)
                         .help("The existing model your photos will teach. Keep the included choice for your first run.")
-                    TextField("Save trained model to (your-name/model-name)", text: $workspace.outputRepo)
+                    TextField(
+                        "Save trained model to",
+                        text: $workspace.outputRepo,
+                        prompt: Text("your-name/model-name")
+                    )
                     Toggle("Keep the trained model private", isOn: $workspace.privateResult)
                 }.formStyle(.columns)
                 Text("With a Hugging Face token in Settings, the trained model is uploaded to this repository when "
@@ -279,16 +278,16 @@ struct GPUJourneyView: View {
     private var monitor: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
-                Picker("Monitor", selection: $monitorTab) {
+                Picker("Monitor", selection: Bindable(session).monitorTab) {
                     ForEach(MonitorTab.allCases) { Text($0.rawValue).tag($0) }
                 }
-                .pickerStyle(.segmented).labelsHidden().frame(maxWidth: 420)
+                .pickerStyle(.segmented).labelsHidden().fixedSize()
                 Spacer(minLength: 0)
                 Button("Refresh progress", systemImage: "arrow.clockwise") { Task { await workspace.refresh() } }
                     .disabled(workspace.isBusy || workspace.isStopping)
                     .keyboardShortcut("r", modifiers: .command)
             }
-            switch monitorTab {
+            switch session.monitorTab {
             case .progress: ScrollView { progress.padding(.bottom, 12) }
             case .tensorBoard: tensorBoard.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             case .log: log
@@ -321,7 +320,9 @@ struct GPUJourneyView: View {
                 .font(.system(.callout, design: .monospaced)).textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(12)
         }
-        .defaultScrollAnchor(.bottom)
+        .defaultScrollAnchor(.top, for: .alignment)
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(.bottom, for: .sizeChanges)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(StudioStyle.surface, in: RoundedRectangle(cornerRadius: 8))
         .accessibilityLabel("Training log")
@@ -349,7 +350,7 @@ struct GPUJourneyView: View {
                 }
             }
             Divider()
-            TrainingResultSection(result: workspace.result, busy: workspace.isBusy) {
+            TrainingResultSection(state: workspace.result?.state, busy: workspace.isBusy) {
                 Task { await workspace.retrieveResult() }
             }
         }
@@ -357,13 +358,13 @@ struct GPUJourneyView: View {
 }
 
 struct TrainingResultSection: View {
-    let result: TrainingResult?
+    let state: TrainingResult.State?
     let busy: Bool
     let retrieve: () -> Void
 
     var body: some View {
         StudioSection(title: "Your trained model") {
-            switch result?.state {
+            switch state {
             case nil, .training?:
                 Text("When training finishes, the model is uploaded to your Hugging Face repository, or saved in "
                     + "this project's results folder if you have no Hugging Face token.")

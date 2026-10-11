@@ -37,7 +37,7 @@ struct StudioPrompt: Identifiable {
                 ? "Stop the rented computer before \(work.purpose.verb)?"
                 : "Cancel the current work before \(work.purpose.verb)?"
         case .stopWithPendingResult: "Your trained model has not been collected yet"
-        case let .raiseBudget(_, to, _): "Raise the spending limit to \(StudioStyle.money(to))?"
+        case let .raiseBudget(_, to, _): "Raise the spending limit to \(StudioMoney.format(to))?"
         }
     }
 
@@ -51,8 +51,8 @@ struct StudioPrompt: Identifiable {
         case let .raiseBudget(from, to, rate):
             let hours = rate.map { $0 > 0 ? " That is about \(Self.hours((to - from) / $0)) more at this price." : "" }
                 ?? ""
-            return "The computer stops automatically at \(StudioStyle.money(to)) instead of \(StudioStyle.money(from))."
-                + hours
+            return "The computer stops automatically at \(StudioMoney.format(to)) "
+                + "instead of \(StudioMoney.format(from))." + hours
         }
     }
 
@@ -90,8 +90,8 @@ struct StudioPrompt: Identifiable {
         guard work.hasRunningPod else {
             return "Completed captions are saved. Work still in progress will be cancelled first."
         }
-        let price = work.hourlyRate.map { "It costs \(StudioStyle.money($0)) per hour" } ?? "It is still billing"
-        var text = "\(price) and has used about \(StudioStyle.money(work.spent)) so far. "
+        let price = work.hourlyRate.map { "It costs \(StudioMoney.format($0)) per hour" } ?? "It is still billing"
+        var text = "\(price) and has used about \(StudioMoney.format(work.spent)) so far. "
             + "Stop ends GPU billing; saved network storage remains. "
             + "If the stop cannot be confirmed, ConceptStudio stays open so you can retry."
         if work.offerKeepRunning {

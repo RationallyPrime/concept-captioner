@@ -357,6 +357,10 @@ final class StudioSession {
     var quitDecision: StudioCloseDecision?
     /// The GPU workspace whose RunPod and Hub keys were last read from the Keychain.
     @ObservationIgnored weak var gpuKeysLoadedFor: GPUWorkspace?
+    /// Review's list selection; kept here so it survives moving between screens.
+    var reviewSelection: Set<String> = []
+    /// The Monitor tab last shown.
+    var monitorTab = MonitorTab.progress
 
     // MARK: - End lane ui stored state
 }
