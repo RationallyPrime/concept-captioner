@@ -6,24 +6,35 @@ import Foundation
 public struct GeminiClient: ModelClient {
     public static let defaultBaseURL = URL(string: "https://generativelanguage.googleapis.com/v1beta")!
 
+    /// Which Gemini API serves the request. The two differ in some model capabilities (thinking
+    /// levels of the image family); the request shape is the same.
+    public enum API: Sendable {
+        case developer
+        case vertex
+    }
+
     public let baseURL: URL
     public let apiKey: String
     public let requestedModel: String
     public let transport: any HTTPTransport
+    /// Also send the key as bearer `Authorization` (Pydantic AI Gateway). Independent of `api`.
     public let bearerAuth: Bool
+    public let api: API
 
     public init(
         apiKey: String,
         model: String,
         baseURL: URL = defaultBaseURL,
         transport: any HTTPTransport = URLSessionTransport(),
-        bearerAuth: Bool = false
+        bearerAuth: Bool = false,
+        api: API = .developer
     ) {
         self.apiKey = apiKey
         requestedModel = model
         self.baseURL = baseURL
         self.transport = transport
         self.bearerAuth = bearerAuth
+        self.api = api
     }
 
     public func request(
@@ -124,7 +135,7 @@ public struct GeminiClient: ModelClient {
         } else {
             let scale = ["minimal", "low", "medium", "high"]
             let levels: [Int] = if requestedModel.hasPrefix("gemini-3.1-flash-lite-image")
-                || (requestedModel.hasPrefix("gemini-3.1-flash-image") && !bearerAuth) {
+                || (requestedModel.hasPrefix("gemini-3.1-flash-image") && api == .developer) {
                 [0, 3]
             } else if requestedModel.hasPrefix("gemini-3-pro-preview") {
                 [1, 3]

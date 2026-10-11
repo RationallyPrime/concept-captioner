@@ -38,6 +38,9 @@ struct GatewayTests {
         ("gateway/openai", "gpt-5.2", "https://gateway-us.pydantic.dev/proxy/openai/responses"),
         ("gateway/openai-responses", "gpt-5.2", "https://gateway-us.pydantic.dev/proxy/openai/responses"),
         ("gateway/openai-chat", "gpt-5.2", "https://gateway-us.pydantic.dev/proxy/openai/chat/completions"),
+        ("gateway/responses", "gpt-5.2", "https://gateway-us.pydantic.dev/proxy/openai/responses"),
+        ("gateway/chat", "gpt-5.2", "https://gateway-us.pydantic.dev/proxy/openai/chat/completions"),
+        ("openai", "gpt-5.2", "https://api.openai.com/v1/responses"),
         ("gateway/anthropic", "claude-opus-5", "https://gateway-us.pydantic.dev/proxy/anthropic/v1/messages"),
         (
             "gateway/google",
@@ -58,12 +61,19 @@ struct GatewayTests {
         #expect(resolved.requested == model)
         let request = try #require(await transport.requests.first)
         #expect(request.url?.absoluteString == url)
-        let key = kind.hasPrefix("gateway/") ? "pylf_v1_us_test" : kind == "vercel" ? "vercel-key" : "router-key"
+        let key = switch kind {
+        case _ where kind.hasPrefix("gateway/"): "pylf_v1_us_test"
+        case "vercel": "vercel-key"
+        case "openai": "direct-openai"
+        default: "router-key"
+        }
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer \(key)")
         #expect(request.value(forHTTPHeaderField: "x-api-key") == nil)
         #expect(request.value(forHTTPHeaderField: "x-goog-api-key") == (kind.contains("google") ? key : nil))
         let body = try JSONValue(parsing: #require(request.httpBody))
         #expect(body.field("model")?.stringValue == (kind.contains("google") ? nil : model))
+        // Every Responses request opts out of retention; Chat Completions bodies carry no store.
+        #expect(body.field("store") == (url.hasSuffix("/responses") ? .bool(false) : nil))
     }
 
     @Test(arguments: ["us", "eu"])
@@ -153,9 +163,18 @@ struct ResponsesGatewayTests {
         #expect(request.value(forHTTPHeaderField: "X-Title") == "test")
         let body = try JSONValue(parsing: #require(request.httpBody))
         let input = try #require(body.field("input")?.arrayValue)
-        #expect(input[0].field("role")?.stringValue == "system")
-        #expect(input[1].field("content")?.element(0)?.field("type")?.stringValue == "input_text")
-        #expect(input[1].field("content")?.element(1)?.field("image_url")?.stringValue == "data:image/png;base64,AQI=")
+        // The system prompt is `instructions`, except prompted mode, where json_object needs it in input.
+        let user = mode == .prompted ? input[1] : input[0]
+        #expect(input.count == (mode == .prompted ? 2 : 1))
+        #expect(input[0].field("role")?.stringValue == (mode == .prompted ? "system" : "user"))
+        if mode == .prompted {
+            #expect(body.field("instructions") == nil)
+        } else {
+            #expect(body.field("instructions")?.stringValue?.hasPrefix("Caption.") == true)
+        }
+        #expect(user.field("content")?.element(0)?.field("type")?.stringValue == "input_text")
+        #expect(user.field("content")?.element(1)?.field("image_url")?.stringValue == "data:image/png;base64,AQI=")
+        #expect(body.field("store") == .bool(false))
         #expect(body.field("max_output_tokens") == .int(300))
         #expect(body.field("reasoning") == .object(["effort": .string("low")]))
         if mode == .tool {
@@ -168,6 +187,15 @@ struct ResponsesGatewayTests {
             if mode == .native { #expect(body.field("text")?.field("format")?.field("schema") == Caption.jsonSchema) }
             if mode == .prompted { #expect(input[0].field("content")?.stringValue?.contains("JSON object") == true) }
         }
+    }
+
+    @Test func extraBodyCannotTurnRetentionBackOn() {
+        let body = OpenAIResponsesClient.body(
+            model: "gpt-5.2", instructions: "Caption.", messages: [.user("Image.")],
+            output: OutputRequest(name: Caption.schemaName, schema: Caption.jsonSchema, mode: .native),
+            settings: RequestSettings(extraBody: ["store": .bool(true)])
+        )
+        #expect(body["store"] == .bool(false))
     }
 
     @Test func refusalAndMalformedRepliesAreErrors() throws {

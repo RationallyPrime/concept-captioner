@@ -1,4 +1,5 @@
-// ChatGPT plan inference uses OAuth credentials and the fixed public Responses endpoint.
+// ChatGPT plan inference uses OAuth credentials and the fixed public Responses endpoint. The
+// plan route streams (`stream: true`); the reply is the terminal `response.completed` event.
 
 import Foundation
 
@@ -103,7 +104,7 @@ public struct ChatGPTModelClient: ModelClient {
         }
         try Task.checkCancellation()
         try await usageLimit.check()
-        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/responses")!)
+        var request = URLRequest(url: OpenAIResponsesClient.openAIBaseURL.appendingPathComponent("responses"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
@@ -139,14 +140,10 @@ public struct ChatGPTModelClient: ModelClient {
             throw ConfigurationError("Choose a model available to your connected ChatGPT account.")
         }
         try Self.validate(settings: settings, outputMode: output.mode)
-        var body: JSONObject = [
-            "model": .string(requestedModel),
-            "instructions": .string(output.instructions(instructions)),
-            "input": .array(messages.map(OpenAIResponsesClient.encode)),
-            "text": OpenAIResponsesClient.textFormat(output),
-            "store": .bool(false), "stream": .bool(true),
-        ]
-        body["reasoning"] = OpenAIResponsesClient.reasoning(settings, model: requestedModel)
+        var body = OpenAIResponsesClient.body(
+            model: requestedModel, instructions: instructions, messages: messages, output: output, settings: settings
+        )
+        body["stream"] = .bool(true)
         return body
     }
 
@@ -174,13 +171,7 @@ public struct ChatGPTModelClient: ModelClient {
     }
 
     private func httpFailure(_ response: HTTPStreamResponse) async throws -> ChatGPTInferenceError {
-        var body = Data()
-        for try await line in response.lines {
-            try Task.checkCancellation()
-            body.append(contentsOf: line.utf8)
-            if body.count >= ProviderHTTP.errorBodyLimit { break }
-            body.append(10)
-        }
+        let body = try await response.collect(limit: ProviderHTTP.errorBodyLimit)
         try Task.checkCancellation()
         return ChatGPTInferenceError(
             status: response.status, headers: response.headers,
@@ -189,38 +180,27 @@ public struct ChatGPTModelClient: ModelClient {
     }
 
     private func completedReply(_ response: HTTPStreamResponse, mode: OutputMode) async throws -> ModelReply {
-        var data: [String] = []
-        var event = ""
-        for try await line in response.lines {
+        for try await event in response.events {
             try Task.checkCancellation()
-            if line.isEmpty {
-                if let reply = try terminalReply(data, event: event, response: response, mode: mode) {
-                    return reply
-                }
-                data = []
-                event = ""
-            } else if line.hasPrefix("data:") {
-                data.append(String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces))
-            } else if line.hasPrefix("event:") {
-                event = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+            if let reply = try terminalReply(event, response: response, mode: mode) {
+                return reply
             }
         }
         try Task.checkCancellation()
-        if let reply = try terminalReply(data, event: event, response: response, mode: mode) { return reply }
         throw ModelError
             .malformedReply("ChatGPT stream ended without response.completed. No caption was saved; try again.")
     }
 
+    /// The reply for a terminal success event, a thrown error for a terminal failure, nil for
+    /// everything else (created, in_progress, deltas, `[DONE]`).
     private func terminalReply(
-        _ data: [String], event: String, response: HTTPStreamResponse, mode: OutputMode
+        _ event: ServerSentEvent, response: HTTPStreamResponse, mode: OutputMode
     ) throws -> ModelReply? {
-        guard !data.isEmpty else { return nil }
-        let text = data.joined(separator: "\n")
-        guard text != "[DONE]" else { return nil }
-        guard let envelope = try? JSONValue(parsing: Data(text.utf8)) else {
+        guard event.data != "[DONE]" else { return nil }
+        guard let envelope = try? JSONValue(parsing: Data(event.data.utf8)) else {
             throw ModelError.malformedReply("ChatGPT returned an invalid stream event. No caption was saved.")
         }
-        switch envelope.field("type")?.stringValue ?? event {
+        switch envelope.field("type")?.stringValue ?? event.event ?? "" {
         case "response.completed":
             guard let completed = envelope.field("response"),
                   completed.field("status")?.stringValue == "completed" else {
@@ -232,7 +212,7 @@ public struct ChatGPTModelClient: ModelClient {
                 status: response.status,
                 headers: response.headers,
                 envelope: envelope,
-                body: ProviderHTTP.truncatedText(Data(text.utf8))
+                body: ProviderHTTP.truncatedText(Data(event.data.utf8))
             )
         case "response.incomplete":
             let reason = envelope.field("response")?.field("incomplete_details")?.field("reason")?.stringValue

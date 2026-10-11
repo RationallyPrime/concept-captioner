@@ -20,25 +20,45 @@ public protocol HTTPTransport: Sendable {
     func send(_ request: URLRequest) async throws -> HTTPResponse
 }
 
+/// A response whose body is read as it arrives. Status and headers are complete; `body` yields
+/// raw byte chunks of any size (a chunk boundary means nothing). Read the body once, either as
+/// `events` or with `collect(limit:)`.
 public struct HTTPStreamResponse: Sendable {
     public let status: Int
     /// Header names lowercased, as for HTTPResponse.
     public let headers: [String: String]
-    public let lines: AsyncThrowingStream<String, any Error>
+    public let body: AsyncThrowingStream<Data, any Error>
     private let cancellation: @Sendable () -> Void
 
     public init(
         status: Int,
         headers: [String: String] = [:],
-        lines: AsyncThrowingStream<String, any Error>,
+        body: AsyncThrowingStream<Data, any Error>,
         cancel: @escaping @Sendable () -> Void = {}
     ) {
         self.status = status
         self.headers = headers
-        self.lines = lines
+        self.body = body
         cancellation = cancel
     }
 
+    /// The body parsed as server-sent events, each delivered as soon as its blank line arrives.
+    public var events: ServerSentEventStream {
+        ServerSentEventStream(body: body)
+    }
+
+    /// At most `limit` bytes of the body (for error reports), stopping early once reached.
+    public func collect(limit: Int) async throws -> Data {
+        var collected = Data()
+        for try await chunk in body {
+            try Task.checkCancellation()
+            collected.append(chunk.prefix(limit - collected.count))
+            if collected.count >= limit { break }
+        }
+        return collected
+    }
+
+    /// Stop reading and release the connection. Safe to call more than once.
     public func cancel() {
         cancellation()
     }
@@ -48,7 +68,8 @@ public protocol HTTPStreamingTransport: HTTPTransport {
     func stream(_ request: URLRequest) async throws -> HTTPStreamResponse
 }
 
-/// URLSession-backed. Follows redirects; drops Authorization when a redirect leaves the host.
+/// URLSession-backed. Follows redirects; drops every credential header when a redirect leaves
+/// the host.
 ///
 /// Errors from URLSession (`URLError`) propagate unchanged; each caller wraps them in its own
 /// error type (`ModelError.transport`, `HubError.transport`). A non-HTTP response is reported as
@@ -61,6 +82,9 @@ public struct URLSessionTransport: HTTPStreamingTransport {
         self.session = session
         self.timeout = timeout
     }
+
+    /// Largest chunk the streaming body yields without a line ending in it.
+    static let streamChunkLimit = 16384
 
     public func send(_ request: URLRequest) async throws -> HTTPResponse {
         var request = request
@@ -92,13 +116,22 @@ public struct URLSessionTransport: HTTPStreamingTransport {
             guard let name = name as? String, let value = value as? String else { continue }
             headers[name.lowercased()] = value
         }
-        let (lines, continuation) = AsyncThrowingStream<String, any Error>.makeStream()
+        // Raw bytes, not `bytes.lines`: AsyncLineSequence drops empty lines, and the blank line is
+        // what ends a server-sent event. A chunk is flushed at every line ending so an event is
+        // delivered the moment its terminating blank line arrives.
+        let (body, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
         let reader = Task {
             do {
-                for try await line in bytes.lines {
-                    try Task.checkCancellation()
-                    continuation.yield(line)
+                var chunk = Data()
+                for try await byte in bytes {
+                    chunk.append(byte)
+                    if byte == 0x0A || byte == 0x0D || chunk.count >= Self.streamChunkLimit {
+                        try Task.checkCancellation()
+                        continuation.yield(chunk)
+                        chunk = Data()
+                    }
                 }
+                if !chunk.isEmpty { continuation.yield(chunk) }
                 continuation.finish()
             } catch {
                 continuation.finish(throwing: error)
@@ -109,14 +142,17 @@ public struct URLSessionTransport: HTTPStreamingTransport {
             bytes.task.cancel()
         }
         continuation.onTermination = { _ in cancel() }
-        return HTTPStreamResponse(status: http.statusCode, headers: headers, lines: lines, cancel: cancel)
+        return HTTPStreamResponse(status: http.statusCode, headers: headers, body: body, cancel: cancel)
     }
 }
 
-/// Per-task delegate: lets URLSession follow the redirect but strips `Authorization` once the
-/// chain leaves the original host (Hub `resolve` URLs redirect to a CDN that rejects a second
-/// auth mechanism, and a bearer token must never leak to a third host anyway).
+/// Per-task delegate: lets URLSession follow the redirect but strips the credential headers once
+/// the chain leaves the original host (Hub `resolve` URLs redirect to a CDN that rejects a second
+/// auth mechanism, and a key must never leak to a third host anyway).
 private final class RedirectDelegate: NSObject, URLSessionTaskDelegate, Sendable {
+    /// Every header a client in this package puts a credential in.
+    static let credentialHeaders = ["Authorization", "x-api-key", "x-goog-api-key"]
+
     let originalHost: String?
 
     init(originalHost: String?) {
@@ -131,7 +167,9 @@ private final class RedirectDelegate: NSObject, URLSessionTaskDelegate, Sendable
     ) async -> URLRequest? {
         var next = request
         if next.url?.host()?.lowercased() != originalHost {
-            next.setValue(nil, forHTTPHeaderField: "Authorization")
+            for name in Self.credentialHeaders {
+                next.setValue(nil, forHTTPHeaderField: name)
+            }
         }
         return next
     }
@@ -175,6 +213,22 @@ enum ProviderHTTP {
         } catch {
             throw ModelError.malformedReply("response is not JSON: \(truncatedText(response.body))")
         }
+    }
+
+    /// A 400 that names thinking or reasoning, re-worded to say which model refused which level.
+    /// Every other error is returned unchanged.
+    static func explainThinkingRejection(
+        _ error: ModelError,
+        model: String,
+        settings: RequestSettings
+    ) -> ModelError {
+        guard case let .http(status, body) = error, status == 400, settings.thinks,
+              body.contains("reasoning") || body.contains("thinking") else { return error }
+        return .http(
+            status: status,
+            body: "model '\(model)' rejected thinking '\(settings.thinkingEffort?.rawValue ?? "medium")'; "
+                + "choose a supported thinking level or none. Provider response: \(body)"
+        )
     }
 
     /// UTF-8 text of at most `errorBodyLimit` bytes. Lossy on purpose: the cut may split a

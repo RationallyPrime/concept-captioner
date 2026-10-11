@@ -1,10 +1,18 @@
-// Chat Completions over URLSession. Covers OpenAI, OpenRouter and vLLM. See docs/CORE-SPEC.md
-// for the exact request and reply shapes per output mode.
+// Chat Completions over URLSession. Covers OpenRouter, Vercel, vLLM and the gateway's explicit
+// OpenAI Chat route (direct OpenAI speaks Responses). See docs/CORE-SPEC.md for the exact
+// request and reply shapes per output mode.
 
 import Foundation
 
 public struct OpenAICompatibleClient: ModelClient {
-    public static let openAIBaseURL = URL(string: "https://api.openai.com/v1")!
+    /// How a thinking level is spelled on the wire. Chosen by `resolve` from the endpoint kind.
+    public enum ReasoningDialect: Sendable {
+        /// `reasoning_effort: <level>` (OpenAI Chat Completions, Vercel, vLLM).
+        case reasoningEffort
+        /// `reasoning: {effort, enabled: true}` with OpenRouter's three-step scale.
+        case openRouter
+    }
+
     public static let openRouterBaseURL = URL(string: "https://openrouter.ai/api/v1")!
     public static let vercelBaseURL = URL(string: "https://ai-gateway.vercel.sh/v1")!
 
@@ -13,19 +21,22 @@ public struct OpenAICompatibleClient: ModelClient {
     public let requestedModel: String
     public let transport: any HTTPTransport
     public let extraHeaders: [String: String]
+    public let reasoningDialect: ReasoningDialect
 
     public init(
         baseURL: URL,
         apiKey: String?,
         model: String,
         transport: any HTTPTransport = URLSessionTransport(),
-        extraHeaders: [String: String] = [:]
+        extraHeaders: [String: String] = [:],
+        reasoningDialect: ReasoningDialect = .reasoningEffort
     ) {
         self.baseURL = baseURL
         self.apiKey = apiKey
         requestedModel = model
         self.transport = transport
         self.extraHeaders = extraHeaders
+        self.reasoningDialect = reasoningDialect
     }
 
     public func request(
@@ -47,13 +58,8 @@ public struct OpenAICompatibleClient: ModelClient {
                 headers: headers,
                 transport: transport
             )
-        } catch let ModelError.http(status, body) where status == 400 && settings.thinks
-            && (body.contains("reasoning_effort") || body.contains("thinking")) {
-            throw ModelError.http(
-                status: status,
-                body: "model '\(requestedModel)' rejected thinking '\(settings.thinkingEffort?.rawValue ?? "medium")'; "
-                    + "choose a supported thinking level or none. Provider response: \(body)"
-            )
+        } catch let error as ModelError {
+            throw ProviderHTTP.explainThinkingRejection(error, model: requestedModel, settings: settings)
         }
         return try Self.parse(envelope, mode: output.mode)
     }
@@ -123,7 +129,7 @@ public struct OpenAICompatibleClient: ModelClient {
     }
 
     private func reasoningSettings(_ settings: RequestSettings) -> JSONObject {
-        guard baseURL.host() == Self.openRouterBaseURL.host() else {
+        guard reasoningDialect == .openRouter else {
             // pydantic-ai's OPENAI_REASONING_EFFORT_MAP sends "medium" for `thinking: true`.
             return ["reasoning_effort": .string(settings.thinkingEffort?.rawValue ?? "medium")]
         }

@@ -8,7 +8,8 @@
 //   OpenAI-compatible server is `kind: vllm`, whose key the user set for custom endpoints and
 //   nothing else.
 // - A custom `base_url` must be https, or http to a loopback / private-network host.
-// - The vLLM key goes only to the host configured by the user, never to an arbitrary job host.
+// - The vLLM key goes only to the origin (scheme, host, port) configured by the user, never to
+//   an arbitrary job host or another port on the configured one.
 
 import Foundation
 
@@ -103,8 +104,7 @@ public extension Endpoints {
                 throw ConfigurationError("kind vllm needs base_url")
             }
             let configured = try keys.vllmBaseURL.map(checkBaseURL)
-            if configured?.host(percentEncoded: false)?.lowercased()
-                != target.host(percentEncoded: false)?.lowercased() {
+            if configured.map(Origin.init) != Origin(target) {
                 apiKey = nil
             }
         }
@@ -129,11 +129,13 @@ public extension Endpoints {
     ) throws -> any ModelClient {
         switch provider {
         case .openai:
-            let base = OpenAICompatibleClient.openAIBaseURL
-            return OpenAICompatibleClient(baseURL: base, apiKey: apiKey, model: spec.model, transport: transport)
+            let base = OpenAIResponsesClient.openAIBaseURL
+            return OpenAIResponsesClient(baseURL: base, apiKey: apiKey ?? "", model: spec.model, transport: transport)
         case .openrouter:
-            let base = OpenAICompatibleClient.openRouterBaseURL
-            return OpenAICompatibleClient(baseURL: base, apiKey: apiKey, model: spec.model, transport: transport)
+            return OpenAICompatibleClient(
+                baseURL: OpenAICompatibleClient.openRouterBaseURL, apiKey: apiKey, model: spec.model,
+                transport: transport, reasoningDialect: .openRouter
+            )
         case .vercel:
             return OpenAICompatibleClient(
                 baseURL: OpenAICompatibleClient.vercelBaseURL, apiKey: apiKey, model: spec.model, transport: transport
@@ -185,7 +187,8 @@ public extension Endpoints {
     }
 
     private static var gatewayUpstreams: [String] {
-        ["google", "google-cloud", "anthropic", "openai", "openai-responses", "openai-chat"]
+        // `chat` and `responses` are pydantic-ai's aliases of `openai-chat` and `openai-responses`.
+        ["google", "google-cloud", "anthropic", "openai", "openai-responses", "openai-chat", "chat", "responses"]
     }
 
     private static func gatewayClient(
@@ -207,14 +210,14 @@ public extension Endpoints {
             return GeminiClient(
                 apiKey: apiKey, model: spec.model,
                 baseURL: base.appendingPathComponent("google-vertex/v1beta1/publishers/google"),
-                transport: transport, bearerAuth: true
+                transport: transport, bearerAuth: true, api: .vertex
             )
         case "anthropic":
             return AnthropicClient(
                 apiKey: apiKey, model: spec.model, baseURL: base.appendingPathComponent("anthropic"),
                 transport: transport, bearerAuth: true
             )
-        case "openai-chat":
+        case "openai-chat", "chat":
             return OpenAICompatibleClient(
                 baseURL: base.appendingPathComponent("openai"), apiKey: apiKey, model: spec.model, transport: transport
             )
@@ -280,6 +283,20 @@ public extension Endpoints {
             return false
         }
         return address.isLoopback || address.isPrivate || address.isLinkLocal
+    }
+}
+
+/// Scheme, lowercased host and port with the scheme's default filled in: what the vLLM key is
+/// bound to.
+struct Origin: Equatable {
+    let scheme: String?
+    let host: String?
+    let port: Int?
+
+    init(_ url: URL) {
+        scheme = url.scheme?.lowercased()
+        host = url.host(percentEncoded: false)?.lowercased()
+        port = url.port ?? (scheme == "https" ? 443 : scheme == "http" ? 80 : nil)
     }
 }
 

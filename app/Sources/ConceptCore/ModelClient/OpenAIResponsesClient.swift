@@ -1,8 +1,11 @@
-// OpenAI Responses wire format, used by Pydantic AI Gateway's default OpenAI route.
+// OpenAI Responses wire format: direct `openai`, Pydantic AI Gateway's default OpenAI route, and
+// (through the shared `body` encoder) the ChatGPT plan route.
 
 import Foundation
 
 public struct OpenAIResponsesClient: ModelClient {
+    public static let openAIBaseURL = URL(string: "https://api.openai.com/v1")!
+
     public let baseURL: URL
     public let apiKey: String
     public let requestedModel: String
@@ -28,28 +31,45 @@ public struct OpenAIResponsesClient: ModelClient {
     ) async throws -> ModelReply {
         var headers = ["Authorization": "Bearer \(apiKey)"]
         settings.mergeExtraHeaders(into: &headers)
-        let envelope = try await ProviderHTTP.post(
-            requestBody(instructions: instructions, messages: messages, output: output, settings: settings),
-            to: baseURL.appendingPathComponent("responses"), headers: headers, transport: transport
+        let body = Self.body(
+            model: requestedModel, instructions: instructions, messages: messages, output: output, settings: settings
         )
+        let envelope: JSONValue
+        do {
+            envelope = try await ProviderHTTP.post(
+                body, to: baseURL.appendingPathComponent("responses"), headers: headers, transport: transport
+            )
+        } catch let error as ModelError {
+            throw ProviderHTTP.explainThinkingRejection(error, model: requestedModel, settings: settings)
+        }
         return try Self.parse(envelope, mode: output.mode)
     }
 
-    func requestBody(
+    /// The one Responses request body; ChatGPTModelClient adds only `stream`.
+    ///
+    /// The system prompt goes in the top-level `instructions` field, except in prompted mode:
+    /// `json_object` requires the word "JSON" in an input message and OpenAI does not count
+    /// `instructions`, so there it leads `input` as a system message (as pydantic-ai does).
+    /// `store` is always false: captions and images are not retained at OpenAI.
+    static func body(
+        model: String,
         instructions: String,
         messages: [ChatMessage],
         output: OutputRequest,
         settings: RequestSettings
     ) -> JSONObject {
-        // JSON mode requires "JSON" in an input message; putting instructions here also preserves
-        // the complete conversation across the stage's in-conversation correction.
-        let system: JSONValue = .object([
-            "role": .string("system"), "content": .string(output.instructions(instructions)),
-        ])
-        var body: JSONObject = ["model": .string(requestedModel), "input": .array([system] + messages.map(Self.encode))]
+        let system = output.instructions(instructions)
+        var input = messages.map(encode)
+        var body: JSONObject = ["model": .string(model)]
+        if output.mode == .prompted {
+            input.insert(.object(["role": .string("system"), "content": .string(system)]), at: 0)
+        } else {
+            body["instructions"] = .string(system)
+        }
+        body["input"] = .array(input)
         switch output.mode {
         case .native, .prompted:
-            body["text"] = Self.textFormat(output)
+            body["text"] = textFormat(output)
         case .tool:
             body["tools"] = .array([.object([
                 "type": .string("function"), "name": .string(output.name),
@@ -58,13 +78,14 @@ public struct OpenAIResponsesClient: ModelClient {
             body["tool_choice"] = .object(["type": .string("function"), "name": .string(output.name)])
             if let parallel = settings.parallelToolCalls { body["parallel_tool_calls"] = .bool(parallel) }
         }
-        body["reasoning"] = Self.reasoning(settings, model: requestedModel)
+        body["reasoning"] = reasoning(settings, model: model)
         if let temperature = settings.temperature { body["temperature"] = .double(temperature) }
         if let maxTokens = settings.maxTokens { body["max_output_tokens"] = .int(maxTokens) }
         if let topP = settings.topP { body["top_p"] = .double(topP) }
         if let tier = settings.serviceTier { body["service_tier"] = .string(tier) }
         // Responses has no seed, top_k, stop, penalties or logit_bias parameters.
         settings.mergeExtraBody(into: &body)
+        body["store"] = .bool(false)
         return body
     }
 
