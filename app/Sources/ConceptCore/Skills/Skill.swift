@@ -71,10 +71,11 @@ public struct Skill: Sendable, Equatable {
             .sorted { $0.unicodeScalars.lexicographicallyPrecedes($1.unicodeScalars) }
     }
 
-    /// "h3-still" -> references/profiles/h3-still.md; or any existing .md path.
-    public func profile(_ nameOrPath: String) throws -> String {
+    /// "h3-still" -> references/profiles/h3-still.md; or any existing .md path. A relative .md
+    /// path resolves against `base` (a job's `directory`), else against the working directory.
+    public func profile(_ nameOrPath: String, relativeTo base: URL? = nil) throws -> String {
         if nameOrPath.hasSuffix(".md") {
-            let candidate = URL(fileURLWithPath: nameOrPath)
+            let candidate = Skills.resolve(nameOrPath, relativeTo: base)
             if Skills.isFile(candidate) {
                 return try Skills.readText(candidate)
             }
@@ -161,11 +162,21 @@ public enum Skills {
         return skill
     }
 
-    /// Load from a path string (expands "~"); nil loads the bundled default.
-    public static func load(path: String?) throws -> Skill {
+    /// Load from a path string (expands "~"); nil loads the bundled default. A relative path
+    /// resolves against `base` (a job's `directory`), else against the working directory.
+    public static func load(path: String?, relativeTo base: URL? = nil) throws -> Skill {
         guard let path else { return try load() }
+        return try load(resolve(path, relativeTo: base, isDirectory: true))
+    }
+
+    /// A path string as a file URL: `~` expanded, an absolute path as is, a relative one appended
+    /// to `base` and standardized; with no `base`, against the working directory.
+    public static func resolve(_ path: String, relativeTo base: URL?, isDirectory: Bool = false) -> URL {
         let expanded = (path as NSString).expandingTildeInPath
-        return try load(URL(fileURLWithPath: expanded, isDirectory: true))
+        guard let base, !expanded.hasPrefix("/") else {
+            return URL(fileURLWithPath: expanded, isDirectory: isDirectory)
+        }
+        return base.appendingPathComponent(expanded, isDirectory: isDirectory).standardizedFileURL
     }
 
     // MARK: - Frontmatter

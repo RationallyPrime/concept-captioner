@@ -89,7 +89,7 @@ public struct URLSessionTransport: HTTPStreamingTransport {
     public func send(_ request: URLRequest) async throws -> HTTPResponse {
         var request = request
         request.timeoutInterval = timeout
-        let delegate = RedirectDelegate(originalHost: request.url?.host())
+        let delegate = RedirectDelegate(original: request.url)
         let (data, response) = try await session.data(for: request, delegate: delegate)
         guard let http = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
@@ -105,7 +105,7 @@ public struct URLSessionTransport: HTTPStreamingTransport {
     public func stream(_ request: URLRequest) async throws -> HTTPStreamResponse {
         var request = request
         request.timeoutInterval = timeout
-        let delegate = RedirectDelegate(originalHost: request.url?.host())
+        let delegate = RedirectDelegate(original: request.url)
         let (bytes, response) = try await session.bytes(for: request, delegate: delegate)
         guard let http = response as? HTTPURLResponse else {
             bytes.task.cancel()
@@ -147,16 +147,18 @@ public struct URLSessionTransport: HTTPStreamingTransport {
 }
 
 /// Per-task delegate: lets URLSession follow the redirect but strips the credential headers once
-/// the chain leaves the original host (Hub `resolve` URLs redirect to a CDN that rejects a second
-/// auth mechanism, and a key must never leak to a third host anyway).
+/// the chain leaves the original origin, that is scheme, host and port (Hub `resolve` URLs
+/// redirect to a CDN that rejects a second auth mechanism, a key must never leak to a third host,
+/// and a downgrade to plain http or a move to another port on the same host is a different
+/// origin too).
 private final class RedirectDelegate: NSObject, URLSessionTaskDelegate, Sendable {
     /// Every header a client in this package puts a credential in.
     static let credentialHeaders = ["Authorization", "x-api-key", "x-goog-api-key"]
 
-    let originalHost: String?
+    let original: Origin?
 
-    init(originalHost: String?) {
-        self.originalHost = originalHost?.lowercased()
+    init(original: URL?) {
+        self.original = original.map(Origin.init)
     }
 
     func urlSession(
@@ -166,7 +168,7 @@ private final class RedirectDelegate: NSObject, URLSessionTaskDelegate, Sendable
         newRequest request: URLRequest
     ) async -> URLRequest? {
         var next = request
-        if next.url?.host()?.lowercased() != originalHost {
+        if original == nil || next.url.map(Origin.init) != original {
             for name in Self.credentialHeaders {
                 next.setValue(nil, forHTTPHeaderField: name)
             }

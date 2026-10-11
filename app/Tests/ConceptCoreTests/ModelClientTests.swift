@@ -505,6 +505,17 @@ struct URLSessionTransportTests {
         }
     }
 
+    @Test(arguments: ["/downgrade", "/port"])
+    func dropsEveryCredentialHeaderWhenRedirectLeavesTheOrigin(path: String) async throws {
+        let (response, seen) = try await send(path)
+        #expect(response.status == 200)
+        #expect(seen.count == 2)
+        #expect(seen.last?.url?.host() == "origin.test")
+        for name in Self.credentialHeaders {
+            #expect(seen.last?.value(forHTTPHeaderField: name) == nil, "\(name) followed the redirect to \(path)")
+        }
+    }
+
     @Test func keepsCredentialsOnTheSameHost() async throws {
         let (response, seen) = try await send("/same")
         #expect(response.status == 200)

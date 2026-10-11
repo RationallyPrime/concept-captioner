@@ -20,7 +20,10 @@ public struct Runner: Sendable {
     private let captionerStage: StructuredStage<Caption>
     private let criticStage: StructuredStage<Critique>?
 
-    /// skill nil -> Skills.load(path: job.skill); profile nil -> job.profile; concurrency nil -> captioner.concurrency.
+    /// skill nil -> Skills.load(path: job.skill, relativeTo: job.directory); profile nil ->
+    /// job.profile, a relative `.md` path resolved against job.directory (an explicit `profile`
+    /// is the caller's own path and resolves against the working directory); concurrency nil ->
+    /// captioner.concurrency.
     ///
     /// `ConfigurationError` when the skill cannot be loaded, the profile is unknown to it, or the
     /// concurrency is below 1.
@@ -33,7 +36,7 @@ public struct Runner: Sendable {
         concurrency: Int? = nil,
         overwrite: Bool = false
     ) throws {
-        let loadedSkill = try skill ?? Skills.load(path: job.skill)
+        let loadedSkill = try skill ?? Skills.load(path: job.skill, relativeTo: job.directory)
         let profileName = profile ?? job.profile
         let inFlight = concurrency ?? captioner.concurrency
         guard inFlight >= 1 else {
@@ -44,7 +47,7 @@ public struct Runner: Sendable {
         self.critic = critic
         self.skill = loadedSkill
         self.profileName = profileName
-        profileText = try loadedSkill.profile(profileName)
+        profileText = try loadedSkill.profile(profileName, relativeTo: profile == nil ? job.directory : nil)
         self.concurrency = inFlight
         self.overwrite = overwrite
         captionerStage = StructuredStage(

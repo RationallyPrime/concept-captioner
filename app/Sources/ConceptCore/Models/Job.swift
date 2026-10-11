@@ -201,7 +201,10 @@ public struct Endpoints: Sendable, Equatable {
 public struct Job: Sendable, Equatable {
     public typealias Mapping = OrderedDictionary<String, String>
 
+    /// A skill directory path. Relative paths resolve against `directory`, the folder that holds
+    /// the job file, never against the process's working directory (see `resolvedURL(for:)`).
     public var skill: String?
+    /// A profile name in the skill, or a path to a `.md` file, resolved like `skill`.
     public var profile: String
     public var concepts: [Concept]
     public var samples: OrderedDictionary<String, Mapping?>
@@ -210,6 +213,11 @@ public struct Job: Sendable, Equatable {
     public var captionerThinking: ThinkingLevel
     public var criticThinking: ThinkingLevel
     public var policyOverrides: OrderedDictionary<String, String>
+    /// The directory that holds the job file this job was loaded from (`load(contentsOf:)` sets
+    /// it). Relative `skill` and `.md` profile paths resolve against it. nil for a job built in
+    /// memory or parsed from text, whose relative paths resolve against the working directory.
+    /// Not part of the job file and not part of equality.
+    public var directory: URL?
 
     /// Validates like `Job._check`: at least one concept, unique triggers, every sample mapping.
     public init(
@@ -233,6 +241,20 @@ public struct Job: Sendable, Equatable {
         self.criticThinking = criticThinking
         self.policyOverrides = policyOverrides
         try check()
+    }
+
+    /// Equality is the job file's content; where it was loaded from does not count.
+    public static func == (lhs: Job, rhs: Job) -> Bool {
+        lhs.skill == rhs.skill && lhs.profile == rhs.profile && lhs.concepts == rhs.concepts
+            && lhs.samples == rhs.samples && lhs.singleSubjectOnly == rhs.singleSubjectOnly
+            && lhs.endpoints == rhs.endpoints && lhs.captionerThinking == rhs.captionerThinking
+            && lhs.criticThinking == rhs.criticThinking && lhs.policyOverrides == rhs.policyOverrides
+    }
+
+    /// A path from the job file as a file URL: `~` expanded, an absolute path as is, a relative
+    /// one against `directory` (the working directory when `directory` is nil).
+    public func resolvedURL(for path: String, isDirectory: Bool = false) -> URL {
+        Skills.resolve(path, relativeTo: directory, isDirectory: isDirectory)
     }
 
     public var triggers: [String] {
@@ -359,7 +381,9 @@ public struct Job: Sendable, Equatable {
         } catch {
             throw ConfigurationError("cannot read job file \(url.path): \(error.localizedDescription)")
         }
-        return try load(yaml: text)
+        var job = try load(yaml: text)
+        job.directory = url.standardizedFileURL.deletingLastPathComponent()
+        return job
     }
 
     public static func load(yaml: String) throws -> Job {

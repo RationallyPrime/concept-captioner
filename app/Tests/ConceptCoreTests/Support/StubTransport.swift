@@ -39,7 +39,8 @@ public actor StubTransport: HTTPTransport {
 // MARK: - URLSession stub
 
 /// A `URLProtocol` for exercising `URLSessionTransport` without a network. Serves `/cross`
-/// (302 to another host), `/same` (302 to the same host) and anything else as 200 `ok`, and
+/// (302 to another host), `/same` (302 to the same origin), `/downgrade` (302 to http on the same
+/// host), `/port` (302 to another port on the same host) and anything else as 200 `ok`, and
 /// records every request the loading system hands it, redirected ones included.
 public final class RedirectStubProtocol: URLProtocol {
     public static let seen = Mutex<[URLRequest]>([])
@@ -68,6 +69,8 @@ public final class RedirectStubProtocol: URLProtocol {
         let target: URL? = switch url.path() {
         case "/cross": URL(string: "https://cdn.test/final")
         case "/same": URL(string: "https://origin.test/final")
+        case "/downgrade": URL(string: "http://origin.test/final")
+        case "/port": URL(string: "https://origin.test:8443/final")
         default: nil
         }
         if let target {

@@ -24,7 +24,11 @@ comparing code with this document sees them as decisions rather than drift.
 | 2026-10-11 | The vLLM key is bound to the configured origin (scheme, host, port), not the host alone | Resolve, Deviation 9 |
 | 2026-10-11 | `GeminiClient.api` (Developer/Vertex) is separate from `bearerAuth`; `OpenAICompatibleClient.reasoningDialect` is chosen by `resolve` | GeminiClient, OpenAICompatibleClient |
 | 2026-10-11 | `gateway/chat` and `gateway/responses` aliases; credential headers stripped on cross-host redirects | Resolve, Transport |
+| 2026-10-11 | `AnthropicClient.bearerAuth`: the gateway's Anthropic route sends the key as bearer Authorization | AnthropicClient, Resolve |
+| 2026-10-11 | Job `extra_headers` that carry authentication or routing are rejected | Resolve |
 | 2026-10-11 | The app's on-disk project folder is part of the shared contract | The language-neutral contract |
+| 2026-10-11 | Relative `skill` and `.md` profile paths in a job file resolve against the job file's folder (`Job.directory`), never the working directory | Project folder, Job, Skills, Runner |
+| 2026-10-11 | Redirect credential stripping compares the origin (scheme, host, port), not the host alone | Transport |
 
 ## Package
 
@@ -112,17 +116,33 @@ The app's project is a folder the CLI can caption as is:
   job.yaml       the shared job file; never holds a key, token or absolute path
   images/        the training images, each with its sidecars beside it:
                  <stem>.txt caption, <stem>.json response record, _summary.json after a run
-  skill/         present only when the user chose a custom skill: a copy of that skill
-                 directory, named in job.yaml as `skill: ./skill`; the bundled default skill
-                 writes no `skill` key
+  skill/<name>/  present only when the user chose a custom skill: a copy of that skill
+                 directory, named in job.yaml as `skill: ./skill/<name>`. The folder carries the
+                 skill's own name because the Agent Skills spec requires a skill's directory
+                 name to match its `name`. The bundled default skill writes no `skill` key
   references/    app-only: one reference image per trigger, `<hex of the trigger's UTF-8>.png`;
                  never read by the core or the CLI and never published
 ```
 
+**Relative paths in a job file resolve against the folder that holds the job file**, never
+against the process's working directory. That covers `skill` and a `profile` given as a path to
+a `.md` file (a bare profile name is looked up in the skill). `~` is expanded and an absolute
+path is used as is, but the app never writes either. The app's working directory is `/`, and a
+CLI can be launched from anywhere, so a working-directory rule would break the project as soon
+as either ran from somewhere else. A job that was not read from a file (parsed from text, built
+in memory) has no folder; its relative paths fall back to the working directory. Command-line
+overrides (`--skill`, `--profile`) are the caller's own paths and resolve against the working
+directory as usual.
+
+Swift: `Job.load(contentsOf:)` records the folder in `Job.directory`; `Runner` loads the skill
+with `Skills.load(path: job.skill, relativeTo: job.directory)` and the profile with
+`skill.profile(job.profile, relativeTo: job.directory)`. Python: `Job.load(path)` keeps
+`path.parent` and the CLI and runner resolve `job.skill` and a `.md` `job.profile` against it.
+
 Image file stems are unique within `images/` (the source rejects colliding stems), and a file
-name is the sample ID in `job.yaml`, the sidecars, and a published Hub dataset. Run from the
-project folder, the CLI equivalent of the app's captioning is
-`concept-captioner run job.yaml --images images --out images`.
+name is the sample ID in `job.yaml`, the sidecars, and a published Hub dataset. From any
+directory, the CLI equivalent of the app's captioning is
+`concept-captioner run <project>/job.yaml --images <project>/images --out <project>/images`.
 
 ### Deviations from the Python code, decided here
 
@@ -317,8 +337,8 @@ public struct Endpoints: Sendable, Equatable {
 }
 
 public struct Job: Sendable, Equatable {
-    public var skill: String? = nil                      // skill directory; nil: the bundled default
-    public var profile: String = "h3-still"
+    public var skill: String? = nil                      // skill directory; nil: the bundled default; relative -> against `directory`
+    public var profile: String = "h3-still"              // profile name in the skill, or a .md path (relative -> against `directory`)
     public var concepts: [Concept]
     public var samples: OrderedDictionary<String, OrderedDictionary<String, String>?> = [:]
     public var singleSubjectOnly: Bool = false           // single_subject_only
@@ -326,6 +346,9 @@ public struct Job: Sendable, Equatable {
     public var captionerThinking: ThinkingLevel = .low   // captioner_thinking
     public var criticThinking: ThinkingLevel = .high     // critic_thinking
     public var policyOverrides: OrderedDictionary<String, String> = [:]  // policy_overrides
+    /// The folder holding the job file it was loaded from; set by load(contentsOf:), nil otherwise.
+    /// Not serialized and not part of `==` (equality is the job file's content).
+    public var directory: URL? = nil
 
     /// Validates like `Job._check`: at least one concept, unique triggers, every sample mapping.
     public init(skill: String? = nil, profile: String = "h3-still", concepts: [Concept],
@@ -340,13 +363,15 @@ public struct Job: Sendable, Equatable {
     public func unmapped(_ sampleIDs: [String]) -> [String]          // ids whose mapping is nil or absent
     public mutating func setMapping(_ mapping: OrderedDictionary<String, String>?, for sampleID: String) throws
     public func sampleView(mapping: OrderedDictionary<String, String>) -> JSONValue
+    /// `Skills.resolve(path, relativeTo: directory)`.
+    public func resolvedURL(for path: String, isDirectory: Bool = false) -> URL
 
     /// Strict decoding from an ordered JSON value (what YAML parses to): unknown keys are
     /// ConfigurationError ("extra fields not permitted"), as pydantic `extra="forbid"`.
     public init(json: JSONValue) throws
     public var jsonValue: JSONValue { get }          // ordered as model_dump(mode="json"); nil fields omitted except null samples
 
-    public static func load(contentsOf url: URL) throws -> Job     // ConfigurationError for any problem
+    public static func load(contentsOf url: URL) throws -> Job     // ConfigurationError for any problem; sets `directory`
     public static func load(yaml: String) throws -> Job
     public func dump() throws -> String                            // YAML, keys in declaration order
     public func save(to url: URL) throws
@@ -523,14 +548,18 @@ public struct Skill: Sendable, Equatable {
     public func reference(_ relative: String) throws -> String   // references/<relative>; ConfigurationError "skill '<name>' has no reference '<relative>'"
     public func instructions() throws -> String                  // body.trimmed + "\n\n" + each reference.trimmed, joined by "\n\n", plus a trailing "\n"
     public func profiles() -> [String]                           // sorted stems of references/profiles/*.md, [] when missing
-    public func profile(_ nameOrPath: String) throws -> String   // ".md" path that exists -> its text; else references/profiles/<name>.md; else ConfigurationError
+    /// ".md" path that exists (relative -> against `base`) -> its text; else references/profiles/<name>.md; else ConfigurationError
+    public func profile(_ nameOrPath: String, relativeTo base: URL? = nil) throws -> String
 }
 
 public enum Skills {
     public static let defaultSkillName = "diffusion-training-captioner"
     public static func defaultSkillURL() -> URL                  // Bundle.module, Resources/Skills/<defaultSkillName>
     public static func load(_ directory: URL? = nil) throws -> Skill
-    public static func load(path: String?) throws -> Skill       // expands "~", nil -> default
+    public static func load(path: String?, relativeTo base: URL? = nil) throws -> Skill  // nil -> default; else resolve(path, relativeTo: base)
+    /// "~" expanded; an absolute path as is; a relative one appended to `base` and standardized,
+    /// or against the working directory when `base` is nil.
+    public static func resolve(_ path: String, relativeTo base: URL?, isDirectory: Bool = false) -> URL
     /// Split "---\n<yaml>\n---\n" frontmatter; (empty, text) when there is none. ConfigurationError:
     /// "SKILL.md frontmatter is not closed", "SKILL.md frontmatter is not valid YAML: ...",
     /// "SKILL.md frontmatter must be a mapping".
@@ -777,9 +806,10 @@ public protocol HTTPStreamingTransport: HTTPTransport {
 }
 
 /// URLSession-backed, both buffered and streaming. Follows redirects; when a redirect leaves the
-/// original host it drops every credential header: `Authorization`, `x-api-key`,
-/// `x-goog-api-key` (Hub `resolve` URLs redirect to a CDN that rejects a second auth mechanism,
-/// and a key must never reach a third host).
+/// original origin (scheme, host, port with the scheme's default filled in, as `Origin` in
+/// Resolve) it drops every credential header: `Authorization`, `x-api-key`, `x-goog-api-key`
+/// (Hub `resolve` URLs redirect to a CDN that rejects a second auth mechanism, a key must never
+/// reach a third host, and an http downgrade or another port is a different origin).
 public struct URLSessionTransport: HTTPStreamingTransport {
     public init(session: URLSession = .shared, timeout: TimeInterval = 600)
     public func send(_ request: URLRequest) async throws -> HTTPResponse
@@ -1371,7 +1401,9 @@ public struct Runner: Sendable {
     public let concurrency: Int
     public var overwrite: Bool
 
-    /// skill nil -> Skills.load(path: job.skill); profile nil -> job.profile; concurrency nil -> captioner.concurrency.
+    /// skill nil -> Skills.load(path: job.skill, relativeTo: job.directory); profile nil -> job.profile,
+    /// a relative .md path resolved against job.directory (an explicit `profile` resolves against the
+    /// working directory); concurrency nil -> captioner.concurrency.
     public init(job: Job, captioner: ResolvedEndpoint, critic: ResolvedEndpoint? = nil, skill: Skill? = nil,
                 profile: String? = nil, concurrency: Int? = nil, overwrite: Bool = false) throws
 
