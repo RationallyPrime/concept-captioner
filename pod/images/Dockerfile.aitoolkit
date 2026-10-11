@@ -67,6 +67,6 @@ RUN set -eux \
  && /opt/venvs/aitoolkit/bin/python -c "import torch, flash_attn, natten, torchcodec, diffusers, transformers; v = torch.__version__; assert v == '${TORCH_VERSION}+${AI_TOOLKIT_CUDA}', v; print('torch', v, 'flash_attn', flash_attn.__version__, 'natten', natten.__version__, 'torchcodec', torchcodec.__version__, 'diffusers', diffusers.__version__, 'transformers', transformers.__version__)" \
  && uv pip freeze --python /opt/venvs/aitoolkit/bin/python > /opt/venvs/aitoolkit/freeze.txt
 
-# VERIFY on a pod (POD-SPEC §4.2): the config keys for the MiniMax H3 family at this commit, whether
-# `trigger_word` is still honoured, and whether run.py writes TensorBoard event files natively.
-# Those belong to scripts/launch_aitoolkit.py; nothing in this image depends on the answers.
+# H3 registration/network/loader contracts are checked against this exact source. The new
+# BF16 H3 wrapper path still needs hosted training/generation capacity acceptance. Per-example
+# captions supply concepts; the wrapper does not inject a global trigger_word.

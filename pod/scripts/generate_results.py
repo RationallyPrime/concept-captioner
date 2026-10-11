@@ -4,8 +4,9 @@
 The agent writes generation.json after validating the source checkpoint. Outputs and the
 incremental comparison.json manifest live in this generation run's output directory, so
 the existing authenticated files/download endpoints serve them. No listener is added.
-FLUX uses ai-toolkit's StableDiffusion/GenerateImageConfig; LTX uses its official one-stage
-CLI. Other families are deliberately unsupported. Heavy imports happen only at execution.
+FLUX uses ai-toolkit's StableDiffusion/GenerateImageConfig; H3 uses its registered model
+and the trained LoRASpecialNetwork recipe; LTX uses its official one-stage CLI.
+Heavy imports happen only at execution.
 """
 
 from __future__ import annotations
@@ -52,7 +53,7 @@ def source_config(request: dict[str, Any], workspace: Path) -> tuple[dict[str, A
 
 
 def pairs(request: dict[str, Any], trainer: str) -> list[dict[str, Any]]:
-    ext = "png" if trainer == "aitoolkit" else "mp4"
+    ext = "png" if trainer == "aitoolkit" and request.get("num_frames", 1) == 1 else "mp4"
     return [
         {
             "prompt": prompt,
@@ -168,6 +169,105 @@ def ltx_command(
     return command
 
 
+def bind_h3_network(sd: Any, network_config: Any, checkpoint: Path, torch: Any) -> Any:
+    """The concrete pinned BaseSDTrainProcess construction, without optimizer/training state."""
+    from toolkit.lora_special import LoRASpecialNetwork
+
+    target = sd.get_model_to_train()
+    network = LoRASpecialNetwork(
+        text_encoder=None,
+        unet=target,
+        lora_dim=network_config.linear,
+        multiplier=1.0,
+        alpha=network_config.linear_alpha,
+        train_unet=True,
+        train_text_encoder=False,
+        conv_lora_dim=network_config.conv,
+        conv_alpha=network_config.conv_alpha,
+        dropout=network_config.dropout,
+        network_config=network_config,
+        network_type=network_config.type,
+        transformer_only=network_config.transformer_only,
+        is_transformer=sd.is_transformer,
+        base_model=sd,
+        **{**network_config.network_kwargs, "target_lin_modules": sd.target_lora_modules},
+    )
+    network.force_to(sd.device_torch, dtype=torch.float32)
+    sd.network = network
+    network._update_torch_multiplier()
+    network.apply_to(None, target, False, True)
+    # Use the live network for both arms; do not fuse changing model weights between arms.
+    # load_weights uses base_model_ref to convert H3's Comfy diffusion_model + A/B keys.
+    network.can_merge_in = False
+    network.load_weights(str(checkpoint))
+    network.eval()
+    return network
+
+
+def h3_generate(
+    cfg: dict[str, Any],
+    checkpoint: Path,
+    request: dict[str, Any],
+    rows: list[dict[str, Any]],
+    out: Path,
+) -> None:
+    import torch
+
+    sys.path.insert(0, os.environ.get("AI_TOOLKIT_DIR", "/opt/ai-toolkit"))
+    from toolkit.config_modules import GenerateImageConfig, ModelConfig, NetworkConfig
+    from toolkit.util.get_model import get_model_class
+
+    native = json.loads((checkpoint.parent / "source-native-config.json").read_text())
+    process = native["config"]["process"][0]
+    model_values = process["model"].copy()
+    if model_values.get("arch") != "minimax_h3" or process["network"].get("type") != "lora":
+        raise ValueError("H3 comparison requires the trained minimax_h3 LoRA recipe")
+    # The frozen image-training adapter is disabled by upstream previews. Omit it entirely
+    # here on both sides; it is never the trained adapter or a base-only hidden addition.
+    for key in ("assistant_lora_path", "inference_lora_path", "lora_path"):
+        model_values.pop(key, None)
+    rules = runpy.run_path(str(Path(__file__).with_name("h3_recipe.py")))
+    rules["download_assets"](
+        Path(os.environ.get("PODAGENT_WORKSPACE", "/workspace")), training_adapter=False
+    )
+    model = ModelConfig(**model_values)
+    cls = get_model_class(model)
+    sd = cls(
+        device="cuda:0",
+        model_config=model,
+        dtype=process["train"].get("dtype", "bf16"),
+        noise_scheduler=cls.get_train_scheduler(),
+    )
+    try:
+        with torch.no_grad():
+            sd.load_model()
+            network_values = process["network"].copy()
+            network_values.pop("pretrained_lora_path", None)
+            bind_h3_network(sd, NetworkConfig(**network_values), checkpoint, torch)
+            for variant, multiplier in (("base", 0.0), ("lora", 1.0)):
+                configs = [
+                    GenerateImageConfig(
+                        prompt=row["prompt"],
+                        seed=row["seed"],
+                        width=request["width"],
+                        height=request["height"],
+                        num_inference_steps=request["inference_steps"],
+                        guidance_scale=request["guidance_scale"],
+                        num_frames=request["num_frames"],
+                        fps=24,
+                        network_multiplier=multiplier,
+                        output_path=str(out / row[f"{variant}_path"]),
+                        output_ext="png" if request["num_frames"] == 1 else "mp4",
+                    )
+                    for row in rows
+                ]
+                sd.generate_images(configs, sampler="flowmatch")
+    finally:
+        del sd
+        gc.collect()
+        torch.cuda.empty_cache()
+
+
 def ltx_generate(
     cfg: dict[str, Any],
     checkpoint: Path,
@@ -203,11 +303,22 @@ def generate(config_path: Path, trainer: str) -> int:
         request = json.loads(config_path.read_text(encoding="utf-8"))
         workspace = Path(os.environ.get("PODAGENT_WORKSPACE", "/workspace"))
         cfg, checkpoint = source_config(request, workspace)
+        h3 = trainer == "aitoolkit" and cfg["base_model"] == "Comfy-Org/MiniMax-H3"
         supported = (
-            trainer == "aitoolkit" and cfg["base_model"] == "black-forest-labs/FLUX.1-dev"
-        ) or (trainer == "ltx" and cfg["base_model"] == "Lightricks/LTX-2")
+            (trainer == "aitoolkit" and cfg["base_model"] == "black-forest-labs/FLUX.1-dev")
+            or (trainer == "ltx" and cfg["base_model"] == "Lightricks/LTX-2")
+            or h3
+        )
         if not supported:
-            raise ValueError("Generation supports FLUX.1-dev with AI Toolkit and LTX-2 only")
+            raise ValueError("Generation supports FLUX.1-dev, MiniMax-H3 with AI Toolkit and LTX-2")
+        if h3 and (
+            request["frame_rate"] != 24
+            or (
+                request["num_frames"] != 1
+                and (request["num_frames"] < 5 or request["num_frames"] % 17 != 5)
+            )
+        ):
+            raise ValueError("H3 comparison needs 1 or 17n+5 frames at exactly 24 fps")
         out = config_path.parent / "output"
         out.mkdir(exist_ok=True)
         rows = pairs(request, trainer)
@@ -220,8 +331,15 @@ def generate(config_path: Path, trainer: str) -> int:
             "state": "generating",
             "pairs": rows,
         }
+        if h3:
+            captured = json.loads((checkpoint.parent / "source-native-config.json").read_text())
+            rules = runpy.run_path(str(Path(__file__).with_name("h3_recipe.py")))
+            manifest["effective_native_config"] = rules["comparison_recipe"](
+                captured["config"]["process"][0]
+            )
+            manifest["comparison_training_adapter"] = False
         path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-        (flux_generate if trainer == "aitoolkit" else ltx_generate)(
+        (h3_generate if h3 else flux_generate if trainer == "aitoolkit" else ltx_generate)(
             cfg, checkpoint, request, rows, out
         )
         missing = [

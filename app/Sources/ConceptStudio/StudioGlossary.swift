@@ -1,68 +1,6 @@
 import AppKit
 import SwiftUI
 
-enum StudioTerm: String, CaseIterable, Identifiable {
-    case train, diffusionModels, baseModel, concept, trainingData, caption, conceptBoundary, trigger, classNoun, lora
-
-    var id: String {
-        rawValue
-    }
-
-    var title: String {
-        switch self {
-        case .train: "Train"
-        case .diffusionModels: "Diffusion models"
-        case .baseModel: "Base model"
-        case .concept: "Concept"
-        case .trainingData: "Training data"
-        case .caption: "Caption"
-        case .conceptBoundary: "Concept boundary"
-        case .trigger: "Trigger"
-        case .classNoun: "Class noun"
-        case .lora: "LoRA"
-        }
-    }
-
-    var definition: String {
-        switch self {
-        case .train:
-            "Adjust a model using examples so it can generate something it did not previously know well. "
-                + "Training here runs on a rented GPU computer, not on your Mac."
-        case .diffusionModels:
-            "AI models that generate images or videos by turning noise into an image through a series of steps. "
-                + "A text prompt guides what they generate."
-        case .baseModel:
-            "The existing image or video model you start with, before training your concept. "
-                + "Your trained LoRA must be used with a compatible base model."
-        case .concept:
-            "The one thing you want the model to learn: for example, a person’s identity, an object, "
-                + "an art style or an activity. It is the subject of this project, not a caption for one photo."
-        case .trainingData:
-            "The photos or video clips used as examples during training, paired with captions. "
-                + "They should show the concept clearly, with enough variation to distinguish it from other details."
-        case .caption:
-            "Text paired with one training image or clip. It names your concept by its trigger and class noun, "
-                + "then describes the other visible details or action. This helps guide what the model learns."
-        case .conceptBoundary:
-            "The distinction between the concept named by the trigger and everything else described in the caption. "
-                + "For a person, defining appearance belongs to the concept. Pose, clothing and setting are described."
-        case .trigger:
-            "A distinctive identifier such as NORA7. Captions use it to name your concept, "
-                + "and you include it in a generation prompt when you want that concept to appear."
-        case .classNoun:
-            "A general word for the kind of concept, such as person, ceramic vase or painting style. "
-                + "It accompanies the trigger so the model knows what the trigger refers to."
-        case .lora:
-            "LoRA means Low-Rank Adaptation: a small file containing the changes learned during training. "
-                + "Load it alongside a compatible base model in an image or video generation application."
-        }
-    }
-
-    static func matching(_ text: String) -> StudioTerm? {
-        allCases.first { $0.title.localizedCaseInsensitiveCompare(text) == .orderedSame }
-    }
-}
-
 struct StudioDefinitionView: View {
     let term: StudioTerm
 
@@ -72,6 +10,40 @@ struct StudioDefinitionView: View {
             Text(term.definition).foregroundStyle(StudioStyle.supportingText)
                 .fixedSize(horizontal: false, vertical: true)
         }.padding(20).frame(width: 340, alignment: .leading)
+    }
+}
+
+/// Contextual terms reuse the same native hover, click and keyboard definitions as the introduction.
+struct StudioTermsHelp: View {
+    let terms: [StudioTerm]
+    let title: String
+    @FocusState private var focusedTerm: StudioTerm?
+    private let columns = [GridItem(.adaptive(minimum: 180), alignment: .leading)]
+
+    init(terms: [StudioTerm], title: String = "Definitions") {
+        self.terms = terms
+        self.title = title
+    }
+
+    var body: some View {
+        DisclosureGroup(title) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Hover for a definition, or select a term to open it. Keyboard focus shows "
+                    + "the definition below; Space or Return opens it, and Escape closes it.")
+                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                    .fixedSize(horizontal: false, vertical: true)
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+                    ForEach(terms) { term in StudioTermButton(term, focusedTerm: $focusedTerm) }
+                }
+                if let focusedTerm, terms.contains(focusedTerm) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(focusedTerm.title).font(.headline)
+                        Text(focusedTerm.definition).foregroundStyle(StudioStyle.supportingText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }.padding(.top, 4)
+                }
+            }.padding(.vertical, 8)
+        }
     }
 }
 

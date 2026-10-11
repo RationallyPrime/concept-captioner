@@ -52,6 +52,7 @@ test results and live acceptance are recorded separately in CORE-STATUS and APP-
 | 2026-10-11 | Job-relative skill and `.md` profile paths resolve in both languages; Deviation 10 is closed | Project folder, Skills, Runner |
 | 2026-10-11 | Python imagefolder Hub datasets dispatch images and clips by file name, including mixed datasets | Sources |
 | 2026-10-11 | Per-sample partial-caption progress is an app-only hook through ModelClient, StructuredStage and Runner; shared job/record formats do not change | ModelClient, Runner |
+| 2026-10-11 | Owner-requested H3 clip support adds a bundled `h3-video` caption profile, shared verbatim with Python; `h3-still` remains the photograph/frame profile | Skills |
 
 ## Package
 
@@ -662,13 +663,25 @@ The profile-by-path rule: a `nameOrPath` ending in `.md` that is an existing fil
 verbatim; otherwise look under `references/profiles/`; otherwise
 `"unknown profile '<x>'; skill '<name>' has [<profiles>], or pass a path to a .md file"`.
 
+The bundled `h3-video` profile describes the actual selected clip using H3's three text
+fields: `integrated_multimodal_description`, `overall_soundscape`, then
+`non_diegetic_music`. Its chronology belongs to the selected segment. Concept boundaries,
+mapped triggers and the shared Caption envelope still apply. Audio claims require inspected
+audio; a video attachment alone does not establish silence or authorize invented sound.
+`h3-still` retains its single-frame instructions and `N/A` audio fields unchanged. These are
+caption-writing instructions, not new schema fields or mechanical caption-format validators.
+In a mixed image-and-clip job, `h3-video` applies that same single-frame convention to an
+attached still, and chronological clip instructions only to an attached video.
+Trainer admission and H3's frame-count, timing and component rules belong to POD-SPEC;
+choosing a caption profile alone does not make incompatible media trainable.
+
 Frontmatter regex equivalent: text starts with `---`, then `[ \t]*\r?\n`, capture up to the
 first line that is `---[ \t]*` followed by `\r?\n` or end of text; body is everything after.
 
 ### Tests `SkillsTests.swift` must pass
 
 1. `Skills.load()` (default): `name == "diffusion-training-captioner"`, `instructions()`
-   contains `"# Core Caption Policy"`, `profiles() == ["flux-image", "h3-still", "ltx-image", "ltx-video", "plain"]`,
+   contains `"# Core Caption Policy"`, `profiles() == ["flux-image", "h3-still", "h3-video", "ltx-image", "ltx-video", "plain"]`,
    `profile("h3-still")` contains `"[Shot 1]"`, `profile("nope")` throws.
 2. A temp skill `my-skill` with frontmatter `description: Mine.` and `metadata.references: [extra.md]`,
    `references/extra.md` = `EXTRA TEXT`, `references/unused.md` = `NEVER`: `name == "my-skill"`,

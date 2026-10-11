@@ -22,6 +22,7 @@ MAX_UPLOAD_BYTES = _rules["MAX_UPLOAD_BYTES"]
 MAX_STAGED_BYTES = _rules["MAX_STAGED_BYTES"]
 INSTALLING = _rules["INSTALLING"]
 STAGING_LOCK = threading.RLock()
+INITIAL_FILES = frozenset({"initial-lora.safetensors", "initial-recipe.json"})
 
 
 def upload_folder(paths: Paths, name: str) -> Path:
@@ -40,9 +41,9 @@ def upload_name(paths: Paths, file_name: str) -> None:
     if not script.is_file():
         script = Path(__file__).resolve().parents[3] / "scripts/pull_dataset.py"
     suffixes = runpy.run_path(str(script))["IMAGE_SUFFIXES"]
-    if file_name not in {"metadata.jsonl", "job.yaml"} and Path(file_name).suffix.lower() not in (
-        suffixes | {".txt", ".json"}
-    ):
+    if file_name not in ({"metadata.jsonl", "job.yaml"} | INITIAL_FILES) and Path(
+        file_name
+    ).suffix.lower() not in (suffixes | {".txt", ".json"}):
         raise Validation(
             "Upload accepts supported media, caption/response sidecars, metadata.jsonl and job.yaml"
         )
@@ -62,6 +63,8 @@ def claim_stage(paths: Paths, name: str) -> None:
     with STAGING_LOCK:
         folder = upload_folder(paths, name)
         stage_bytes(folder)
+        if any((folder / file).exists() for file in INITIAL_FILES):
+            raise Validation("Initial LoRA assets use a separate stage from training media")
         if not folder.is_dir() or not (folder / "metadata.jsonl").is_file():
             raise Validation(
                 "Upload metadata.jsonl and its approved files before preparing the local dataset"
@@ -74,6 +77,17 @@ def claim_stage(paths: Paths, name: str) -> None:
 def release_stage(paths: Paths, name: str) -> None:
     with STAGING_LOCK:
         (upload_folder(paths, name) / INSTALLING).unlink(missing_ok=True)
+
+
+def claim_initialization(paths: Paths, name: str) -> Path:
+    """Freeze only the two fixed initializer slots, separately from dataset installation."""
+    with STAGING_LOCK:
+        folder = upload_folder(paths, name)
+        stage_bytes(folder)
+        if not folder.is_dir() or {p.name for p in folder.iterdir()} != INITIAL_FILES:
+            raise Validation("Upload exactly initial-lora.safetensors and initial-recipe.json")
+        (folder / INSTALLING).touch(exist_ok=False)
+        return folder
 
 
 class UploadWriter:

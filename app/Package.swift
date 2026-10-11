@@ -20,8 +20,8 @@ let package = Package(
         ),
         .executableTarget(
             name: "ConceptStudio",
-            dependencies: ["ConceptCore"],
-            resources: [.copy("Resources/Demo"), .process("Resources/OpenAI")],
+            dependencies: ["ConceptCore", .product(name: "Yams", package: "Yams")],
+            resources: [.copy("Resources/Demo"), .process("Resources/OpenAI"), .copy("Resources/Training")],
             swiftSettings: [.swiftLanguageMode(.v6)],
             linkerSettings: [.linkedFramework("AVKit")],
         ),

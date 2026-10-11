@@ -292,12 +292,12 @@ struct MediaWorkflowTests {
             #expect(source.range(startFrame: 0, frameCount: invalidCount) == nil)
         }
         let output = directory.appendingPathComponent("selected.mp4")
-        #expect(!source.isConstantRate(startFrame: 3, frameCount: 9))
+        #expect(!source.supportsTiming(startFrame: 3, frameCount: 9))
         await #expect(throws: StudioError.self) {
             try await MediaEditor.trim(url: original, startFrame: 3, frameCount: 9, longEdge: 512, output: output)
         }
         #expect(!FileManager.default.fileExists(atPath: output.path))
-        #expect(source.isConstantRate(startFrame: 0, frameCount: 9))
+        #expect(source.supportsTiming(startFrame: 0, frameCount: 9))
         let selected = try await MediaEditor.trim(
             url: original, startFrame: 0, frameCount: 9, longEdge: 512, output: output
         )
@@ -325,7 +325,7 @@ struct MediaWorkflowTests {
         try await MediaFixtures.video(at: original, times: (0 ..< 273).map { Double($0) / 30 })
         let timeline = try await MediaEditor.videoTimeline(url: original)
         #expect(timeline.times.count == 273)
-        #expect(timeline.maximumTrainingFrames == 257)
+        #expect(timeline.maximumTrainingFrames() == 257)
         #expect(timeline.range(startFrame: 0, frameCount: 257) != nil)
         let output = directory.appendingPathComponent("unsupported.mp4")
         await #expect(throws: StudioError.self) {

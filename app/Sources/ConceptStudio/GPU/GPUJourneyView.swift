@@ -61,29 +61,6 @@ struct GPUJourneyView: View {
         }
     }
 
-    /// Inline status: progress and recoverable states. Blocking failures go to the window alert.
-    private var status: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                Label(workspace.pod?.status.capitalized ?? "No rented computer", systemImage: "server.rack")
-                    .font(.headline)
-                Text(workspace.message).font(.callout).foregroundStyle(StudioStyle.supportingText)
-                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-            }
-            Spacer(minLength: 0)
-            if workspace.isBusy || workspace.isStopping { ProgressView().controlSize(.small) }
-            if showsSpendControls, workspace.hasRunningPod {
-                VStack(alignment: .trailing, spacing: 8) {
-                    Text("GPU spend · \(StudioMoney.format(workspace.elapsedCost))")
-                        .font(.headline).monospacedDigit()
-                    Button(workspace.isStopping ? "Stopping…" : "Stop everything", systemImage: "stop.circle") {
-                        session.requestStopEverything()
-                    }.disabled(workspace.isStopping)
-                }
-            }
-        }
-    }
-
     // MARK: GPU pods
 
     private var pods: some View {
@@ -91,7 +68,10 @@ struct GPUJourneyView: View {
             StudioSection(
                 title: "Choose a training computer",
                 subtitle: "A GPU is the part that does the training. These have at least "
-                    + "\(GPUWorkspace.minimumGPUMemoryGB) GB of memory to fit the included models."
+                    + "\(workspace.requiredGPUMemoryGB) GB of memory per GPU. "
+                    + (workspace.isH3Training ? "H3's known training reference used a 96 GB GPU; "
+                        + "recipe and resolution still affect fit." : "The included FLUX and LTX defaults were tested "
+                        + "on 32 GB GPUs.")
             ) {
                 Form {
                     trainerPicker
@@ -171,12 +151,12 @@ struct GPUJourneyView: View {
                     }
                 }
                 if workspace.hasRunningPod {
-                    LabeledContent("Spending limit") {
+                    LabeledContent("Whole-computer spending limit") {
                         Text(StudioMoney.format(workspace.activeBudget ?? workspace.budget)).monospacedDigit()
                     }
                     TextField("Raise the limit to (USD)", value: $newBudget, format: .number)
                 } else {
-                    TextField("Stop at this GPU budget (USD)", value: $workspace.budget, format: .number)
+                    TextField("Whole-computer GPU budget (USD)", value: $workspace.budget, format: .number)
                 }
                 Stepper("Stop after \(workspace.idleMinutes) idle minutes", value: $workspace.idleMinutes, in: 1 ... 60)
             }.formStyle(.columns)
@@ -218,11 +198,16 @@ struct GPUJourneyView: View {
     }
 
     private var trainerPicker: some View {
-        Picker("Prepare it for", selection: $workspace.trainer) {
-            Text("AI Toolkit · image model").tag("aitoolkit")
-            Text("LTX · image and video model").tag("ltx")
+        Picker("Training model", selection: Binding(get: { workspace.baseModel }, set: workspace.chooseTrainingModel)) {
+            Text("FLUX.1-dev · images").tag("black-forest-labs/FLUX.1-dev")
+            Text("LTX-2 · images and video").tag("Lightricks/LTX-2")
+            Text("MiniMax H3 · images and video").tag(GPUWorkspace.h3BaseModel)
+            if !["black-forest-labs/FLUX.1-dev", "Lightricks/LTX-2", GPUWorkspace.h3BaseModel]
+                .contains(workspace.baseModel) {
+                Text("Custom · \(workspace.baseModel)").tag(workspace.baseModel)
+            }
         }
-        .disabled(workspace.hasRunningPod || workspace.isBusy)
+        .disabled(workspace.isBusy || workspace.isTraining)
     }
 
     // MARK: Training
@@ -230,8 +215,7 @@ struct GPUJourneyView: View {
     private var training: some View {
         VStack(alignment: .leading, spacing: StudioStyle.contentSpacing) {
             StudioSection(title: "Your training plan") {
-                Text(workspace.plan?.explanation
-                    ?? "Rent a computer first. Its control agent will tell us which GPUs each service can use.")
+                Text(session.trainingPlanExplanation)
                     .fixedSize(horizontal: false, vertical: true)
                 LabeledContent(
                     workspace.usesLocalDataset ? "Training inputs" : "Published dataset",
@@ -262,6 +246,7 @@ struct GPUJourneyView: View {
                     trainerPicker
                     TextField("Starting model", text: $workspace.baseModel)
                         .help("Base diffusion model to train. Choose a compatible model for these images or clips.")
+                        .disabled(workspace.isBusy || workspace.isTraining)
                     TextField(
                         "Save trained model to",
                         text: $workspace.outputRepo,
@@ -275,6 +260,8 @@ struct GPUJourneyView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Divider()
+            TrainingInitializationView(workspace: workspace)
+            Divider()
             StudioSection(
                 title: "Run settings",
                 subtitle: "A training step updates the model using a batch of your examples. More steps take longer; "
@@ -283,7 +270,10 @@ struct GPUJourneyView: View {
                 Form {
                     Stepper("Training steps: \(workspace.steps)", value: $workspace.steps, in: 25 ... 10000, step: 25)
                 }.formStyle(.columns)
-                DisclosureGroup("Advanced training controls") { advancedTraining.padding(.top, 12) }
+                TrainingBudgetView(session: session, workspace: workspace)
+                DisclosureGroup("Advanced training controls") {
+                    advancedTraining.padding(.top, 12).disabled(workspace.isBusy || workspace.isTraining)
+                }
                 Button("Start training", systemImage: "play.fill") {
                     Task { await workspace.train(datasetRepo: datasetRepo, captureLocal: session.captureTrainingInputs)
                     }
@@ -317,14 +307,23 @@ struct GPUJourneyView: View {
                 ForEach(GPUWorkspace.resolutionChoices, id: \.self) { Text("\($0) px").tag($0) }
             }
             .help("Sets photo training and generated-output resolution. Video dimensions come from approved clips.")
+            if workspace.trainingResolutions.count > 1 {
+                Text("Imported image resolutions: " + workspace.trainingResolutions.map(String.init)
+                    .joined(separator: ", ")
+                    + " px. Changing the resolution picker replaces this set with one resolution.")
+                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
+            }
             Stepper("LoRA rank: \(workspace.rank)", value: $workspace.rank, in: 1 ... 128)
                 .help("How much detail the small trained add-on can hold. Higher values use more memory.")
+            Stepper("LoRA alpha: \(workspace.alpha)", value: $workspace.alpha, in: 1 ... 128)
+            Stepper("Batch size: \(workspace.batchSize)", value: $workspace.batchSize, in: 1 ... 32)
+            Stepper("Gradient accumulation: \(workspace.accumulation)", value: $workspace.accumulation, in: 1 ... 32)
             TextField("Learning rate", value: $workspace.learningRate, format: .number)
                 .help("How much the model changes at each step. Keep the default for your first run.")
             TextField("Triggers", text: $workspace.triggerWords)
             TextField("Caption profile", text: $workspace.profile)
             TextField("Training seed", value: $workspace.seed, format: .number)
-            if workspace.datasetContainsVideo, workspace.trainer == "ltx" {
+            if workspace.datasetContainsVideo, workspace.trainer == "ltx" || workspace.isH3Training {
                 Text(
                     "Video training uses every frame at the dimensions and rate approved in Images. To change a "
                         + "clip's dimensions or length, approve its segment again, then caption and publish it. "
@@ -334,6 +333,17 @@ struct GPUJourneyView: View {
             }
             Toggle("Keep a caption model on GPU 0 while training", isOn: $workspace.keepCaptionServer)
             if workspace.keepCaptionServer { TextField("Caption model", text: $workspace.captionModel) }
+            StudioTermsHelp(terms: [
+                .trainingSteps,
+                .rank,
+                .alpha,
+                .learningRate,
+                .batchSize,
+                .gradientAccumulation,
+                .resolution,
+                .seed,
+                .trigger,
+            ])
         }.formStyle(.columns)
     }
 
@@ -413,30 +423,40 @@ struct GPUJourneyView: View {
         .background(StudioStyle.surface, in: RoundedRectangle(cornerRadius: 8))
         .accessibilityLabel("Training log")
     }
+}
 
+extension GPUJourneyView {
     private var progress: some View {
         VStack(alignment: .leading, spacing: StudioStyle.contentSpacing) {
-            StudioSection(title: "Training") {
-                LabeledContent("Status", value: workspace.trainingState.capitalized).font(.headline)
-                if workspace.points.isEmpty {
+            StudioSection(title: "Learning curve") {
+                if workspace.runID.isEmpty, let run = workspace.monitoredRun {
+                    Text("Most recent saved run · " + run.startedAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                }
+                if workspace.curveDisplay != .available {
                     ContentUnavailableView(
-                        "Your learning curve will appear here",
+                        workspace.curveDisplay.title,
                         systemImage: "chart.xyaxis.line",
-                        description: Text("Start a run from Training, then return here to see its progress.")
+                        description: Text(workspace.curveDisplay.explanation)
                     )
+                    if workspace.curveDisplay == .noRun {
+                        Button("Go to Training") { session.step = .training }
+                    } else if workspace.curveDisplay == .waiting {
+                        ProgressView("Waiting for a training measurement").controlSize(.small)
+                    }
                 } else {
-                    Chart(workspace.points) { point in
+                    Chart(workspace.monitoredPoints) { point in
                         LineMark(x: .value("Training step", point.step), y: .value("Training loss", point.loss))
                             .foregroundStyle(StudioStyle.accent)
                     }
                     .chartXAxisLabel("Training step").chartYAxisLabel("Loss")
                     .frame(minHeight: 200, idealHeight: 260)
-                    Text("Loss measures fit to these examples. A lower curve alone does not prove better pictures.")
+                    Text(workspace.curveDisplay.explanation)
                         .font(.callout).foregroundStyle(StudioStyle.supportingText)
                 }
             }
             Divider()
-            TrainingResultSection(state: workspace.result?.state, busy: workspace.isBusy) {
+            TrainingResultSection(state: workspace.monitoredResultState, busy: workspace.isBusy) {
                 Task { await workspace.retrieveResult() }
             }
         }
@@ -509,6 +529,33 @@ extension StudioSession {
             }
             await leaveComputerRunning()
             await gpu.stopEverything(discardingPendingResult: discardingPendingResult)
+        }
+    }
+}
+
+extension GPUJourneyView {
+    /// Inline status: progress and recoverable states. Blocking failures go to the window alert.
+    private var status: some View {
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                LabeledContent("Computer", value: workspace.computerStatus).font(.headline)
+                if step == .training || step == .monitor {
+                    LabeledContent("Training", value: workspace.trainingStatus)
+                }
+                Text(workspace.message).font(.callout).foregroundStyle(StudioStyle.supportingText)
+                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            }
+            Spacer(minLength: 0)
+            if workspace.isBusy || workspace.isStopping { ProgressView().controlSize(.small) }
+            if showsSpendControls, workspace.hasRunningPod {
+                VStack(alignment: .trailing, spacing: 8) {
+                    Text("GPU spend · \(StudioMoney.format(workspace.elapsedCost))")
+                        .font(.headline).monospacedDigit()
+                    Button(workspace.isStopping ? "Stopping…" : "Stop everything", systemImage: "stop.circle") {
+                        session.requestStopEverything()
+                    }.disabled(workspace.isStopping)
+                }
+            }
         }
     }
 }

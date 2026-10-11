@@ -281,10 +281,12 @@ extension StudioSession {
                 guard personConcepts.allSatisfy({ references[$0.trigger] != nil }) else {
                     throw StudioError.message("Choose a reference photo for each person in Concepts first.")
                 }
-                self.mappingProposals = try await self.inspector.proposals(
-                    images: project.images.filter { !Sources.isVideo(Sources.suffix(of: $0.id)) }.map(\.url),
+                let stills = project.images.filter { !Sources.isVideo(Sources.suffix(of: $0.id)) }
+                let proposals = try await self.inspector.proposals(
+                    images: stills.map(\.url),
                     references: references
                 )
+                self.receiveMappingSuggestions(proposals, sampleIDs: stills.map(\.id))
             } else {
                 guard personConcepts.allSatisfy({ references[$0.trigger] != nil }) else {
                     throw StudioError.message("Choose a reference photo for each person in Concepts first.")
@@ -298,8 +300,13 @@ extension StudioSession {
                     self.completed += 1
                 }
             }
-            self.message = "Review each suggested assignment, then confirm it."
+            self.message = "Suggestions are ready. Select a sample to compare the result with its confirmed assignment."
         }
+    }
+
+    /// An empty entry records a completed comparison with no confident suggestion; job mappings stay human-owned.
+    func receiveMappingSuggestions(_ proposals: [String: Job.Mapping], sampleIDs: [String]) {
+        mappingProposals = Dictionary(uniqueKeysWithValues: sampleIDs.map { ($0, proposals[$0] ?? [:]) })
     }
 
     func caption(only: Set<String>? = nil, overwrite: Bool = false) {

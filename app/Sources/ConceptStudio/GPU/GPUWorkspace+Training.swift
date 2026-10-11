@@ -57,6 +57,10 @@ extension GPUWorkspace {
         trainingState = state.state
     }
 
+    func updateCaptionServerState(_ services: [AgentService]) {
+        captionServerActive = services.contains { $0.name == "vllm" && $0.active }
+    }
+
     func train(
         datasetRepo: String, captureLocal: (@MainActor () async throws -> LocalTrainingDataset)? = nil
     ) async {
@@ -64,71 +68,65 @@ extension GPUWorkspace {
             guard let agent = self.agent, self.hasRunningPod else {
                 throw StudioError.message("Rent a training computer first, then return here.")
             }
+            let cap = self.runBudget
+            guard cap.isFinite, cap > 0 else {
+                throw StudioError.message("Choose a positive budget for this training run before preparing its inputs.")
+            }
+            let baseline = self.estimatedPodCost
+            let selectedTrainer = self.trainer
+            let selectedModel = self.baseModel
+            if self.isH3Training {
+                let plan = try await agent.plan()
+                try await self.validateH3Computer(agent, gpus: plan.train?.gpus ?? [])
+            }
             let local = try await self.currentLocalDataset(capture: captureLocal)
             defer { local?.remove() }
+            guard self.trainer == selectedTrainer, self.baseModel == selectedModel else {
+                throw StudioError.message("The training model changed during input preparation. "
+                    + "Check the selected model and start again; no training was submitted.")
+            }
             let repeated = self.runHistory.first { $0.runID == self.repeatSourceRunID }
             let repo = repeated?.datasetRepo ?? datasetRepo
             let revision = repeated.map(\.datasetRevision)
                 ?? (self.datasetRevision.isEmpty ? nil : self.datasetRevision)
             let containsVideo = local?.containsVideo ?? repeated?.datasetContainsVideo ?? self.datasetContainsVideo
             let inputFacts = (profile: self.profile, triggers: self.triggerWords, video: containsVideo)
-            guard local != nil || !repo.isEmpty, self.steps > 0, self.rank > 0, !self.baseModel.isEmpty,
-                  Self.resolutionChoices.contains(self.resolution) else {
-                throw StudioError
-                    .message("Publish your dataset first and choose a model with positive training steps and rank.")
-            }
-            guard !containsVideo || self.trainer == "ltx" else {
-                throw StudioError.message("FLUX image training does not accept video clips. Choose the LTX trainer.")
-            }
-            guard self.seed >= 0, self.learningRate.isFinite, self.learningRate > 0, self.learningRate <= 1 else {
-                throw StudioError.message("Choose a positive learning rate and a nonnegative seed.")
-            }
-            guard !self.resultNeedsSaving else {
-                throw StudioError.message("Retrieve pending trained models or generated outputs before starting a run.")
-            }
-            // A pending result on other storage cannot be retrieved from here; it stays in the project's
-            // training record and is retrieved from a computer on that storage.
-            if let result = self.result, result.state == .pending, self.resultIsOnThisPod(result) {
-                throw StudioError.message(
-                    "Save the trained LoRA from run \(result.runID) first (Retrieve now), then start another run."
-                )
-            }
+            try self.validateTrainingSettings(local: local != nil, repo: repo, containsVideo: containsVideo)
+            let initialization = try self.trainingInitialization()
             let dataset = "concept-" + UUID().uuidString.prefix(12).lowercased()
             var params = self.trainingParams(dataset: dataset, inputFacts: inputFacts)
             let servicesBeforeStart = try await agent.services()
+            self.updateCaptionServerState(servicesBeforeStart)
             guard !servicesBeforeStart.contains(where: { $0.active && ($0.name.hasPrefix("trainer-")
                     || $0.name.hasPrefix("generate-")) }) else {
                 throw StudioError.message("A training run is active. Stop it before starting another.")
             }
             let plan = try await agent.plan()
             self.plan = plan
-            self.runID = dataset
-            try await self.installTrainingDataset(local, repo: repo, revision: revision, name: dataset, agent: agent)
-            try await self.prepareCaptionServerForTraining(agent, plan: plan)
-            self.points = []
-            self.historyRunID = self.runID
-            await self.defaultOutputRepo()
-            let destination: TrainingResult.Destination = self.canPushToHub && !self.outputRepo.isEmpty
-                ? .hub : .download
-            if destination == .hub {
-                params["hub"] = .object([
-                    "repo_id": .string(self.outputRepo), "private": .bool(self.privateResult),
-                    "push_on_finish": .bool(true),
-                ])
-            }
-            self.datasetContainsVideo = containsVideo
-            self.datasetRevision = local == nil ? (revision ?? "") : ""
-            try await agent.start("trainer-\(self.trainer)", gpus: plan.train?.gpus ?? [], params: params)
-            self.result = TrainingResult(
-                runID: self.runID, outputRepo: self.outputRepo, destination: destination,
-                volumeID: self.currentVolumeID, state: .training
+            params = await self.admitNewRun(
+                dataset, params: params, repo: repo, local: local, revision: revision,
+                cap: cap, baseline: baseline, containsVideo: containsVideo
             )
+            let destination = self.result?.destination ?? .download
+            var startedTrainer = false
+            defer { if !startedTrainer { self.finishFailedPreparation() } }
+            try await self.installTrainingDataset(local, repo: repo, revision: revision, name: dataset, agent: agent)
+            if let initialization {
+                params["initialization"] = try await .object(initialization.upload(to: agent))
+            }
+            try await self.prepareCaptionServerForTraining(agent, plan: plan)
+            self.historyRunID = self.runID
+            try Task.checkCancellation()
+            try self.checkCurrentRunBudget()
+            try await agent.start("trainer-\(selectedTrainer)", gpus: plan.train?.gpus ?? [], params: params)
+            startedTrainer = true
             self.persist()
             self.persistResult()
             await self.recordNewTrainingRun(
                 agent, datasetRepo: local == nil ? repo : "", params: params, localInputDigest: local?.digest
             )
             let services = try await agent.services()
+            self.updateCaptionServerState(services)
             if !services.contains(where: { $0.name == "tensorboard" && $0.active }) {
                 try await agent.start("tensorboard", gpus: [], params: ["logdir": .string("/workspace/runs")])
             }
@@ -138,6 +136,64 @@ extension GPUWorkspace {
                 ? "Training started. When it finishes, the LoRA is pushed to \(self.outputRepo)."
                 : "Training started. When it finishes, the LoRA is saved into this project’s results folder."
         }
+    }
+
+    private func validateTrainingSettings(local: Bool, repo: String, containsVideo: Bool) throws {
+        guard nativeRecipe == nil || isH3Training else {
+            throw StudioError.message("This imported recipe is for H3. Choose another training model to clear it "
+                + "before using a different base model.")
+        }
+        guard local || !repo.isEmpty, steps > 0, rank > 0, !baseModel.isEmpty,
+              Self.resolutionChoices.contains(resolution) else {
+            throw StudioError.message("Prepare your dataset and choose a model with positive training steps and rank.")
+        }
+        guard !containsVideo || trainer == "ltx" || isH3Training else {
+            throw StudioError.message("FLUX image training does not accept video clips. Choose LTX or H3 training.")
+        }
+        guard seed >= 0, learningRate.isFinite, learningRate > 0, learningRate <= 1,
+              alpha > 0, batchSize > 0, accumulation > 0 else {
+            throw StudioError.message("Choose positive training values and a nonnegative seed.")
+        }
+        guard !resultNeedsSaving else {
+            throw StudioError.message("Retrieve pending trained models or generated outputs before starting a run.")
+        }
+    }
+
+    private func admitNewRun(
+        _ id: String, params: JSONObject, repo: String, local: LocalTrainingDataset?, revision: String?,
+        cap: Double, baseline: Double, containsVideo: Bool
+    ) async -> JSONObject {
+        var params = params
+        runID = id
+        await defaultOutputRepo()
+        let destination: TrainingResult.Destination = canPushToHub && !outputRepo.isEmpty ? .hub : .download
+        if destination == .hub {
+            params["hub"] = .object([
+                "repo_id": .string(outputRepo), "private": .bool(privateResult), "push_on_finish": .bool(true),
+            ])
+        }
+        points = []
+        datasetContainsVideo = containsVideo
+        datasetRevision = local == nil ? (revision ?? "") : ""
+        result = TrainingResult(
+            runID: id,
+            outputRepo: outputRepo,
+            destination: destination,
+            volumeID: currentVolumeID,
+            state: .training
+        )
+        trainingState = "Preparing inputs"
+        recordStartedRun(
+            datasetRepo: local == nil ? repo : "",
+            params: params,
+            resumed: false,
+            localInputDigest: local?.digest,
+            budget: cap,
+            baseline: baseline
+        )
+        persist()
+        persistResult()
+        return params
     }
 
     /// Signed in to Hugging Face with no output repo chosen: push to `<account>/<project>-lora`
@@ -167,6 +223,7 @@ extension GPUWorkspace {
 
     func prepareCaptionServerForTraining(_ agent: any PodAgent, plan: TrainingPlan) async throws {
         let services = try await agent.services()
+        updateCaptionServerState(services)
         let captionActive = services.contains(where: { $0.name == "vllm" && $0.active })
         if plan.mode == "sequential", captionActive {
             try await agent.stop("vllm")
@@ -176,7 +233,7 @@ extension GPUWorkspace {
         }
     }
 
-    private func trainingParams(
+    func trainingParams(
         dataset: String, inputFacts: (profile: String, triggers: String, video: Bool)
     ) -> JSONObject {
         let words = inputFacts.triggers.split(whereSeparator: { $0 == "," || $0.isWhitespace }).map(String.init)
@@ -186,7 +243,10 @@ extension GPUWorkspace {
             "dataset": .object(["path": .string("/workspace/datasets/\(dataset)")]),
             "triggers": .array(words.map(JSONValue.string)), "profile": .string(inputFacts.profile),
             "base_model": .string(baseModel), "steps": .int(steps), "rank": .int(rank),
-            "learning_rate": .double(learningRate), "resolution": .int(resolution),
+            "alpha": .int(alpha), "batch_size": .int(batchSize), "gradient_accumulation": .int(accumulation),
+            "learning_rate": .double(learningRate),
+            "resolution": trainingResolutions.count > 1
+                ? .array(trainingResolutions.map(JSONValue.int)) : .int(resolution),
             "seed": .int(seed),
             "save_every": .int(checkpointEvery), "sample_every": .int(samplesEnabled ? checkpointEvery : 0),
         ]
@@ -203,7 +263,10 @@ extension GPUWorkspace {
             }
             params["extra"] = .object(extra)
         } else {
-            params["extra"] = .object(["training_seed": .int(seed)])
+            var extra = nativeRecipe?.settings
+                ?? runHistory.first(where: { $0.runID == repeatSourceRunID })?.params["extra"]?.objectValue ?? [:]
+            extra["training_seed"] = .int(seed)
+            params["extra"] = .object(extra)
         }
         return params
     }
@@ -234,12 +297,14 @@ extension GPUWorkspace {
             let plan = try await agent.plan()
             self.plan = plan
             let services = try await agent.services()
+            self.updateCaptionServerState(services)
             if plan.mode == "sequential",
                services.contains(where: { $0.name.hasPrefix("trainer-") && $0.active }) {
                 throw StudioError.message("Finish training before captioning on this single-GPU computer.")
             }
             if !services.contains(where: { $0.name == "vllm" && $0.active }) {
                 try await agent.start("vllm", gpus: plan.caption?.gpus ?? [], params: self.captionStartParams)
+                self.captionServerActive = nil
             }
             self.lastActivity = Date()
             self.message = "The caption model is starting. Large models can take several minutes to download."

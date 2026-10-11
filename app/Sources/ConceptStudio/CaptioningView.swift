@@ -5,6 +5,17 @@ struct CaptioningView: View {
     @Bindable var session: StudioSession
     @State private var overwrite = false
 
+    var captionFormatSelection: Binding<String> {
+        Binding(
+            get: { session.project?.job.profile ?? "flux-image" },
+            set: { profile in
+                guard !session.demoMode else { return }
+                session.project?.job.profile = profile
+                session.saveProject()
+            }
+        )
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: StudioStyle.contentSpacing) {
@@ -27,13 +38,16 @@ struct CaptioningView: View {
                                         + "A gateway can use many models with one key."
                                 )
                         }
-                        Picker("Caption format", selection: Binding(
-                            get: { session.project?.job.profile ?? "flux-image" },
-                            set: { session.project?.job.profile = $0; session.saveProject() }
-                        )) {
+                        Picker("Caption format", selection: captionFormatSelection) {
                             ForEach(profiles, id: \.self) { Text(profileTitle($0)).tag($0) }
                         }.disabled(session.demoMode)
                     }.formStyle(.columns)
+                    if session.demoMode {
+                        Text("The demo uses prepared FLUX captions, so its format stays fixed. "
+                            + "In a real project, choose the format your training model expects.")
+                            .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     if session.endpointKind == "openai" || (session.useCritic && session.criticKind == "openai") {
                         ChatGPTCaptioningControls(session: session)
                     }
@@ -245,6 +259,7 @@ struct CaptioningView: View {
             "ltx-image": "LTX · image captions",
             "ltx-video": "LTX · video captions",
             "h3-still": "H3 · still-image captions",
+            "h3-video": "H3 · video captions",
             "plain": "Plain prose",
         ][profile] ?? profile
     }

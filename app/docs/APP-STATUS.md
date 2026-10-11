@@ -4,16 +4,21 @@ Updated 2026-10-11 after the review repairs, based on all seven hardening lanes 
 follow-up `cd5f746`, with the review corrections and owner acceptance below. Source checks,
 native offline demo checks and bounded FLUX/LTX generation, resume and video training checks
 have completed. The GPU proofs predate the review repairs: FLUX used r1; LTX used r2.
-Published r2 images do not contain this repair round. See [RUNNING.md](RUNNING.md),
+The current `v0.2.2-clean-20261011` images contain the review repairs and direct upload;
+their checks are anonymous pulls and CPU controls, not a new GPU run. H3 changes in this
+working round still require a subsequent image build. See [RUNNING.md](RUNNING.md),
 [CORE-STATUS.md](CORE-STATUS.md) and [POD-STATUS.md](../../pod/docs/POD-STATUS.md).
 
 ## Implemented
 
-- **Onboarding:** Welcome and Images contain the owner's full explanation of diffusion
+- **Onboarding:** Images contains the owner's full explanation of diffusion
   training, concepts, training data, captions and concept boundaries, with italic glossary
-  terms and hover, click and keyboard definitions. Later journey screens have tooltips at most;
-  the interactive glossary does not yet cover the entire flow. Welcome uses ordinary
-  project/account actions and photographic demo examples. Labels describe operations,
+  terms and hover, click and keyboard definitions. The same catalog now supplies contextual
+  Definitions on every journey screen, Settings, Advanced training controls, concept/media
+  editors, saved runs and generation. Help opens a searchable catalog and the full explanation
+  without changing the Images disclosure's remembered state. At the owner's later
+  walkthrough request, Welcome uses a brief orientation and ordinary project/account
+  actions rather than repeating that introduction. The demo uses photographic examples. Labels describe operations,
   inputs and consequences.
 - **One concept by default:** category-specific questions and caption/mapping/reviewer
   instructions for person, object/character, style and motion. Multiple concepts and detailed
@@ -26,7 +31,9 @@ Published r2 images do not contain this repair round. See [RUNNING.md](RUNNING.m
   and motion are reassigned automatically. Previously published excluded targets are removed from
   the next dataset commit; unrelated remote files are preserved and excluded from app training.
 - **Real clips:** import from files, folders, Photos or Hub imagefolder; playback, frame
-  inspection, exact segment approval and LTX video captions. Approved segments preserve the
+  inspection, exact segment approval and LTX/H3 video captions. The selected model determines
+  the permitted segment: LTX uses `8n+1` frames; H3 uses `17n+5` at exactly 24 fps.
+  Approved segments preserve the
   selected frames and timing, with aspect-preserving 32-aligned dimensions. Variable-rate
   selections are refused because pinned LTX preprocessing cannot preserve their timestamps;
   constant-rate portions remain selectable. LTX derives its
@@ -41,12 +48,14 @@ Published r2 images do not contain this repair round. See [RUNNING.md](RUNNING.m
   only approved included media, saved captions/records, metadata and the job, with 2 GiB/file
   and 20 GiB/dataset limits. Training waits for atomic installation. Local Resume checks the
   exact input digest in both app and pod; Repeat allows edited data as a new run. No Hub
-  dataset account is required; gated base-model access is unchanged. This requires updated
-  pod source; the published r2 images predate the upload route.
+  dataset account is required; gated base-model access is unchanged. The current
+  `v0.2.2-clean-20261011` images include this route; the older r2 images do not.
 - **Saved training runs:** project-local dataset revisions or local input digests, settings, checkpoints, outputs and
   available GPU cost information; reopen history, Load settings for repeat and supported
-  checkpoint resume. Missing revision or cost information is shown as unavailable.
-- **Generated results:** actual pod generation services for FLUX.1-dev and LTX-2, checkpoint
+  checkpoint resume. Each new run captures its budget and rental-spend baseline before
+  preparing inputs, and records them before transfer. Resume retains that cap and adds its continuation cost. The existing
+  whole-computer cap still applies. Missing revision or cost information is shown as unavailable.
+- **Generated results:** pod generation services for FLUX.1-dev, LTX-2 and H3, checkpoint
   choice, paired base/LoRA generation with matched prompts and seeds, downloaded galleries,
   and Save trained model to this Mac. A comparison is successful only when its downloaded
   manifest says complete and every listed pair is present; partial files remain available
@@ -72,6 +81,28 @@ Published r2 images do not contain this repair round. See [RUNNING.md](RUNNING.m
   and explicit handling of pending outputs before a computer is stopped.
 
 ## Exercised in the native window
+
+**Walkthrough clarity fixes, 2026-10-11:** the rebuilt offline demo was walked from Welcome
+through all nine steps. Finished footer messages clear when leaving their step. Concepts has
+one forward button and retains ⌘↩. The crop preview shows all four edges and dims excluded
+pixels. Local reference-face comparison reports agreement or no confident suggestion beside
+each already-confirmed sample, retaining the human assignments. Captioning explains the
+demo's fixed format. Editing a caption displays the unsaved notice without moving the image
+above the editor. Recent projects show parent folders. Training identifies the computer and
+run separately and describes the selected hosted captioning route. Monitor showed no run
+before training, then the simulated curve and **Training: Finished** alongside **Computer:
+Running**, matching the exited log. Saved-run copy explains data versions and continuation.
+
+Welcome's accessibility press reports an error through the computer-control tool but opens
+the disclosure; the same tool error also occurred while successfully opening the demo.
+VoiceOver was started for the requested check, but its global navigation keys could not be
+verified through that control connection. It was off afterward. A trial storage-binding change
+did not alter the behavior and was removed. Full human VoiceOver acceptance remains unverified;
+this is not recorded as a repaired application defect.
+
+The owner subsequently asked to remove the repeated introduction from Welcome. That screen
+now explains project creation/opening briefly; the full text remains on Images. This removes
+the redundant Welcome disclosure rather than changing the owner's explanation.
 
 **Review-repair check:** the rebuilt window showed recent-entry removal controls. In the
 offline demo, Concepts ⌘↩ opened Mapping for Person, and opened Captioning directly for
@@ -100,6 +131,29 @@ check passed, including preserving custom style details through reopening and un
 
 ## Offline verification
 
+- **Current walkthrough/H3/help integration:** 498 Swift tests passed (238 app tests in 39
+  suites; 260 Core tests in 38 suites), plus 117 Python reference tests. H3 media cases export
+  real synthetic 22- and 39-frame audiovisual segments and check exact caption/critic request
+  bytes, sidecars, publication and Undo. Budget checks include failed/cancelled preparation,
+  accumulated Resume cost and restoration without the original project open. The pod's
+  script and agent gates are recorded separately in POD-STATUS. These are offline tests;
+  the real provider/trainer evidence below retains its original scope.
+- **Final presentation checks:** strict SwiftLint and SwiftFormat are clean across 164 Swift
+  files. The offscreen harness rendered 116 light/dark, minimum/default screen states,
+  including Help at 640 × 480 and 780 × 720. Bounded visual review covered all nine journey
+  screens, Welcome, Settings and Help; a narrow Captioning rerender confirmed that the demo
+  format explanation wraps without widening the minimum-size form. These are rendered views,
+  not fresh native interaction or VoiceOver acceptance. The complete native nine-screen demo
+  walkthrough above preceded the H3/global-help additions; their interactive acceptance and
+  actual H3 run remain separate.
+
+- **Walkthrough clarity gate, 2026-10-11:** **478 Swift tests** pass (218 app and 260 Core),
+  strict SwiftLint reports zero violations, SwiftFormat is clean across 153 files (two
+  resource exclusions), and the debug bundle builds. Focused regressions cover navigation
+  during both work gates, crop/export geometry, actual Review editor placement, mapping
+  conclusions, the demo format lock, run-state explanations and recent-name disambiguation.
+  Existing sole-style approval tests also exercised saved mappings and Undo, including the
+  file-backed target path. These checks precede the in-progress H3 and per-run-budget work.
 - **Review-repair gate, 2026-10-11:** **450 Swift tests** (190 app in 29 suites, 260 Core in
   38 suites), **116 Python tests**, **660 agent**, **291 pod scripts** and **125 podctl**
   tests pass. Strict SwiftLint and SwiftFormat are clean across 145 files (two formatter
@@ -182,9 +236,10 @@ checks do not establish a quality comparison or every model's video support.
 
 Owner acceptance and distribution still pending:
 
-- The separately assigned pod-image rebuild/default update before live checks of direct
-  upload, storage cleanup and the repaired generation/Resume behavior. CI and the Hub-token
-  RunPod-secret change are also separate tickets, untouched by this repair round.
+- Live checks of direct upload, storage cleanup and repaired generation/Resume on the
+  published clean image. Its rebuild/default update and Hub-token secret integration have
+  landed separately; they are not work performed by this walkthrough repair round.
+  The new H3 source requires a later image build before its own GPU acceptance.
 - Native TensorBoard rendering during an actual run. Offline state and the live backend
   handshake are verified separately; no GPU was restarted solely for this UI check.
 - The owner's full morning walkthrough and first real dataset training run.
@@ -223,15 +278,24 @@ failures and asks users to reselect the folder rather than claiming it disappear
 rebuilt native check confirmed both the correct error and the retained Recent entry. These
 repairs passed 25 focused Swift tests, strict lint/format checks and independent source review.
 
-### Known limits before an existing H3 project can train here
+### H3 source integration and remaining runtime proof
 
-The app's ordinary H3 launch currently selects `arch: h3`, whereas the pinned AI Toolkit
-registers `minimax_h3`. Its global first-trigger setting also injects that trigger into captions
-for other concepts. Neither path is suitable for an existing dual-identity H3 continuation.
-Built-in result generation supports FLUX.1-dev and LTX-2, not H3; actual video training currently
-uses LTX. Importing and faithfully continuing an externally trained H3 checkpoint and its
-specialized recipe is not established by the same-storage FLUX/LTX Resume proofs. These are
-concrete integration gaps, not likeness-quality findings. No family training was started.
+The H3 route now uses the pinned AI Toolkit `minimax_h3` implementation, BF16 component
+downloads, exact approved clip groups and an optional imported native recipe. A new run can
+start from copied external LoRA weights; its old counters are discarded and its optimizer
+starts fresh. Same-run Resume remains a separate operation. Captions already name their
+mapped concepts, so the wrapper no longer injects the first trigger into every sample.
+H3 comparisons use the captured native network recipe and selected trained weights, with
+matched prompts/seeds for base and LoRA. Still-trained H3 LoRAs can generate stills or video.
+
+The native path checks for a 96 GB GPU before H3 input transfer, based on the known reference
+recipe. That does not establish memory fit for every setting. Metadata-only inspection of
+the 18 prepared project clips accepted their exact decoded frame counts, 24 fps timing and
+32-aligned dimensions under a 1024 resolution cap; no pixels or audio were inspected by
+that check. The new export, initializer, generation and budget source checks passed the
+offline integration gate; the earlier FLUX/LTX GPU proofs do not validate this H3 implementation. An
+updated AI Toolkit image and actual training/generation acceptance remain required.
+No family training was started.
 
 ## ChatGPT connection follow-up, 2026-10-11
 

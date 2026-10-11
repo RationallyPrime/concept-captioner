@@ -4,8 +4,18 @@
 
 import ConceptCore
 import Foundation
+import Security
 
 extension GPUWorkspace {
+    /// 256 random bits from the system CSPRNG, hex encoded: the pod agent's bearer and vLLM key.
+    nonisolated static func newAgentToken() throws -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+            throw StudioError.message("Your Mac could not generate a key for the computer. Try again.")
+        }
+        return bytes.map { String(format: "%02x", $0) }.joined()
+    }
+
     struct PodCredentials {
         let env: [String: String]
         /// The per-pod secret holding the agent bearer; deleted when the pod is removed.

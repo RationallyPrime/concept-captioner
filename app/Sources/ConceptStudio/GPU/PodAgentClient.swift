@@ -7,14 +7,6 @@ struct TrainingPlan: Decodable {
     let mode: String
     let caption: Assignment?
     let train: Assignment?
-
-    var explanation: String {
-        if mode == "sequential" {
-            "One GPU: finish captioning, stop the caption model to free its memory, then train."
-        } else {
-            "Captioning uses GPU 0. Training uses the other GPUs, so you can keep improving captions while training."
-        }
-    }
 }
 
 struct AgentService: Decodable {
@@ -99,7 +91,18 @@ struct AgentRunConfiguration {
     let dataset: JSONObject
 }
 
+struct AgentGPU: Decodable {
+    let index: Int
+    let name: String
+    let memoryTotalMiB: Int
+    enum CodingKeys: String, CodingKey {
+        case index, name
+        case memoryTotalMiB = "memory_total_mib"
+    }
+}
+
 protocol PodAgent: Sendable {
+    func gpus() async throws -> [AgentGPU]
     func upload(name: String, fileName: String, from file: URL, size: Int64) async throws
     func plan() async throws -> TrainingPlan
     func services() async throws -> [AgentService]
@@ -118,6 +121,10 @@ protocol PodAgent: Sendable {
 }
 
 extension PodAgent {
+    func gpus() async throws -> [AgentGPU] {
+        throw StudioError.message("This agent cannot report GPU memory. Update its training image before using H3.")
+    }
+
     func upload(name: String, fileName: String, from file: URL, size: Int64) async throws {
         throw StudioError.message("This computer does not support direct training uploads. Update its training image.")
     }
@@ -166,6 +173,11 @@ struct PodAgentClient: PodAgent {
     let transport: any HTTPTransport
     var downloader: any FileDownloading = URLSessionDownloader()
     var uploader: any FileUploading = URLSessionUploader()
+
+    func gpus() async throws -> [AgentGPU] {
+        struct Result: Decodable { let gpus: [AgentGPU] }
+        return try await JSONDecoder().decode(Result.self, from: call("gpus")).gpus
+    }
 
     func plan() async throws -> TrainingPlan {
         try await JSONDecoder().decode(TrainingPlan.self, from: call(
@@ -287,6 +299,10 @@ struct PodAgentClient: PodAgent {
 }
 
 actor DemoPodAgent: PodAgent {
+    func gpus() -> [AgentGPU] {
+        (0 ..< count).map { AgentGPU(index: $0, name: "Simulated 96 GB GPU", memoryTotalMiB: 97887) }
+    }
+
     let count: Int
     private var states: [String: String] = [:]
     private var runIDs: [String: String] = [:]

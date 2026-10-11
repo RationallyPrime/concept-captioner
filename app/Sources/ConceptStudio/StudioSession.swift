@@ -73,7 +73,12 @@ final class StudioSession {
     }
 
     var demoMode = false
-    var step: StudioStep? = .images
+    var step: StudioStep? = .images {
+        didSet {
+            if step != oldValue, !busy, !editing { message = "" }
+        }
+    }
+
     var selectedImageID: String?
     var message = ""
     var errorMessage: String?
@@ -281,11 +286,19 @@ final class StudioSession {
         }
         message = title
         errorMessage = nil
+        let originatingStep = step
         let work = Task {
             defer {
                 switch gate {
                 case .run: busy = false; task = nil
                 case .edit: editing = false; editTask = nil
+                }
+                // Keep active progress visible across navigation, but do not leave its result
+                // underneath a different step when the operation settles.
+                if busy || editing {
+                    message = busy ? runTitle : editTitle
+                } else if step != originatingStep {
+                    message = ""
                 }
             }
             do {
@@ -311,11 +324,6 @@ final class StudioSession {
 
     private static func plain(_ title: String) -> String {
         title.trimmingCharacters(in: CharacterSet(charactersIn: "…. "))
-    }
-
-    static func describe(_ error: any Error) -> String {
-        if let error = error as? StudioError { return error.localizedDescription }
-        return error.localizedDescription + " Check the relevant settings and try again."
     }
 
     func cancel() {
@@ -535,4 +543,11 @@ final class StudioSession {
     var monitorTab = MonitorTab.progress
 
     // MARK: - End lane ui stored state
+}
+
+extension StudioSession {
+    static func describe(_ error: any Error) -> String {
+        if let error = error as? StudioError { return error.localizedDescription }
+        return error.localizedDescription + " Check the relevant settings and try again."
+    }
 }

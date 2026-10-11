@@ -34,17 +34,65 @@ struct MediaSelection: Codable, Equatable {
     var videoHeight: Int?
 }
 
+/// The selected diffusion model's frame geometry; approval never silently snaps or retimes a target.
+enum VideoTrainingFormat: String, CaseIterable, Identifiable {
+    case ltx = "ltx-video", h3 = "h3-video"
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        self == .h3 ? "MiniMax H3" : "LTX"
+    }
+
+    var minimumFrames: Int {
+        self == .h3 ? 5 : 9
+    }
+
+    var frameStep: Int {
+        self == .h3 ? 17 : 8
+    }
+
+    var initialFrames: Int {
+        self == .h3 ? 39 : 33
+    }
+
+    var gridDescription: String {
+        self == .h3 ? "17n+5" : "8n+1"
+    }
+
+    init(profile: String) {
+        self = profile.hasPrefix("h3-") ? .h3 : .ltx
+    }
+
+    func maximumFrames(available: Int) -> Int {
+        let available = min(available, MediaEditor.maximumVideoFrames)
+        guard available >= minimumFrames else { return 0 }
+        return minimumFrames + (available - minimumFrames) / frameStep * frameStep
+    }
+
+    func accepts(frameCount: Int) -> Bool {
+        frameCount >= minimumFrames && frameCount <= MediaEditor.maximumVideoFrames
+            && (frameCount - minimumFrames) % frameStep == 0
+    }
+
+    func initialSelectionFrames(available: Int) -> Int {
+        if self == .h3, accepts(frameCount: available) { return available }
+        return min(initialFrames, maximumFrames(available: available))
+    }
+}
+
 struct VideoTimeline {
     let times: [CMTime]
     let end: CMTime
 
-    var maximumTrainingFrames: Int {
-        times.isEmpty ? 0 : min(MediaEditor.maximumVideoFrames, (times.count - 1) / 8 * 8 + 1)
+    func maximumTrainingFrames(format: VideoTrainingFormat = .ltx) -> Int {
+        format.maximumFrames(available: times.count)
     }
 
-    func range(startFrame: Int, frameCount: Int) -> CMTimeRange? {
-        guard startFrame >= 0, frameCount >= 9, frameCount % 8 == 1,
-              frameCount <= MediaEditor.maximumVideoFrames, frameCount <= times.count,
+    func range(startFrame: Int, frameCount: Int, format: VideoTrainingFormat = .ltx) -> CMTimeRange? {
+        guard startFrame >= 0, format.accepts(frameCount: frameCount), frameCount <= times.count,
               startFrame <= times.count - frameCount else { return nil }
         let start = times[startFrame]
         let finish = startFrame + frameCount < times.count ? times[startFrame + frameCount] : end
@@ -52,12 +100,15 @@ struct VideoTimeline {
         return CMTimeRange(start: start, end: finish)
     }
 
-    /// Pinned LTX preprocessing consumes uniform frame positions rather than the container's PTS.
-    func isConstantRate(startFrame: Int, frameCount: Int) -> Bool {
-        guard let range = range(startFrame: startFrame, frameCount: frameCount) else { return false }
+    /// Both trainers consume uniform positions; H3's released temporal geometry also requires 24 fps.
+    func supportsTiming(startFrame: Int, frameCount: Int, format: VideoTrainingFormat = .ltx) -> Bool {
+        guard let range = range(startFrame: startFrame, frameCount: frameCount, format: format) else { return false }
         let selected = Array(times[startFrame ..< startFrame + frameCount]) + [range.end]
-        let interval = range.duration.seconds / Double(frameCount)
-        let tolerance = 1 / Double(selected.map(\.timescale).min() ?? 1)
+        let interval = format == .h3 ? 1 / 24.0 : range.duration.seconds / Double(frameCount)
+        let containerTick = 1 / Double(selected.map(\.timescale).min() ?? 1)
+        // A coarse container tick cannot establish H3's fixed 24 fps cadence. In particular,
+        // allowing a whole 1/30-second tick would admit 30 fps, and 1/24000 would admit 23.976.
+        let tolerance = format == .h3 ? min(containerTick, 0.000001) : containerTick
         return zip(selected, selected.dropFirst()).allSatisfy {
             abs(($0.1 - $0.0).seconds - interval) <= tolerance
         }
@@ -65,7 +116,7 @@ struct VideoTimeline {
 }
 
 enum MediaEditor {
-    /// Matches the current LTX trainer's approved-media bucket bound.
+    /// App export bound; each model's final permitted count is derived from its own grid.
     static let maximumVideoFrames = 257
     static let convertibleImageSuffixes: Set<String> = [".heic", ".heif", ".tif", ".tiff"]
 
@@ -279,20 +330,23 @@ enum MediaEditor {
         return composition
     }
 
-    /// Export exactly N approved frames without retiming; N must match an LTX 8n+1 bucket.
+    /// Export exactly N approved frames on the selected model's grid, without retiming.
     /// Re-encoding avoids keyframe-aligned passthrough extending the selected range.
     static func trim(
-        url: URL, startFrame: Int, frameCount: Int, longEdge: Int, output: URL
+        url: URL, startFrame: Int, frameCount: Int, longEdge: Int, output: URL,
+        format: VideoTrainingFormat = .ltx
     ) async throws -> (range: CMTimeRange, info: VideoInfo) {
         let timeline = try await videoTimeline(url: url)
-        guard let range = timeline.range(startFrame: startFrame, frameCount: frameCount) else {
-            throw StudioError.message("Choose an available segment of 8n+1 frames, "
-                + "from 9 through \(maximumVideoFrames), such as 17 or 33 frames.")
+        guard let range = timeline.range(startFrame: startFrame, frameCount: frameCount, format: format) else {
+            throw StudioError.message(
+                "Choose an available \(format.title) segment of \(format.gridDescription) frames, "
+                    + "from \(format.minimumFrames) through \(format.maximumFrames(available: maximumVideoFrames))."
+            )
         }
-        guard timeline.isConstantRate(startFrame: startFrame, frameCount: frameCount) else {
-            throw StudioError.message("This segment has variable frame timing that the LTX trainer cannot preserve. "
-                +
-                "Choose a constant-rate portion or import a constant-frame-rate copy; no clip was retimed or replaced.")
+        guard timeline.supportsTiming(startFrame: startFrame, frameCount: frameCount, format: format) else {
+            let requirement = format == .h3 ? "constant timing at 24 frames per second" : "constant frame timing"
+            throw StudioError.message("\(format.title) requires \(requirement). "
+                + "Choose a compatible portion or import a compatible copy; no clip was retimed or replaced.")
         }
         guard let export = AVAssetExportSession(
             asset: AVURLAsset(url: url),
@@ -308,6 +362,11 @@ enum MediaEditor {
             guard exported.times.count == frameCount else {
                 throw StudioError.message("The exported clip did not contain exactly \(frameCount) frames. "
                     + "Choose another start frame or another clip; no target was replaced.")
+            }
+            guard exported.supportsTiming(startFrame: 0, frameCount: frameCount, format: format),
+                  abs(exported.end.seconds - range.duration.seconds) < 0.002 else {
+                throw StudioError.message("The exported clip changed its duration or frame timing. "
+                    + "Choose another clip; no target was replaced.")
             }
             for (index, time) in exported.times.enumerated() {
                 let original = timeline.times[startFrame + index] - range.start

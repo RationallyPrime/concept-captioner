@@ -408,7 +408,6 @@ def expected_aitoolkit(workspace: Path) -> dict[str, Any]:
                     "type": "sd_trainer",
                     "training_folder": str(run / "output"),
                     "device": "cuda:0",
-                    "trigger_word": "NORA7",
                     "log_dir": str(run / "tensorboard"),
                     "network": {"type": "lora", "linear": 16, "linear_alpha": 16},
                     "save": {
@@ -489,13 +488,15 @@ def test_aitoolkit_model_block_by_family() -> None:
     }
     assert aitoolkit.model_block("/workspace/models/MiniMax-H3") == {
         "name_or_path": "/workspace/models/MiniMax-H3",
-        "arch": "h3",
-        "quantize": True,
+        "arch": "minimax_h3",
+        "quantize": False,
+        "quantize_te": False,
     }
     assert aitoolkit.model_block("vendor/h3-base") == {
         "name_or_path": "vendor/h3-base",
-        "arch": "h3",
-        "quantize": True,
+        "arch": "minimax_h3",
+        "quantize": False,
+        "quantize_te": False,
     }
     assert aitoolkit.model_block("vendor/sh3ll") == {"name_or_path": "vendor/sh3ll"}
     assert aitoolkit.model_block("stabilityai/sdxl") == {"name_or_path": "stabilityai/sdxl"}

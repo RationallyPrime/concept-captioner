@@ -24,6 +24,7 @@ import json
 import os
 import re
 import runpy
+import shutil
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -50,7 +51,7 @@ from .errors import AgentError
 from .ltx_rules import LTX_HUB_MODEL, LTX_HUB_REVISION, check_preprocess
 from .settings import Paths, Settings
 from .storage import RUN_STATE_FILE, cleanup_datasets
-from .uploads import claim_stage
+from .uploads import claim_initialization, claim_stage, release_stage, upload_folder
 
 RUN_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
 NAME_PATTERN = RUN_ID_PATTERN  # dataset folder names follow the run-id rule
@@ -307,6 +308,13 @@ class HubTarget(BaseModel):
     push_on_finish: bool = False
 
 
+class Initialization(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(pattern=NAME_PATTERN)
+    lora_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    recipe_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class RunConfig(ServiceParams):
     """The trainer run config (POD-SPEC §4.1); params of both trainer services."""
 
@@ -330,6 +338,7 @@ class RunConfig(ServiceParams):
     hf_token: Secret = None
     extra: dict[str, Any] = {}
     resume: bool = False
+    initialization: Initialization | None = None
 
     @field_validator("triggers")
     @classmethod
@@ -484,8 +493,6 @@ class GenerationParams(ServiceParams):
     def _distinct_run(self) -> GenerationParams:
         if self.run_id == self.source_run_id:
             raise ValueError("generation must have its own run_id")
-        if self.num_frames % 8 != 1:
-            raise ValueError("num_frames must be 8n+1")
         return self
 
 
@@ -639,9 +646,33 @@ def _invalid(model: ServiceParams, reason: str) -> None:
     )
 
 
+def _h3_rules(paths: Paths) -> dict[str, Any]:
+    script = paths.scripts / "h3_recipe.py"
+    if not script.is_file():
+        script = Path(__file__).resolve().parents[3] / "scripts/h3_recipe.py"
+    return runpy.run_path(str(script))
+
+
 def _validate_training_start(name: str, params: RunConfig, paths: Paths) -> None:
     run_dir = paths.run_dir(params.run_id)
     previous = run_dir / RUN_JSON
+    if params.initialization is not None:
+        rules = _h3_rules(paths)
+        if name != "trainer-aitoolkit" or params.base_model != rules["MODEL"]:
+            _invalid(
+                params, "External initialization currently supports MiniMax-H3 AI Toolkit runs"
+            )
+        if not params.resume:
+            if run_dir.exists():
+                _invalid(params, "External weights initialize a NEW run_id, never an existing run")
+            try:
+                rules["read_initialization"](
+                    upload_folder(paths, params.initialization.name),
+                    params.initialization.model_dump(),
+                    params.rank,
+                )
+            except (OSError, ValueError, AgentError) as error:
+                _invalid(params, str(error))
     if not params.resume:
         # Preserve the existing start/restart contract. The native Resume action opts into
         # stricter checkpoint/settings validation; Repeat always allocates a new run_id.
@@ -662,6 +693,7 @@ def _validate_training_start(name: str, params: RunConfig, paths: Paths) -> None
         "gradient_accumulation",
         "seed",
         "extra",
+        "initialization",
     )
     changed = [key for key in immutable if getattr(old, key) != getattr(params, key)]
     if changed:
@@ -721,10 +753,23 @@ def _validate_generation(name: str, params: GenerationParams, paths: Paths) -> N
         _invalid(params, "Choose a new generation run_id; existing outputs are kept")
     cfg, _ = _generation_source(params, paths)
     supported = "black-forest-labs/FLUX.1-dev" if name == "generate-aitoolkit" else LTX_HUB_MODEL
-    if cfg.get("base_model") != supported or not params.checkpoint.endswith(".safetensors"):
+    h3 = name == "generate-aitoolkit" and cfg.get("base_model") == _h3_rules(paths)["MODEL"]
+    if (cfg.get("base_model") != supported and not h3) or not params.checkpoint.endswith(
+        ".safetensors"
+    ):
         _invalid(params, f"This generation path supports {supported} checkpoints only")
-    if name == "generate-aitoolkit" and params.num_frames != 1:
+    if h3:
+        if params.num_frames != 1 and (params.num_frames < 5 or params.num_frames % 17 != 5):
+            _invalid(params, "H3 generation needs 1 still frame or 17n+5 video frames")
+        if params.frame_rate != 24:
+            _invalid(params, "H3 generation uses exactly 24 fps")
+        native = paths.run_dir(params.source_run_id) / "native-config.json"
+        if native.is_symlink() or not native.is_file():
+            _invalid(params, "H3 generation needs the saved effective native model/network recipe")
+    elif name == "generate-aitoolkit" and params.num_frames != 1:
         _invalid(params, "FLUX generation produces images; num_frames must be 1")
+    elif name == "generate-ltx" and params.num_frames % 8 != 1:
+        _invalid(params, "LTX generation needs 8n+1 frames")
 
 
 # --- the spec and its builders ---------------------------------------------------------------
@@ -912,10 +957,40 @@ def _trainer_prepare(params: ServiceParams, paths: Paths) -> None:
     """Create ``<runs>/<id>/`` (with ``tensorboard/``) and write ``run.json``, secrets stripped."""
     cfg = _as(params, RunConfig)
     run_dir = paths.run_dir(cfg.run_id)
+    payload = cfg.model_dump(mode="json", exclude=set(SECRET_FIELDS))
+    if cfg.base_model == _h3_rules(paths)["MODEL"]:
+        rules = _h3_rules(paths)
+        imported: dict[str, Any] = {}
+        if cfg.initialization is not None:
+            if cfg.resume:
+                imported = rules["read_initialization"](
+                    run_dir, cfg.initialization.model_dump(), cfg.rank
+                )
+            else:
+                folder = claim_initialization(paths, cfg.initialization.name)
+                try:
+                    imported = rules["read_initialization"](
+                        folder, cfg.initialization.model_dump(), cfg.rank
+                    )
+                    run_dir.mkdir(parents=True, exist_ok=False)
+                    for filename in ("initial-lora.safetensors", "initial-recipe.json"):
+                        shutil.copyfile(folder / filename, run_dir / filename)
+                    rules["read_initialization"](run_dir, cfg.initialization.model_dump(), cfg.rank)
+                finally:
+                    release_stage(paths, cfg.initialization.name)
+        helper = paths.scripts / "launch_aitoolkit.py"
+        if not helper.is_file():
+            helper = Path(__file__).resolve().parents[3] / "scripts/launch_aitoolkit.py"
+        merge = runpy.run_path(str(helper))["deep_merge"]
+        videos = any(
+            p.suffix.lower() in {".mp4", ".mov", ".m4v"} for p in Path(cfg.dataset.path).rglob("*")
+        )
+        quality = merge(rules["quality_settings"](video=videos), imported)
+        payload["extra"] = merge(quality, cfg.extra)
+        payload["extra"]["network"].update(linear=cfg.rank, linear_alpha=cfg.alpha)
     _prestart_cleanup(cfg, paths)
     (run_dir / RUN_STATE_FILE).unlink(missing_ok=True)
     (run_dir / "tensorboard").mkdir(parents=True, exist_ok=True)
-    payload = cfg.model_dump(mode="json", exclude=set(SECRET_FIELDS))
     tmp = run_dir / f"{RUN_JSON}.tmp"
     tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     os.replace(tmp, run_dir / RUN_JSON)
@@ -936,6 +1011,9 @@ def _generation_prepare(params: ServiceParams, paths: Paths) -> None:
     # A simultaneous resume may replace an unnumbered final save on another GPU. Capture
     # both selected inputs before launching either inference variant, not after base sampling.
     (run_dir / "source-run.json").write_text(json.dumps(source, indent=2) + "\n", encoding="utf-8")
+    native = paths.run_dir(cfg.source_run_id) / "native-config.json"
+    if source.get("base_model") == _h3_rules(paths)["MODEL"]:
+        shutil.copyfile(native, run_dir / "source-native-config.json")
     digest = hashlib.sha256()
     with (
         checkpoint.open("rb") as src,

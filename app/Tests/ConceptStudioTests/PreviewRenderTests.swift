@@ -91,6 +91,13 @@ struct PreviewRenderTests {
             try await captureStates(of: step, session: session, output: output, filter: filter, captures: &captures)
         }
         try await captureAuxiliaryScreens(session: session, output: output, filter: filter, captures: &captures)
+        try await capture(
+            "help", view: StudioHelpView(), output: output, filter: filter, captures: &captures,
+            renderSizes: [
+                ("minimum", CGSize(width: 640, height: 480)),
+                ("default", CGSize(width: 780, height: 720)),
+            ]
+        )
         await session.gpu.stopEverything()
         #expect(!session.gpu.hasRunningPod)
         try await captureChatGPT(
@@ -111,12 +118,6 @@ struct PreviewRenderTests {
             "welcome", view: StudioRootView(session: session),
             output: output, filter: filter, captures: &captures
         )
-        session.preferences.set(false, forKey: "studio.trainingExplanationExpanded")
-        try await capture(
-            "welcome-collapsed", view: StudioRootView(session: session),
-            output: output, filter: filter, captures: &captures
-        )
-        session.preferences.set(true, forKey: "studio.trainingExplanationExpanded")
     }
 
     /// Extra states of a journey screen: a prefilled suggestion, a multi-selection, a running computer, tabs.

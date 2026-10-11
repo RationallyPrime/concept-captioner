@@ -247,8 +247,10 @@ extension StudioSession {
         gpu.profile = project?.job.profile ?? "flux-image"
         gpu.datasetRevision = projectState.datasetRevision
         gpu.datasetContainsVideo = project?.images.contains { Sources.isVideo(Sources.suffix(of: $0.id)) } ?? false
-        if !preservingTrainer, !gpu.hasRunningPod {
+        if !preservingTrainer, !gpu.hasRunningPod, !gpu.hasNativeRecipe,
+           ["black-forest-labs/FLUX.1-dev", "Lightricks/LTX-2"].contains(gpu.baseModel) {
             gpu.trainer = gpu.profile.hasPrefix("ltx-") ? "ltx" : "aitoolkit"
+            if gpu.profile.hasPrefix("h3-") { gpu.baseModel = GPUWorkspace.h3BaseModel }
         }
     }
 

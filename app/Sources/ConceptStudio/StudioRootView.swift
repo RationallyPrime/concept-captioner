@@ -3,6 +3,7 @@ import SwiftUI
 
 struct StudioRootView: View {
     @Bindable var session: StudioSession
+    @Environment(\.openWindow) private var openWindow
     var body: some View {
         Group {
             if session.project == nil {
@@ -86,9 +87,15 @@ struct StudioRootView: View {
                 Text((session.step ?? .images).explanation)
                     .foregroundStyle(StudioStyle.supportingText).fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 660, alignment: .leading)
+                StudioTermsHelp(terms: (session.step ?? .images).definitionTerms)
+                    .id(session.step)
             }
             Spacer(minLength: 0)
-            if session.demoMode { DemoBadge() }
+            VStack(alignment: .trailing, spacing: 12) {
+                if session.demoMode { DemoBadge() }
+                Button("Help", systemImage: "questionmark.circle") { openWindow(id: "help") }
+                    .help("Open the training explanation and searchable definitions.")
+            }
         }.padding(24)
     }
 
@@ -117,7 +124,7 @@ struct StudioRootView: View {
                 if let previous = session.previousStep {
                     Button("Back") { session.goBack() }.help("Back to \(previous.title) (⌘[)")
                 }
-                if let following = session.nextStep {
+                if session.step != .concepts, let following = session.nextStep {
                     Button("Next: \(following.title)") { session.goForward() }.help("⌘]")
                 }
             }

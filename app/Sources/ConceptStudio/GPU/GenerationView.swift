@@ -64,10 +64,13 @@ struct GenerationView: View {
                 }
                 TextField("Seeds (comma separated)", text: $seedText)
                 Stepper("Generation steps: \(inferenceSteps)", value: $inferenceSteps, in: 1 ... 100)
-                if selectedRun?.trainer == "ltx" {
-                    Picker("Video length at 24 fps", selection: $videoFrames) {
-                        ForEach([17, 49, 97, 129], id: \.self) { frames in
-                            Text("\(frames) frames · \(Double(frames) / 24, specifier: "%.1f") seconds").tag(frames)
+                if selectedRun?.generatesVideo == true {
+                    Picker("Generated output at 24 fps", selection: $videoFrames) {
+                        ForEach(selectedRun?.generationFrameChoices ?? [], id: \.self) { frames in
+                            if frames == 1 { Text("Still image").tag(frames) } else {
+                                Text("\(frames) frames · \(Double(frames) / 24, specifier: "%.1f") seconds")
+                                    .tag(frames)
+                            }
                         }
                     }
                 }
@@ -77,10 +80,13 @@ struct GenerationView: View {
                     Task { await workspace.refreshRunFiles(run.runID) }
                 }.disabled(workspace.isBusy || !workspace.hasRunningPod)
                 if !run.supportsGeneration {
-                    StudioNotice("Generation supports FLUX.1-dev and LTX-2. This run uses \(run.baseModel).")
+                    StudioNotice(
+                        "Generation supports FLUX.1-dev, LTX-2 and MiniMax H3. This run uses \(run.baseModel)."
+                    )
                 }
-                if run.trainer == "ltx" {
-                    Text("Both LTX videos use the selected frame count at 24 fps and the same resolution and settings.")
+                if run.generatesVideo {
+                    Text("Both outputs use the selected frame count at 24 fps and the same resolution and settings. "
+                        + "H3 can generate still images or videos even when its LoRA was trained on still images.")
                         .font(.callout).foregroundStyle(StudioStyle.supportingText)
                 }
             }
@@ -90,6 +96,7 @@ struct GenerationView: View {
             Text("Use the concept trigger in your prompt. Enter up to six prompts and four seeds. "
                 + "Generation uses the rented GPU; the app's spending limit and Stop controls remain active.")
                 .font(.callout).foregroundStyle(StudioStyle.supportingText).fixedSize(horizontal: false, vertical: true)
+            StudioTermsHelp(terms: [.prompt, .seed, .checkpoint, .fps, .resolution, .lora])
             Button("Generate base and LoRA comparison", systemImage: "photo.on.rectangle.angled") {
                 generate()
             }
@@ -108,6 +115,9 @@ struct GenerationView: View {
 
     private func chooseCheckpoint() {
         checkpointPath = RunArtifacts.newest(selectedRun?.checkpoints ?? [])?.path ?? ""
+        if let run = selectedRun, run.generatesVideo, !run.generationFrameChoices.contains(videoFrames) {
+            videoFrames = run.defaultGenerationFrames
+        }
     }
 
     private func generate() {

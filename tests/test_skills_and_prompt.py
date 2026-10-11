@@ -13,7 +13,14 @@ def test_default_skill_loads_with_profiles():
     skill = skills.load()
     assert skill.name == "diffusion-training-captioner"
     assert "# Core Caption Policy" in skill.instructions()
-    assert skill.profiles() == ["flux-image", "h3-still", "ltx-image", "ltx-video", "plain"]
+    assert skill.profiles() == [
+        "flux-image",
+        "h3-still",
+        "h3-video",
+        "ltx-image",
+        "ltx-video",
+        "plain",
+    ]
     assert "[Shot 1]" in skill.profile("h3-still")
     with pytest.raises(ConfigurationError):
         skill.profile("nope")
@@ -64,6 +71,30 @@ def test_prompt_assembly(job):
     assert '"NORA7"' in job_view and "IVAN9" not in job_view
     review = critic_instructions(skill, profile, job, {"NORA7": "x"})
     assert "REVIEW TASK" in review and "RESPONSE\n" not in review
+
+
+def test_h3_video_profile_carries_actual_target_type_and_keeps_still_convention(job):
+    import json
+
+    skill = skills.load()
+    job.profile = "h3-video"
+    profile = skill.profile(job.profile)
+    video = captioner_instructions(
+        skill, profile, job, {"NORA7": "the person in the selected clip"}, is_video=True
+    )
+    still = captioner_instructions(skill, profile, job, {"NORA7": "the person in the still"})
+
+    def inputs(text):
+        view = text.split("ACTIVE JOB CONFIGURATION\n", 1)[1].split("\n", 1)[0]
+        return json.loads(view)["inputs"]
+
+    assert inputs(video)["evidence"] == "attached_target_video"
+    assert inputs(video)["audio_status"] == "uninspected"
+    assert inputs(still)["evidence"] == "attached_target_image"
+    assert inputs(still)["audio_status"] == "not_applicable"
+    assert "## Still images in a mixed project" in profile
+    assert "use the unchanged `h3-still` convention" in profile
+    assert "never claim silence because audio was unavailable or uninspected" in profile
 
 
 def test_style_defaults_do_not_request_identity_traits():

@@ -5,6 +5,7 @@ struct ConceptStudioApp: App {
     @State private var session = StudioSession()
     @FocusedValue(\.captionSaveAction) private var captionSaveAction
     @NSApplicationDelegateAdaptor(StudioAppDelegate.self) private var delegate
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         Window("ConceptStudio", id: "studio") {
@@ -27,7 +28,7 @@ struct ConceptStudioApp: App {
                 .keyboardShortcut("o")
                 Menu("Open Recent") {
                     ForEach(session.recentPaths, id: \.self) { path in
-                        Button(URL(fileURLWithPath: path).lastPathComponent) {
+                        Button(RecentProjects.menuLabel(path, among: session.recentPaths)) {
                             session.openRecent(path)
                         }
                         .help(path)
@@ -48,8 +49,16 @@ struct ConceptStudioApp: App {
                     .disabled(session.project == nil)
             }
             JourneyCommands(session: session)
+            CommandGroup(replacing: .help) {
+                Button("ConceptStudio Help") { openWindow(id: "help") }
+                    .keyboardShortcut("?", modifiers: .command)
+            }
         }
         Settings { StudioSettingsView(session: session) }
+        Window("ConceptStudio Help", id: "help") {
+            StudioHelpView()
+        }
+        .defaultSize(width: 780, height: 720)
     }
 }
 

@@ -26,13 +26,13 @@ enum CurationUndo {
     case inclusion(id: String, wasIncluded: Bool)
     case replacement(
         image: ProjectImage, mapping: Job.Mapping?, concepts: [Concept], selection: MediaSelection?,
-        backup: URL, newID: String
+        backup: URL, newID: String, previousProfile: String, appliedProfile: String
     )
 
     var replacedIDs: Set<String> {
         switch self {
         case .inclusion: []
-        case let .replacement(image, _, _, _, _, newID): [image.id, newID]
+        case let .replacement(image, _, _, _, _, newID, _, _): [image.id, newID]
         }
     }
 }
@@ -102,14 +102,16 @@ extension StudioProject {
         try approveTarget(id: id, name: name, selection: selection) { try AtomicFile.write(data, to: $0) }
     }
 
-    mutating func approveTarget(id: String, sourceFile: URL, name: String, selection: MediaSelection) throws {
-        try approveTarget(id: id, name: name, selection: selection) {
+    mutating func approveTarget(
+        id: String, sourceFile: URL, name: String, selection: MediaSelection, profile: String? = nil
+    ) throws {
+        try approveTarget(id: id, name: name, selection: selection, profile: profile) {
             try FileManager.default.copyItem(at: sourceFile, to: $0)
         }
     }
 
     private mutating func approveTarget(
-        id: String, name: String, selection: MediaSelection, write: (URL) throws -> Void
+        id: String, name: String, selection: MediaSelection, profile: String? = nil, write: (URL) throws -> Void
     ) throws {
         guard let image = images.first(where: { $0.id == id }) else {
             throw StudioError.message("Include this sample before approving its crop or segment.")
@@ -123,6 +125,7 @@ extension StudioProject {
         _ = try moveTarget(image.url, to: backup)
         let oldMapping = job.mapping(for: id)
         let previousSelection = mediaState.selections[id]
+        let previousProfile = job.profile
         do {
             try write(target)
             images.removeAll { $0.id == id }
@@ -131,6 +134,7 @@ extension StudioProject {
             try job.setMapping(job.mappingIncludingWholeTargets(nil), for: target.lastPathComponent)
             mediaState.selections[id] = nil
             mediaState.selections[target.lastPathComponent] = selection
+            if let profile { job.profile = profile }
             try save()
         } catch {
             try? FileManager.default.removeItem(at: target)
@@ -140,12 +144,13 @@ extension StudioProject {
             try? job.setMapping(oldMapping, for: id)
             mediaState.selections[target.lastPathComponent] = nil
             mediaState.selections[id] = previousSelection
+            job.profile = previousProfile
             try? save()
             throw error
         }
         curationUndo.append(.replacement(
             image: image, mapping: oldMapping, concepts: job.concepts, selection: previousSelection, backup: backup,
-            newID: target.lastPathComponent
+            newID: target.lastPathComponent, previousProfile: previousProfile, appliedProfile: job.profile
         ))
     }
 
@@ -153,7 +158,7 @@ extension StudioProject {
         guard let undo = curationUndo.last else { return }
         switch undo {
         case let .inclusion(id, included): try setIncluded(id, included, recordUndo: false)
-        case let .replacement(image, mapping, concepts, selection, backup, newID):
+        case let .replacement(image, mapping, concepts, selection, backup, newID, previousProfile, appliedProfile):
             guard let current = images.first(where: { $0.id == newID }) else {
                 throw StudioError.message("Include the edited sample before undoing its edit.")
             }
@@ -172,6 +177,7 @@ extension StudioProject {
                 try job.setMapping(restoredMapping, for: image.id)
                 mediaState.selections[newID] = nil
                 mediaState.selections[image.id] = selection
+                if job.profile == appliedProfile { job.profile = previousProfile }
                 try save()
             } catch {
                 _ = try? moveTarget(imagesDirectory.appendingPathComponent(image.id), to: backup)

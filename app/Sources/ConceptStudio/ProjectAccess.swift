@@ -48,6 +48,17 @@ struct RecentProjects {
 
     let preferences: UserDefaults
 
+    static func parentLabel(_ path: String) -> String {
+        let parent = URL(fileURLWithPath: path).deletingLastPathComponent().path
+        return (parent as NSString).abbreviatingWithTildeInPath
+    }
+
+    static func menuLabel(_ path: String, among paths: [String]) -> String {
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        guard paths.filter({ URL(fileURLWithPath: $0).lastPathComponent == name }).count > 1 else { return name }
+        return "\(name) — \(parentLabel(path))"
+    }
+
     var entries: [Entry] {
         if let data = preferences.data(forKey: Self.key),
            let entries = try? JSONDecoder().decode([Entry].self, from: data) {

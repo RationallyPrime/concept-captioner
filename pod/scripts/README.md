@@ -8,13 +8,16 @@ They never import `podagent`, and nothing heavy is imported at module level, so
 `launch_ltx.py` reads the LTX rules it shares with the agent (preprocess allowlist, pinned
 LTX-2 Hub revision) from `../agent/src/podagent/ltx_rules.py` at import, by path with runpy.
 The image recreates that layout under `/opt/pod`, and the build's `--help` check fails if the
-copy is missing.
+copy is missing. H3 helpers read the single native/pod recipe field-and-asset JSON
+resource, copied beside scripts; they also remain stdlib-only at import.
 
 | script | runs in | purpose |
 | --- | --- | --- |
 | `pull_dataset.py` | `/opt/venvs/agent` | Hub dataset → `/workspace/datasets/<name>`: images, `<stem>.txt` captions, `metadata.jsonl`, `manifest.json`, `job.yaml` |
 | `push_lora.py` | `/opt/venvs/agent` | `/workspace/runs/<id>` → model repo: newest `.safetensors`, samples, `run.json`, `config.yaml`, generated model card |
-| `launch_aitoolkit.py` | `/opt/venvs/aitoolkit` | `run.json` → ai-toolkit YAML → `run.py`; tees the log; scrapes loss into TensorBoard events (POD-SPEC §4.3) |
+| `launch_aitoolkit.py` | `/opt/venvs/aitoolkit` | FLUX/H3 `run.json` → ai-toolkit YAML → `run.py`; effective native snapshot, log tee and loss scraper |
+| `h3_recipe.py`, `h3_dataset.py` | stdlib admission, then AI Toolkit | canonical H3 quality/initializer contracts, fixed pinned BF16 asset download, exact approved clip grouping |
+| `generate_results.py` | selected trainer venv | actual matched FLUX/H3/LTX base/LoRA inference; incremental manifest and private checkpoint cleanup |
 | `launch_ltx.py` | `/opt/venvs/ltx` | `run.json` → preprocess + LTX-2 trainer config → train; same tee and scraper (POD-SPEC §4.3) |
 
 `docs/POD-STATUS.md` says which of these are implemented. The agent builds each argv from the
@@ -131,3 +134,42 @@ uv pip install huggingface_hub datasets Pillow             # or: -e ".[dev,pod]"
 .venv/bin/python -m pytest ../scripts/tests -q
 .venv/bin/ruff check ../scripts && .venv/bin/ruff format --check ../scripts
 ```
+
+## H3 training, initialization and comparison
+
+`Comfy-Org/MiniMax-H3` uses the pinned `minimax_h3` registration, BF16 DiT/Qwen encoder,
+frozen image-training adapter and AdamW quality defaults. Component filenames and canonical
+quality fields have one source: `app/Sources/ConceptStudio/Resources/Training/h3-recipe-fields.json`.
+Both base and fake images copy it to `/opt/pod/scripts/h3-recipe-fields.json`. The four binary
+assets are revision-pinned in `h3_recipe.py`; original tokenizer/processor/config resolution
+is the pinned upstream model's `MiniMaxAI/MiniMax-H3` path. No model is assumed present at an
+old pod path. No global first trigger is injected; saved per-example captions retain their
+mapped concepts.
+
+Before model download, `h3_dataset.py` admits complete 24 fps CFR clips, 17n+5 frames from
+5 to 243, positive dimensions divisible by 32, and area covered by the training cap squared.
+Each private dataset view sets its exact frame count; mixed stills remain separate one-frame
+buckets. The source files/audio are unchanged. `h3-inputs.json` records the target facts and
+`native-config.json` records actual model/network/train/dataset settings. Image resolution
+arrays stay image-resolution arrays; they are never mistaken for width/height. Unsupported
+count/cadence/cap combinations refuse before download, rather than trim, crop or retime.
+
+A new external warm start uploads only fixed `initial-lora.safetensors` + canonical
+`initial-recipe.json` into a separate confined stage, with the ordinary 2 GiB/file and
+20 GiB/stage limits. `initialization: {name,lora_sha256,recipe_sha256}` binds the files; the
+agent validates actual Comfy/native H3 PEFT A/B headers/rank, captures them privately in a
+NEW run and never installs them as media. `network.pretrained_lora_path` loads those weights
+at fresh step 0. Saved same-run Resume retains initializer provenance and uses private files
+without its upload stage, restoring its own newer checkpoint's step/state.
+
+H3 generation uses the saved effective model + trained network recipe and selected private
+checkpoint snapshot. It attaches an actual pinned `LoRASpecialNetwork` (including rank,
+alpha and target selection), relies on upstream Comfy A/B conversion, disables merging, and
+uses multiplier 0/1 for matched arms. The frozen training assistant is omitted from BOTH
+arms. H3 stills produce PNG; 17n+5 video requests produce MP4 at exactly 24 fps, regardless
+of whether training inputs were stills or clips. The exported manifest omits private native
+paths. Normal success/errors/SIGTERM clean the selected private checkpoint; forced killing
+cannot promise `finally` execution. Every pair must exist before `state: complete`.
+
+This source path has offline/fake-runtime checks only; see POD-STATUS for the separate image,
+hosted H3 training/Resume/generation and capacity acceptance gaps.

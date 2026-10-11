@@ -1,7 +1,6 @@
 import ConceptCore
 import Foundation
 import Observation
-import Security
 
 @MainActor @Observable
 final class GPUWorkspace {
@@ -13,15 +12,23 @@ final class GPUWorkspace {
     var gpuCount = 1
     /// The limit for the next rental. While a pod runs, `activeBudget` is the one enforced.
     var budget = 10.0
+    /// The cap selected for the next training run; separate from the whole-computer rental cap.
+    var runBudget = 10.0
     var idleMinutes = 15 {
         didSet { persist() }
     }
 
     var pod: RentedPod? {
-        didSet { sleepGuard.hold(!demoMode && pod?.isRunning == true) }
+        didSet {
+            sleepGuard.hold(!demoMode && pod?.isRunning == true)
+            if oldValue?.id != pod?.id { captionServerActive = nil }
+            if pod?.isRunning == false { captionServerActive = false }
+        }
     }
 
     var plan: TrainingPlan?
+    /// nil until this computer's service list has been read; never inferred from the GPU count.
+    var captionServerActive: Bool?
     var storage: AgentStorageUsage?
     var message = "Refresh available computers to see current prices."
     var isBusy = false
@@ -38,9 +45,20 @@ final class GPUWorkspace {
     var baseModel = "black-forest-labs/FLUX.1-dev"
     var steps = 200
     var rank = 16
+    var alpha = 16
+    var batchSize = 1
+    var accumulation = 1
+    var nativeRecipe: NativeTrainingRecipe?
+    var nativeRecipeOriginal: URL?
+    var initialCheckpoint: URL?
     var learningRate = 0.0001
     /// Training resolution in pixels; one of `resolutionChoices`. Shown under Advanced.
-    var resolution = 512
+    var trainingResolutions = [512]
+    var resolution: Int {
+        get { trainingResolutions.max() ?? 512 }
+        set { trainingResolutions = [newValue] }
+    }
+
     /// Sample images during training. Off by default: sample generation is unverified (POD-SPEC 4.2).
     var samplesEnabled = false
     /// Model repos created for results are private unless the user turns this off.
@@ -273,6 +291,7 @@ final class GPUWorkspace {
                 storage = try? await agent.storageUsage()
             }
             let services = try await agent.services()
+            updateCaptionServerState(services)
             agentAnswered = true
             if message.hasPrefix("Your computer is rented and its control agent is connecting.") {
                 message = "Your computer is connected and ready. "
@@ -348,7 +367,9 @@ final class GPUWorkspace {
             saved.idleMinutes = idleMinutes
             saved.points = points
             saved.result = result
-            saved.run = runHistory.first(where: { $0.runID == runID })
+            if let run = runHistory.first(where: { $0.runID == runID }) {
+                saved.run = run
+            } else if saved.run?.runID != runID { saved.run = nil }
             saved.generation = generation
             self.saved = saved
             if !demoMode, let data = try? JSONEncoder().encode(saved) {
@@ -374,7 +395,9 @@ final class GPUWorkspace {
         guard let agent else { return }
         while true {
             try Task.checkCancellation()
-            let service = try await agent.services().first(where: { $0.name == name })
+            let services = try await agent.services()
+            updateCaptionServerState(services)
+            let service = services.first(where: { $0.name == name })
             if let service, !service.active {
                 guard service.state == "exited" || (allowStopped && service.state == "stopped") else {
                     throw StudioError
@@ -412,11 +435,15 @@ extension GPUWorkspace {
     func enforceLimits(now: Date = Date()) async throws {
         guard let saved, hasRunningPod else { return }
         elapsedCost = max(0, now.timeIntervalSince(saved.started)) / 3600 * saved.hourlyRate
-        if elapsedCost >= saved.budget {
+        let exceededRun = activeBudgetedRun.flatMap { run in
+            run.gpuBudgetUSD.map { currentRunCost(run, podCost: elapsedCost) >= $0 }
+        } == true
+        if elapsedCost >= saved.budget || exceededRun {
             let stranded = resultNeedsSaving
             await stopEverything(discardingPendingResult: true)
             if !hasRunningPod {
-                message = "Your spending limit was reached. The GPU is stopped."
+                message = (exceededRun ? "This training run's budget was reached."
+                    : "Your computer's spending limit was reached.") + " The GPU is stopped."
                     + (stranded ? " Your model and generated files stay on your network storage; rent a computer "
                         + "on the same storage to retrieve them." : "")
             }
@@ -508,28 +535,6 @@ extension GPUWorkspace {
 }
 
 extension GPUWorkspace {
-    static let minimumGPUMemoryGB = 32
-    nonisolated static let resolutionChoices = [512, 768, 1024]
-
-    /// Host CUDA floor per trainer image, from pod/images/README.md "CUDA and drivers": the
-    /// ai-toolkit image carries cu130 wheels and the LTX image cu132 wheels, both needing an R580+
-    /// driver, which RunPod reports as CUDA 13.0. The base image alone (vLLM cu129 on CUDA 12.8.1)
-    /// would run on 12.x, but the app only rents trainer images.
-    nonisolated static let minimumCUDAByTrainer = ["aitoolkit": "13.0", "ltx": "13.0"]
-
-    nonisolated static func minimumCUDA(_ trainer: String) -> String {
-        minimumCUDAByTrainer[trainer] ?? "13.0"
-    }
-
-    /// 256 random bits from the system CSPRNG, hex encoded: the pod agent's bearer and vLLM key.
-    nonisolated static func newAgentToken() throws -> String {
-        var bytes = [UInt8](repeating: 0, count: 32)
-        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
-            throw StudioError.message("Your Mac could not generate a key for the computer. Try again.")
-        }
-        return bytes.map { String(format: "%02x", $0) }.joined()
-    }
-
     func noteActivity() {
         lastActivity = Date()
     }
@@ -540,7 +545,7 @@ extension GPUWorkspace {
 
     var availableOffers: [GPUOffer] {
         guard let volume = volumes.first(where: { $0.id == selectedVolume }) else { return [] }
-        return offers.filter { $0.memory >= Self.minimumGPUMemoryGB && $0.isAvailable(in: volume.dataCenter) }
+        return offers.filter { $0.memory >= requiredGPUMemoryGB && $0.isAvailable(in: volume.dataCenter) }
     }
 
     func selectAvailableOffer() {

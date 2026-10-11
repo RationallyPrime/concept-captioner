@@ -198,9 +198,22 @@ training-quality measurements.
 Coverage that remains open:
 
 - Base-image inference on an R570-class driver; observed trainer hosts used CUDA 13.0 drivers.
-- H3-specific AI Toolkit keys, parquet datasets and GPU configurations beyond those recorded.
+- New H3 training/clip/warm-start/generation code is source-verified with CPU/fake-runtime
+  controls; it is not included in the current clean tag and has no hosted H3 acceptance.
+- Parquet datasets and GPU configurations beyond those recorded.
 - Recovery after a real agent or vLLM-worker crash. `tini -s` is installed and supervisor
   process-group ownership is tested, but actual crash/reaping recovery has not been forced.
 - Fresh empty-cache LTX Hub download through the revision-pinned wrapper. This round reused
   the existing network-volume model cache; the source validation and download-failure paths
   have focused tests.
+
+### H3 source addition (not yet built/published)
+
+The next image must include the H3 helpers and the shared recipe/asset JSON COPY from the
+native resource. AI Toolkit remains pinned to `f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47`;
+no dependency/toolchain pin changed in this round. H3 model binaries download at runtime
+from `Comfy-Org/MiniMax-H3` revision `e5eb578a89295337b8ff433a035929ce0279e0b6`, and its
+frozen training adapter from `circlestone-labs/MiniMax-H3-Image-Training-Adapter` revision
+`7c6c04f75ba597232d4ce2bb4a14709948ec723a`. Filename choices are defined once in the shared
+resource. These are BF16 quality assets, not a small-memory H3 recipe. No H3 GPU/RAM fit or
+new image deployment has been measured in this source-only phase.

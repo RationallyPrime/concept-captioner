@@ -6,8 +6,6 @@ struct MappingView: View {
     @State private var locators: [String: String] = [:]
     @State private var enabled: Set<String> = []
     @State private var onlyUnmapped = false
-    /// The editor holds a model or on-device suggestion rather than a confirmed mapping.
-    @State private var fromSuggestion = false
     /// The person changed the editor since it was filled; a late suggestion must not overwrite that.
     @State private var edited = false
     /// Height of the photo detail's scroll area; below `shortDetail` the photo moves beside the subjects.
@@ -62,10 +60,16 @@ struct MappingView: View {
                         session.proposeMappings(useModel: true)
                     }
                 }.disabled(session.busy)
-                Text(session.demoMode ? "The demo uses prepared assignments. No recognition model is called." :
+                Text(session.demoMode ? "The demo model uses prepared assignments. "
+                    + "Reference-face comparison runs on this Mac." :
                     "Mac suggestions stay on this device. "
                     + "Asking the model uses your selected provider and may use account credits.")
                     .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                if session.project?.images.contains(where: { Sources.isVideo(Sources.suffix(of: $0.id)) }) == true {
+                    Text("Reference-face comparison uses still images. For clips, request assignments "
+                        + "from the model or enter locations yourself.")
+                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                }
             }
             Divider()
             HSplitView {
@@ -82,13 +86,7 @@ struct MappingView: View {
                     if let image = selectedImage {
                         VStack(alignment: .leading, spacing: 20) {
                             Text(image.id).font(.title3.weight(.semibold)).textSelection(.enabled)
-                            if fromSuggestion {
-                                StudioNotice(
-                                    "Filled in from a suggestion. Check every concept against this image or clip, "
-                                        + "then confirm the assignment.",
-                                    symbol: "person.crop.rectangle.badge.checkmark"
-                                )
-                            }
+                            suggestionResult(for: image)
                             // In a short window the photo sits beside the subjects, so what a suggestion filled
                             // in is in view above the pinned Confirm bar next to the photo it describes.
                             if detailHeight < shortDetail {
@@ -127,13 +125,33 @@ struct MappingView: View {
     }
 
     private func rowStatus(_ image: ProjectImage) -> Label<Text, Image> {
+        if let result = suggestionConclusion(for: image.id) {
+            return Label(result.rowTitle, systemImage: result.symbol)
+        }
         if session.project?.job.mapping(for: image.id) != nil {
             return Label("Confirmed", systemImage: "checkmark.circle.fill")
         }
-        if session.mappingProposals[image.id] != nil {
-            return Label("Suggested · check it", systemImage: "sparkles")
-        }
         return Label("Unconfirmed", systemImage: "circle")
+    }
+
+    private func suggestionConclusion(for id: String) -> MappingSuggestionConclusion? {
+        MappingSuggestionConclusion.compare(
+            proposal: session.mappingProposals[id], confirmed: session.project?.job.mapping(for: id),
+            locatorTriggers: Set(locatorConcepts.map(\.trigger))
+        )
+    }
+
+    @ViewBuilder
+    private func suggestionResult(for image: ProjectImage) -> some View {
+        if let result = suggestionConclusion(for: image.id), let proposal = session.mappingProposals[image.id] {
+            VStack(alignment: .leading, spacing: 8) {
+                StudioNotice(result.message, symbol: result.symbol)
+                ForEach(locatorConcepts.filter { proposal[$0.trigger] != nil }, id: \.trigger) { concept in
+                    Text("Suggested location for \(concept.trigger): \(proposal[concept.trigger] ?? "")")
+                        .font(.callout).foregroundStyle(StudioStyle.supportingText).textSelection(.enabled)
+                }
+            }
+        }
     }
 
     private func photo(_ image: ProjectImage) -> some View {
@@ -252,7 +270,57 @@ struct MappingView: View {
         let suggestion = confirmed == nil ? session.mappingProposals[id] : nil
         locators = Dictionary(uniqueKeysWithValues: (confirmed ?? suggestion ?? [:]).map { ($0.key, $0.value) })
         enabled = Set(locators.keys).intersection(locatorConcepts.map(\.trigger))
-        fromSuggestion = suggestion != nil
         edited = false
+    }
+}
+
+/// Compares concept presence, not arbitrary locator prose or a calibrated identity score.
+enum MappingSuggestionConclusion: Equatable {
+    case agrees, differs, confirmedNoMatch, suggested, noMatch
+
+    static func compare(
+        proposal: Job.Mapping?, confirmed: Job.Mapping?, locatorTriggers: Set<String>
+    ) -> Self? {
+        guard let proposal else { return nil }
+        let proposed = Set(proposal.keys).intersection(locatorTriggers)
+        if proposed.isEmpty { return confirmed == nil ? .noMatch : .confirmedNoMatch }
+        guard let confirmed else { return .suggested }
+        return proposed == Set(confirmed.keys).intersection(locatorTriggers) ? .agrees : .differs
+    }
+
+    var rowTitle: String {
+        switch self {
+        case .agrees: "Confirmed · suggestion agrees"
+        case .differs: "Confirmed · suggestion differs"
+        case .confirmedNoMatch: "Confirmed · no confident suggestion"
+        case .suggested: "Suggested · check it"
+        case .noMatch: "No confident suggestion"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .agrees: "checkmark.circle"
+        case .differs: "arrow.triangle.branch"
+        case .confirmedNoMatch, .noMatch: "person.crop.rectangle"
+        case .suggested: "sparkles"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .agrees:
+            "The suggestion agrees with your confirmation about which concepts are present. "
+                + "Check the suggested locations below; your confirmed locations are unchanged."
+        case .differs:
+            "The suggestion differs from your confirmed concepts. Your confirmed locations are kept. "
+                + "Review this sample before changing them."
+        case .confirmedNoMatch:
+            "No confident assignment was suggested. Your confirmed locations are kept."
+        case .suggested:
+            "Review the suggested locations against this sample, then confirm the assignments you choose."
+        case .noMatch:
+            "No confident assignment was suggested. Enter the visible concepts and their locations, then confirm."
+        }
     }
 }

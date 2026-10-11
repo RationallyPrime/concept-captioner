@@ -1,0 +1,104 @@
+{
+  "model": [
+    "name_or_path",
+    "arch",
+    "quantize",
+    "quantize_te",
+    "low_vram",
+    "layer_offloading",
+    "layer_offloading_percent",
+    "dtype",
+    "model_kwargs",
+    "use_training_adapter"
+  ],
+  "model.model_kwargs": [
+    "partition",
+    "max_text_length",
+    "sample_audio"
+  ],
+  "network": [
+    "type",
+    "linear",
+    "linear_alpha",
+    "conv",
+    "conv_alpha",
+    "dropout",
+    "transformer_only",
+    "network_kwargs"
+  ],
+  "network.network_kwargs": [
+    "only_if_contains",
+    "ignore_if_contains"
+  ],
+  "train": [
+    "train_unet",
+    "train_text_encoder",
+    "gradient_checkpointing",
+    "noise_scheduler",
+    "timestep_type",
+    "optimizer",
+    "optimizer_params",
+    "lr_scheduler",
+    "lr_scheduler_params",
+    "dtype",
+    "do_guidance_loss",
+    "cache_text_embeddings",
+    "skip_first_sample",
+    "force_first_sample",
+    "audio_loss_multiplier",
+    "ema_config",
+    "do_differential_guidance"
+  ],
+  "train.optimizer_params": [
+    "weight_decay",
+    "betas",
+    "eps"
+  ],
+  "train.lr_scheduler_params": [
+    "num_warmup_steps"
+  ],
+  "train.ema_config": [
+    "use_ema",
+    "ema_decay"
+  ],
+  "dataset": [
+    "caption_dropout_rate",
+    "shuffle_tokens",
+    "cache_latents_to_disk",
+    "cache_text_embeddings",
+    "num_workers",
+    "pin_memory",
+    "num_repeats"
+  ],
+  "asset.dit_fl2va_pruned_path": [
+    "diffusion_models/minimax_h3_fl2va_pruned_bf16.safetensors"
+  ],
+  "asset_fields.dit_fl2va_pruned_path": [
+    "model.model_kwargs.dit_fl2va_pruned_path"
+  ],
+  "asset.text_encoder_path": [
+    "text_encoders/qwen3vl_32b_minimax_h3_bf16.safetensors"
+  ],
+  "asset_fields.text_encoder_path": [
+    "model.te_name_or_path",
+    "model.model_kwargs.text_encoder_path"
+  ],
+  "asset.video_vae_path": [
+    "vae/minimax_h3_video_vae_fp16.safetensors"
+  ],
+  "asset_fields.video_vae_path": [
+    "model.model_kwargs.video_vae_path"
+  ],
+  "asset.audio_vae_path": [
+    "vae/minimax_h3_audio_vae_fp32.safetensors"
+  ],
+  "asset_fields.audio_vae_path": [
+    "model.model_kwargs.audio_vae_path"
+  ],
+  "asset.assistant_lora_path": [
+    "minimax_h3_image_training_adapter.safetensors"
+  ],
+  "asset_fields.assistant_lora_path": [
+    "model.assistant_lora_path"
+  ]
+}

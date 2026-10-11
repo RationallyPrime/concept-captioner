@@ -6,6 +6,70 @@ import Testing
 @Suite("mapping workflow")
 @MainActor
 struct MappingWorkflowTests {
+    @Test func comparisonResultsKeepHumanMappingsAndIncludeNoMatchSamples() async throws {
+        var project = try await makeDemoProject()
+        defer { try? FileManager.default.removeItem(at: project.directory) }
+        project.job = try Job(concepts: [
+            Concept(trigger: "STYLE8", targetConcept: .style), Concept(trigger: "PERSON8"),
+            Concept(trigger: "OTHER8"), Concept(trigger: "MOVE8", targetConcept: .motion),
+        ])
+        let images = project.images
+        #expect(images.count == 3)
+        let human = project.job.mappingIncludingWholeTargets(["PERSON8": "the person on the left"])
+        for image in images {
+            try project.job.setMapping(human, for: image.id)
+        }
+        try project.save()
+        let savedBytes = try Data(contentsOf: project.jobURL)
+        let defaults = IsolatedDefaults()
+        defer { defaults.remove() }
+        let session = StudioSession(preferences: defaults.defaults, secrets: MemorySecretStore())
+        session.project = project
+        let agreed = try #require(images.first?.id)
+        let different = images[1].id
+        let unmatched = images[2].id
+        // Vision emits only confident matches. Its omitted sample must still receive a visible conclusion.
+        session.receiveMappingSuggestions([
+            agreed: ["PERSON8": "face 2, counted from left to right"],
+            different: ["OTHER8": "face 1, counted from left to right"],
+            "uncompared.mp4": ["PERSON8": "the person in the clip"],
+        ], sampleIDs: images.map(\.id))
+        let triggers: Set = ["PERSON8", "OTHER8"]
+        func result(_ id: String) -> MappingSuggestionConclusion? {
+            MappingSuggestionConclusion.compare(
+                proposal: session.mappingProposals[id], confirmed: session.project?.job.mapping(for: id),
+                locatorTriggers: triggers
+            )
+        }
+        #expect(result(agreed) == .agrees)
+        #expect(result(agreed)?.message
+            .contains("agrees with your confirmation about which concepts are present") == true)
+        #expect(session.mappingProposals[agreed]?["PERSON8"] == "face 2, counted from left to right")
+        #expect(result(different) == .differs)
+        #expect(session.mappingProposals[unmatched] == [:])
+        #expect(result(unmatched) == .confirmedNoMatch)
+        #expect(session.mappingProposals["uncompared.mp4"] == nil)
+        for image in images {
+            #expect(session.project?.job.mapping(for: image.id) == human)
+        }
+        #expect(try Data(contentsOf: project.jobURL) == savedBytes)
+        #expect(try Job.load(contentsOf: project.jobURL) == project.job)
+    }
+
+    @Test func unconfirmedComparisonDistinguishesPendingEmptyAndSuggestedResults() {
+        let triggers: Set = ["PERSON8"]
+        #expect(MappingSuggestionConclusion.compare(proposal: nil, confirmed: nil, locatorTriggers: triggers) == nil)
+        #expect(MappingSuggestionConclusion
+            .compare(proposal: [:], confirmed: nil, locatorTriggers: triggers) == .noMatch)
+        #expect(MappingSuggestionConclusion.compare(
+            proposal: ["PERSON8": "face 1"], confirmed: nil, locatorTriggers: triggers
+        ) == .suggested)
+        #expect(MappingSuggestionConclusion.compare(
+            proposal: ["STYLE8": "the whole image"], confirmed: ["PERSON8": "the person", "STYLE8": "the whole image"],
+            locatorTriggers: triggers
+        ) == .confirmedNoMatch)
+    }
+
     @Test(arguments: [TargetConcept.style, .motion])
     func approvingWholeTargetConceptKeepsAutomaticAssignment(_ category: TargetConcept) async throws {
         var project = try await makeDemoProject()

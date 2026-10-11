@@ -132,6 +132,7 @@ _TOP_KEYS = frozenset(
         "hf_token",
         "extra",
         "resume",
+        "initialization",
     }
 )
 _REQUIRED_KEYS = ("run_id", "dataset", "triggers", "base_model")
@@ -303,6 +304,13 @@ def validate_run_config(
         errors.append("extra: must be an object")
         extra = {}
     cfg["extra"] = extra
+    cfg["initialization"] = raw.get("initialization")
+    if cfg["initialization"] is not None:
+        helper = runpy.run_path(str(Path(__file__).with_name("h3_recipe.py")))
+        try:
+            helper["validate_initialization"](cfg["initialization"])
+        except ValueError as error:
+            errors.append(str(error))
     cfg["resume"] = raw.get("resume", False)
     if not isinstance(cfg["resume"], bool):
         errors.append("resume: must be true or false")
@@ -1178,6 +1186,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         run_dir, cfg = load_run(Path(args.config), restore_missing_dataset=not args.dry_run)
+        if cfg.get("initialization") is not None:
+            raise ConfigError("External initial LoRA weights currently support AI Toolkit H3 only")
         source_cfg = cfg
         cfg = resolve_hub_model(cfg)
         entries, skipped = build_dataset_entries(

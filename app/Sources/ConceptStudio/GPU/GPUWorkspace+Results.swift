@@ -467,6 +467,9 @@ extension GPUWorkspace {
     }
 
     func loadProjectRecord() {
+        nativeRecipe = nil
+        nativeRecipeOriginal = nil
+        initialCheckpoint = nil
         runHistory = []
         generations = []
         selectedHistoryRunID = ""

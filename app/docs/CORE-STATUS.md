@@ -32,7 +32,9 @@ All nine modules of CORE-SPEC, with focused tests:
 - Local and Hub imagefolder inputs retain clips as clips. `UserContent.video` carries the full
   approved target to Gemini routes, OpenRouter and vLLM. Unsupported native
   transports reject video before network use; no poster-frame fallback implies motion evidence.
-- The LTX video profile describes action over the exact chosen segment. Image and video
+- The LTX and H3 video profiles describe action over the exact chosen segment. The bundled
+  `h3-video` profile is identical in Swift and Python and retains the three H3 text fields;
+  mixed datasets use the unchanged `h3-still` instructions for still images. Image and video
   prompts distinguish the attached evidence; video audio is not assumed inspected.
 - HEIC/TIFF normalization and editing happen in the app before the core captions a target.
   Only included targets reach publication and training.
@@ -64,8 +66,9 @@ All nine modules of CORE-SPEC, with focused tests:
 
 ## Verified offline only
 
-- **260 Core tests in 38 suites pass** in the review-repair integration gate. The Python
-  reference suite passes **116 tests** after the mixed-metadata and unrelated-Parquet closures. These are offline
+- **260 Core tests in 38 suites pass** in the latest walkthrough/H3/help integration gate. The Python
+  reference suite passes **117 tests**, including the H3 clip-profile addition after the
+  mixed-metadata and unrelated-Parquet closures. These are offline
   checks. Native-media and category cases include exact video bytes, 24 fps metadata,
   OpenRouter/vLLM video wire bodies, encoded-size refusal and all seven categories in both
   media modes. Strict lint and format are clean.

@@ -3,6 +3,7 @@ import SwiftUI
 struct WelcomeView: View {
     @Bindable var session: StudioSession
     @State private var showRetainedComputer = false
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         ScrollView {
@@ -42,6 +43,13 @@ struct WelcomeView: View {
             Text("ConceptStudio")
                 .font(.system(size: 36, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
+            Text(
+                "Use your photos or clips to teach an image or video model a person, an object, a style or a movement."
+            )
+            .fixedSize(horizontal: false, vertical: true)
+            Text("Create a project folder to keep its training data, captions and saved runs together, "
+                + "or open a project you have already started. The Images screen explains the training process.")
+                .foregroundStyle(StudioStyle.supportingText).fixedSize(horizontal: false, vertical: true)
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 10) { startButtons }
                 VStack(alignment: .leading, spacing: 10) { startButtons }
@@ -52,8 +60,8 @@ struct WelcomeView: View {
                 .fixedSize(horizontal: false, vertical: true)
             SettingsLink { Label("Accounts & settings", systemImage: "gearshape") }
                 .help("Opens account authorization, saved keys and model connection settings.")
-            Divider()
-            StudioIntroduction(preferences: session.preferences)
+            Button("ConceptStudio Help", systemImage: "questionmark.circle") { openWindow(id: "help") }
+                .help("Open the training explanation and definitions without opening a project.")
         }
     }
 
@@ -123,11 +131,17 @@ struct WelcomeView: View {
                         Button { session.openRecent(path) } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: "folder").foregroundStyle(StudioStyle.accent)
-                                Text(URL(fileURLWithPath: path).lastPathComponent).fontWeight(.medium)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(URL(fileURLWithPath: path).lastPathComponent).fontWeight(.medium)
+                                    Text(RecentProjects.parentLabel(path))
+                                        .font(.caption).foregroundStyle(StudioStyle.supportingText)
+                                        .lineLimit(1).truncationMode(.middle)
+                                }
                                 Spacer()
                                 Image(systemName: "chevron.right").font(.caption)
                                     .foregroundStyle(StudioStyle.supportingText)
                             }.padding(.vertical, 10).contentShape(Rectangle())
+                                .accessibilityElement(children: .combine)
                         }.buttonStyle(.plain).help(path).disabled(session.busy)
                         Button("Remove from recent projects", systemImage: "xmark") {
                             session.forgetRecent(path)

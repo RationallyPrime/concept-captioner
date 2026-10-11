@@ -38,6 +38,14 @@ demo so an iCloud Photos download cannot be triggered there.
 
 Close the project to return to Welcome. Open or create a project to leave demo mode.
 
+The full training explanation is on Images in both demo and real projects; its disclosure
+remembers whether you left it open. Welcome gives a short orientation rather than repeating
+that text. **Definitions** on each screen explains terms used there: hover over a term,
+select it, or focus its button with the keyboard. Space or Return opens the definition;
+Escape closes it. Settings, Advanced training, media/concept editors, saved runs and
+generation use the same definitions. **Help → ConceptStudio Help** (⌘?) opens the searchable
+catalog and full introduction at any time, including before opening a project.
+
 ## A real project
 
 Create a project in a folder you choose. Images and clips are copied to `images/`; `job.yaml` and caption
@@ -113,22 +121,27 @@ Hub datasets are not supported by the Swift app.
 Inspect and crop shows the actual crop before approval. Approval replaces the training target
 and clears its old caption and subject assignment so they can be reviewed again. Style and
 motion are reassigned automatically. For video, choose Start time and Duration, then preview
-the segment. Advanced: Exact frames and size exposes frame indices, supported frame counts
-(9–257, in steps of eight) and maximum width or height. Approval preserves the selected frame
+the segment. Choose its training model before approval. Advanced: Exact frames and size
+exposes frame indices, supported frame counts and maximum width or height. LTX accepts
+9–257 frames in steps of eight; H3 accepts 5–243 frames in steps of seventeen at exactly
+24 fps. Approval preserves the selected frame
 timing and full visible scene, fits dimensions to the trainer's alignment, and writes the exact
 MP4 that captioning and training consume. Inspect the frames or play the approved clip.
 
 Selected portions with variable frame timing are refused for LTX training because the current
 trainer would discard that timing. Choose a constant-frame-rate portion; the app does not retime
-it silently. Gemini routes support inline video; OpenRouter and vLLM accept a video content
+it silently. H3 also refuses other frame rates, including 23.976 fps. Gemini routes support inline video; OpenRouter and vLLM accept a video content
 part when the selected model supports it. OpenAI and Anthropic refuse clips before sending.
 Python uses pydantic-ai for Gemini/OpenRouter and explicitly refuses vLLM video until that
 library supports the route. Both clients refuse encoded video request bodies of 20 MiB or more,
 including prompts, schema and retry history. See the route table in [CORE-SPEC](CORE-SPEC.md).
 Gemini receives the complete clip with sampling set to 24 frames per second; this does not mean
-that every source frame above 24 fps is observed. Select the LTX video caption format for clip
-training. LTX derives preprocessing buckets from the approved targets; it does not silently
-shorten the chosen segment or crop it to a different aspect ratio.
+that every source frame above 24 fps is observed. Approving a segment selects the matching
+LTX or H3 video caption format. Other saved captions retain their text; review or re-caption
+them when changing formats. LTX derives preprocessing buckets from the approved targets.
+H3 groups clips by their exact frame counts and uses a resolution cap large enough to retain
+their approved dimensions. Neither route silently shortens an approved segment or changes
+its aspect ratio.
 
 Hosted captioning requires no GPU rental. To caption with a local model, choose **Rent or
 choose a captioning computer** on Captioning, rent one on GPU pods, then return and choose
@@ -139,12 +152,30 @@ starting training on a one-GPU computer. ConceptStudio automatically selects the
 training image for the chosen trainer. A custom training image is optional in Advanced
 Settings; clearing the override and saving restores the included image.
 
-The included models use GPUs with at least 32 GB of memory. The app also requests at least
+FLUX and LTX offers use GPUs with at least 32 GB of memory. H3's BF16 recipe uses a 96 GB
+GPU as its known reference; the app checks the connected computer's actual GPU inventory
+before transferring training inputs. This is an admission requirement, not a guarantee that
+every H3 batch or resolution will fit. The app also requests at least
 60 GB of host RAM per GPU for model loading. Its LTX defaults use 8-bit text-encoder loading,
 quantized training, an 8-bit optimizer and tiled image preparation. A two-step 512-pixel,
 rank-16 LTX run succeeded on one 32 GB GPU with a 125 GB host; a smaller 256-pixel, rank-2 run
 succeeded with a 62 GB host. Those checks establish execution, not training quality or a
 universal memory guarantee for other models and datasets.
+
+For an existing H3 LoRA, import its native AI Toolkit recipe on Training, then choose its
+`.safetensors` starting weights. The app copies both into the project. Supported model
+components are downloaded at pinned revisions; old pod paths and run counters are not
+reused. The imported optimizer, precision and trained-layer selection remain part of the
+recipe. Set the new run's length and review its displayed settings before starting. This
+starts a new run at step zero with the selected project's dataset and fresh optimizer state.
+If you close the project before starting that run, select the recipe and starting weights
+again when you reopen it; the copied files remain, but the unsubmitted selection is not restored.
+**Resume latest checkpoint** instead continues a saved run on its original storage using
+that run's checkpoint and state.
+
+The current published `v0.2.2-clean-20261011` image predates these H3 additions. An updated
+AI Toolkit image is required before exercising H3 training or generation; source tests and
+clip inspection do not establish successful GPU execution.
 
 With a configured Hub token, publishing sends included training targets and saved sidecars at the dataset root, imagefolder metadata, and
 `concept-captioner/job.yaml` in one Hub commit. The image names remain the shared sample IDs.
@@ -155,12 +186,18 @@ Without a Hub token, Publish shows **Check training data**. It checks the includ
 saved captions locally. **Start training** then captures a temporary immutable copy, uploads
 files directly through the authenticated pod agent and waits for dataset installation before
 launching the trainer. Each file is limited to 2 GiB and the dataset to 20 GiB. Editing is held
-only while the copies are captured. This requires the updated agent; published r2 images
-predate the upload route. No Hub dataset account is needed, but access requirements for a
+only while the copies are captured. The default `v0.2.2-clean-20261011` agent includes this
+route; older r2 images do not. No Hub dataset account is needed, but access requirements for a
 gated base model such as FLUX.1-dev still apply.
 
 GPU rental displays
-prices and a budget before creation. Stop everything cancels local work, waits for it to
+prices and a whole-computer budget before creation. Training also has a separate per-run
+budget, recorded before input transfer and preparation. A new run starts a new spend total;
+Resume retains the run's cap and adds the cost of its continuation. Raise a saved run's
+budget explicitly before continuing one that has reached its limit. Either the rental cap
+or the active run cap stops the computer; both use GPU cost estimates and exclude storage.
+These guards run while ConceptStudio is open on an awake Mac.
+Stop everything cancels local work, waits for it to
 settle and stops the rented computer. Close and quit warn while work or a computer is active;
 the project remains open if a stop cannot be confirmed. Stopping clears the temporary container
 disk; datasets and checkpoints on separate network storage remain, and that storage remains
@@ -183,7 +220,8 @@ Checkpoints, generated results and model caches remain. There is no cleanup time
 ### Try a trained result and reuse a run
 
 Monitor → Generated results can generate a matched base-versus-LoRA comparison for the
-supported FLUX.1-dev and LTX-2 routes. Select an available checkpoint, enter prompts and seeds,
+supported FLUX.1-dev, LTX-2 and H3 routes. H3 offers still images or video, including for a
+LoRA trained on still images. Select an available checkpoint, enter prompts and seeds,
 and generate. Both sides use the same inputs; the LoRA is the changed variable. Results are
 saved in the project gallery. A failed/incomplete comparison keeps downloaded partial files and
 shows a failure message; it is not presented as a saved complete pair. Unsupported model/trainer combinations show an explanation.

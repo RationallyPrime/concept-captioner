@@ -447,7 +447,9 @@ sidecar, `metadata.jsonl` and `job.yaml` as a binary body. The agent checks the 
 reading the body, just as for existing routes. `name` uses the dataset-name pattern in 3.4;
 `file_name` is a single basename, never an absolute path or a path with separators, NUL or dot
 segments. Allowed names are supported media suffixes from 7.1, their `.txt`/`.json` sidecars,
-and the two named dataset files. The destination is only `/workspace/uploads/<name>/`;
+and the two named dataset files. The exact initializer slots `initial-lora.safetensors` and
+`initial-recipe.json` are also admitted, in a separate stage as described in 4.3. Other
+`.safetensors` upload names are refused. The destination is only `/workspace/uploads/<name>/`;
 symlinks and resolved paths outside that staging directory are refused. It cannot overwrite
 run files, models, logs or another arbitrary workspace path.
 
@@ -605,15 +607,19 @@ they expose no port and use the same supervisor/GPU reservation as training. The
 | `width`, `height` | integers 64–2048, each a multiple of 32 | 512, 512 |
 | `inference_steps` | integer 1–100 | 20 |
 | `guidance_scale` | number 0–20 | 4 |
-| `num_frames` | integer 1–257 with `num_frames % 8 == 1`; FLUX requires 1 | 1 |
-| `frame_rate` | number greater than 0 and at most 60 | 24 |
+| `num_frames` | integer 1–257; FLUX requires 1, LTX requires 8n+1, H3 accepts 1 or 17n+5 (5–243) | 1 |
+| `frame_rate` | number greater than 0 and at most 60; H3 requires exactly 24 | 24 |
 
 Validation refuses an existing generation directory and an unavailable source config or
 checkpoint before `prepare()` creates anything. Prompt override refusal preserves identical
 requested settings for both arms; prompts are argv values, never shell input.
 
-Only `black-forest-labs/FLUX.1-dev` on AI Toolkit and `Lightricks/LTX-2` on LTX are
-implemented. Other families return `422 invalid_params` before creating a generation run.
+`black-forest-labs/FLUX.1-dev` and `Comfy-Org/MiniMax-H3` on AI Toolkit, and
+`Lightricks/LTX-2` on LTX are implemented in source. Other families return
+`422 invalid_params` before creating a generation run. H3 also requires the source run’s
+saved `native-config.json`; preparation captures it as private `source-native-config.json`.
+Its training dataset may contain stills, clips or both; output choice is independent: 1 frame
+produces PNG, 17n+5 frames produce MP4 at 24 fps.
 The checkpoint must be a regular, non-symlink `.safetensors` output of the source run.
 Preparation captures `source-run.json` and `selected-checkpoint.safetensors` privately in the
 new run directory. `generation.json` contains the validated/defaulted request fields above
@@ -632,12 +638,14 @@ log is `trainer.log`, and the existing authenticated file APIs serve only `outpu
 | `base_model` | supported source run base model ID |
 | `upstream_revision` | pinned inference implementation revision |
 | `source_config` | captured source `run.json`, with top-level credential fields removed |
+| `effective_native_config` | H3 only: allowlisted effective model/network/train quality settings and per-dataset frame/fps/resolution settings; private paths omitted |
+| `comparison_training_adapter` | H3 only: false; the frozen training assistant is omitted from both inference arms |
 | `state` | `generating`, `complete`, or `failed` |
 | `pairs` | list of `{prompt, seed, base_path, lora_path}` |
 
 Pairs enumerate prompts in request order, with seeds in request order inside each prompt.
 Paths are relative to this run's `output/`: `pair-000-base.png` / `pair-000-lora.png` for
-FLUX, or the same names with `.mp4` for LTX, then index 001 onward. `complete` is written
+FLUX or H3 stills; `.mp4` for LTX or H3 video, then index 001 onward. `complete` is written
 only after every expected file exists. Exceptions inside the inference block write `failed`
 and retain available outputs. Current pre-inference validation failures can precede manifest
 creation; this is not a successful empty comparison.
@@ -718,9 +726,9 @@ cause a clear refusal, never a pull of current `main`. Local mode recovery is de
 | field | required | default | meaning |
 | --- | --- | --- | --- |
 | `run_id` | yes | | `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`; names `/workspace/runs/<id>` |
-| `dataset.path` | yes | | must resolve under `/workspace/datasets/`; images + `<stem>.<caption_ext>` sidecars (what `pull_dataset.py` produces) |
+| `dataset.path` | yes | | must resolve under `/workspace/datasets/`; approved images/clips + `<stem>.<caption_ext>` sidecars (what `pull_dataset.py` produces) |
 | `dataset.caption_ext` | no | `txt` | |
-| `triggers` | yes | | ≥ 1; the first is the trainer's "trigger word" where the trainer has one |
+| `triggers` | yes | | ≥ 1; preserved as run metadata; captions contain their actual mapped concepts. No global first-trigger injection |
 | `profile` | no | null | informational: which caption profile produced the captions; stored in `run.json` and the model card |
 | `base_model` | yes | | Hub id or `/workspace/models/<dir>`. No default: the H3 vs FLUX vs LTX choice is the user's |
 | `steps` | no | 2000 | |
@@ -731,6 +739,7 @@ cause a clear refusal, never a pull of current `main`. Local mode recovery is de
 | `gradient_accumulation` | no | 1 | |
 | `seed` | no | 42 | |
 | `resume` | no | false | true opts into saved settings/checkpoint validation before service start; it keeps the same run ID and dataset |
+| `initialization` | no | null | AI Toolkit H3 new-run preload: `{name,lora_sha256,recipe_sha256}` identifies the two fixed staged artifacts; never a client filesystem path |
 | `save_every` / `sample_every` | no | 250 / 250 | 0 disables samples |
 | `sample_prompts` | no | `[]` | each should contain a trigger; the wrapper does not enforce it |
 | `hub` | no | null | `repo_id`, `private` (true), `push_on_finish` (false → push is a separate `push-lora` start) |
@@ -756,21 +765,23 @@ the final LoRA), `samples/`.
 
 User-supplied: `run_id`, `dataset.path`, `triggers`, `base_model`, `hub.repo_id` (if pushing).
 Everything else has a default a first-time user can accept. The defaults above are the
-conventional FLUX-LoRA starting point from ai-toolkit's example configs; they are not tuned for
-H3 or LTX and the wrappers must not pretend otherwise.
+conventional FLUX-LoRA starting point from ai-toolkit's example configs. H3 has the explicit
+BF16 quality recipe and target-driven grouping below. Native LTX uses its measured memory
+preset. None is a universal fit or training-quality promise.
 
 **Live evidence and remaining uncertainty** (full receipts and exact image revisions are in
 `POD-STATUS.md`):
 
-- ai-toolkit: the config keys for the MiniMax H3 model family (`model.arch`/`name_or_path`,
-  quantization flags) and semantic treatment of `trigger_word` remain unverified. The tiny
-  FLUX run produced native and scraped TensorBoard events and valid checkpoints.
+- AI Toolkit: FLUX produced real checkpoints, loss, Resume and matched generation. H3’s
+  `minimax_h3` registration, trained-network attachment, exported-key conversion and exact
+  loader behavior are source-verified at the pinned commit with offline controls; this new
+  H3 app/pod path has not yet trained or generated on hosted hardware.
 - LTX-2: the pinned trainer's entrypoints, `caption`/`media_path` preparation, one-frame
   buckets, mapped training keys, nested checkpoints and scraped TensorBoard events ran on
   real hardware. A 512-pixel/rank-16 run passed on one visible 32 GB GPU in a 125 GB host.
   The trainer venv requires TensorBoard explicitly; the image tests an actual event write/read.
-- Wider resolutions, other models, video inputs, generated validation samples and training
-  quality remain unverified. These tiny functional checks do not establish universal memory
+- H3 capacity, other model families and training quality remain unverified. LTX’s approved
+  video training, Resume and paired generation have separate real receipts. These tiny functional checks do not establish universal memory
   capacity. Resume evidence and its exact scope are recorded separately in `POD-STATUS.md`.
 
 ### 4.3 Launch wrappers (`scripts/launch_aitoolkit.py`, `scripts/launch_ltx.py`)
@@ -795,16 +806,78 @@ before exiting, so the supervisor never frees GPUs a trainer still holds.
 | --- | --- |
 | `run_id` | `config.name` |
 | `<run>/output` | `process[0].training_folder` |
-| `triggers[0]` | `process[0].trigger_word` (VERIFY) |
+| `triggers` | run metadata only; no `process[0].trigger_word` is injected |
 | `rank`, `alpha` | `network.{type: lora, linear, linear_alpha}` |
 | `save_every` | `save.save_every` (+ `dtype: float16`, `max_step_saves_to_keep: 4`) |
 | `dataset.path`, `caption_ext`, `resolution` | `datasets[0].{folder_path, caption_ext, resolution, cache_latents_to_disk: true, caption_dropout_rate: 0.05}` |
 | `steps`, `learning_rate`, `batch_size`, `gradient_accumulation` | `train.{steps, lr, batch_size, gradient_accumulation_steps}` + `dtype: bf16`, `optimizer: adamw8bit`, `noise_scheduler: flowmatch`, `gradient_checkpointing: true`, `train_text_encoder: false` |
-| `base_model` | `model.name_or_path` (+ `is_flux: true, quantize: true` for FLUX ids; H3 keys VERIFY) |
+| `base_model` | `model.name_or_path` (+ `is_flux: true, quantize: true` for FLUX; H3 uses the pinned `minimax_h3` BF16 recipe below) |
 | `sample_every`, `sample_prompts`, `seed` | `sample.{sample_every, prompts, seed, width/height = max(resolution), sampler: flowmatch, guidance_scale: 4, sample_steps: 20}` |
 | `extra` | deep-merged last |
 
 Command: `/opt/venvs/aitoolkit/bin/python /opt/ai-toolkit/run.py <run>/config.yaml`.
+
+
+**H3 quality and exact targets.** `Comfy-Org/MiniMax-H3` selects the pinned registered
+`minimax_h3` model. The default quality recipe uses BF16 model/text encoder, `quantize: false`,
+`quantize_te: false`, `low_vram: false`, `fl2va_pruned`, AdamW/flowmatch/sigmoid, weight decay
+0.01, constant warmup (35 steps), text-embedding/latent caching and the transformer block
+20–49 qkv/out/fc1/fc2 subset. The four model binary assets are pinned to
+`e5eb578a89295337b8ff433a035929ce0279e0b6` under `/workspace/models/h3-bf16-quality`:
+pruned BF16 DiT, BF16 Qwen3-VL encoder and the FP16 video/FP32 audio VAEs. The frozen
+image-training adapter is pinned to `circlestone-labs/MiniMax-H3-Image-Training-Adapter`
+revision `7c6c04f75ba597232d4ce2bb4a14709948ec723a`. The pinned model implementation itself
+resolves original tokenizer/processor/config files from `MiniMaxAI/MiniMax-H3`.
+Only binary asset filenames are declared in the shared recipe resource; a supplied old
+component/assistant filename must match those known assets before native import replaces paths.
+No old pod path is treated as an already-installed model.
+
+`h3_dataset.py` verifies complete decoded frame counts/timing with `ffprobe` before model
+download. Clips require 5–243 frames on the 17n+5 grid, exactly 24 fps with uniform decoded
+intervals (1 µs decimal rounding tolerance), and positive 32-aligned dimensions. Their area
+must fit `max(resolution)²`; otherwise refuse and ask for a larger cap or re-approved smaller
+input. The pinned bucket code then keeps exact width/height (scale 1), rather than cropping.
+Private input views group by actual frame count: each native dataset uses that explicit N,
+`auto_frame_count: false`, `shrink_video_to_frames: true`, `fps: 24`. N equal to the actual
+count makes upstream frame selection i→i, with no trim/resampling. Clip groups enable
+`do_audio`; stills have a separate one-frame group and retain the requested image resolution
+array. The default audio loss multiplier is 0 for still-only inputs and 1 when clips are
+present; an explicit imported/advanced recipe can override it. Source clips and audio bytes
+are retained; joint-audio optimization through this new path is still a hosted-test gap.
+`h3-inputs.json` records admitted target dimensions/counts and `native-config.json` atomically
+records the effective native configuration before launch. H3 uses native
+`gradient_accumulation`, avoiding its mutually exclusive `gradient_accumulation_steps` key.
+
+**External H3 weights initialize a new run.** Upload exactly `initial-lora.safetensors` and
+`initial-recipe.json` to a distinct `init-<UUID>` stage using 2.14. The canonical recipe has
+exactly four sections: `model`, `network`, `train`, `dataset`. One authoritative field/asset
+policy is bundled at `app/Sources/ConceptStudio/Resources/Training/h3-recipe-fields.json` and
+copied unchanged into pod scripts. No raw job/meta/output/Hub/credentials, old paths,
+counters or start-step settings cross this contract. The native original recipe remains a
+private project artifact. Its model must identify `Comfy-Org/MiniMax-H3` / `minimax_h3` /
+`fl2va_pruned`; supplied components must be known BF16 assets. `use_training_adapter` is a
+boolean, not an arbitrary assistant path.
+
+The request’s `initialization: {name,lora_sha256,recipe_sha256}` binds both fixed uploads by
+lowercase SHA-256. Agent admission requires a NEW run directory and a matching actual H3
+Comfy/native PEFT A/B safetensors header/rank. Preparation claims the stage, captures both
+artifacts privately outside `output/`, verifies the copies and releases the stage. Normal
+local dataset installation refuses initializer slots; they never enter the media manifest.
+The imported quality settings are preserved in `run.json.extra`; final requested rank,
+alpha, LR, steps, batch and accumulation are authoritative. Rank must match starting weights;
+selector settings must not exclude loaded LoRA modules. The wrapper forces current run,
+approved dataset views/output and a fresh start at 0, setting the pinned upstream
+`network.pretrained_lora_path` to its captured private file. It is not a frozen assistant
+and not same-state Resume; no old optimizer/counter state is loaded. Existing same-run
+Resume retains the immutable initializer binding but does not need or re-upload its stage;
+it uses the captured pair and removes fresh `start_step: 0` so the real saved step restores.
+
+H3 generation privately captures the effective native model/network recipe and selected
+checkpoint. It creates the pinned registered model and an actual `LoRASpecialNetwork` with
+the trained rank/alpha/selectors/target modules and `base_model=sd`. Upstream `load_weights`
+then converts Comfy `diffusion_model.*.lora_A/B` keys. The assistant is omitted on both arms;
+the same live network uses multiplier 0 and 1, with merge disabled, identical requested
+prompts/seeds/geometry/steps, and the pinned H3 scheduler. `model.lora_path` is not used.
 
 `extra.preprocess.args` is checked both at the start API and by the standalone wrapper. At the
 API the check belongs to `trainer-ltx`'s params model, `LtxRunConfig` (`422 invalid_params`,
@@ -892,7 +965,7 @@ bytes and completed output files in every case.
 **Repeat and Resume.** Repeat prefills editable native settings and the saved dataset
 revision, then creates a new run and dataset folder. Resume sends `resume: true` with the
 same run ID; dataset, model, triggers, rank/alpha, learning rate, resolution, batch size,
-accumulation, seed and `extra` must match the saved run. It requires a checkpoint; LTX also
+accumulation, seed, `extra` and initializer provenance must match the saved run. It requires a checkpoint; LTX also
 requires the matching `training_state_step_<digits>.pt`. The pinned LTX trainer restores
 scheduler/RNG/step from its default minimal state; full optimizer state requires upstream's
 full-state option. AI Toolkit finds the newest matching save by creation time, restores

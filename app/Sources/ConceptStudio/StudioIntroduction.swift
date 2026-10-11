@@ -1,9 +1,8 @@
 import SwiftUI
 
-/// The owner's explanation is shared by Welcome and Images. Italics identify glossary links,
+/// The owner's explanation introduces the workflow on Images. Italics identify glossary links,
 /// not text to abbreviate or replace with promotional copy.
 struct StudioIntroduction: View {
-    @State private var definition: StudioTerm?
     @AppStorage private var expanded: Bool
 
     init(preferences: UserDefaults = .standard) {
@@ -43,44 +42,27 @@ struct StudioIntroduction: View {
 
     var body: some View {
         DisclosureGroup("How diffusion training works", isExpanded: $expanded) {
-            VStack(alignment: .leading, spacing: 20) {
-                ForEach(Self.ownerParagraphs + Self.continuation, id: \.self) { paragraph in
-                    StudioGlossaryParagraph(markdown: paragraph) { definition = $0 }
-                }
-                DisclosureGroup("Definitions") {
-                    Text("Hover over an italic term for a definition, or select it to open the explanation. "
-                        + "Keyboard focus on a definition button shows its explanation below the buttons; "
-                        + "activate the button to open the same explanation in a popover.")
-                        .font(.callout).foregroundStyle(StudioStyle.supportingText).padding(.vertical, 8)
-                    FlowDefinitions()
-                }
-            }
-            .padding(.top, 16)
+            StudioExplanationContent().padding(.top, 16)
         }
         .help(
-            "Shows the full training explanation; this Mac remembers your expansion choice across Welcome and Images."
+            "Shows the full training explanation; this Mac remembers whether you left it open or closed."
         )
         .frame(maxWidth: 760, alignment: .leading)
-        .popover(item: $definition) { StudioDefinitionView(term: $0) }
     }
 }
 
-private struct FlowDefinitions: View {
-    private let columns = [GridItem(.adaptive(minimum: 180), alignment: .leading)]
-    @FocusState private var focusedTerm: StudioTerm?
+/// Shared prose for the contextual Images introduction and the always-available Help window.
+/// Opening Help does not change the Images disclosure's remembered state.
+struct StudioExplanationContent: View {
+    @State private var definition: StudioTerm?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-                ForEach(StudioTerm.allCases) { term in StudioTermButton(term, focusedTerm: $focusedTerm) }
+        VStack(alignment: .leading, spacing: 20) {
+            ForEach(StudioIntroduction.ownerParagraphs + StudioIntroduction.continuation, id: \.self) { paragraph in
+                StudioGlossaryParagraph(markdown: paragraph) { definition = $0 }
             }
-            if let focusedTerm {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(focusedTerm.title).font(.headline)
-                    Text(focusedTerm.definition).foregroundStyle(StudioStyle.supportingText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }.padding(.top, 4)
-            }
-        }.padding(.bottom, 8)
+            StudioTermsHelp(terms: StudioTerm.introductory)
+        }
+        .popover(item: $definition) { StudioDefinitionView(term: $0) }
     }
 }

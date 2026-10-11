@@ -168,6 +168,7 @@ RUN uv venv --python "${PYTHON_VERSION}" /opt/venvs/agent \
 # --help from a bare interpreter (the scripts README contract: nothing heavy at import time), which
 # is checked here so a broken script fails the build rather than the first service start.
 COPY pod/scripts/*.py /opt/pod/scripts/
+COPY app/Sources/ConceptStudio/Resources/Training/h3-recipe-fields.json /opt/pod/scripts/h3-recipe-fields.json
 # One LTX rule file (preprocess allowlist, pinned Hub source) for the API and the isolated wrapper.
 COPY pod/agent/src/podagent/ltx_rules.py /opt/pod/agent/src/podagent/ltx_rules.py
 COPY --chmod=0755 pod/images/entrypoint.sh /opt/pod/entrypoint.sh

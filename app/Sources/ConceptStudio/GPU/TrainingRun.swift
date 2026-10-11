@@ -28,6 +28,8 @@ struct TrainingRun: Codable, Equatable, Identifiable {
     var checkpoints: [RunFile] = []
     var hourlyRateUSD: Double?
     var estimatedGPUCostUSD: Double?
+    /// The selected cap belongs to this run, including its later Resume continuations.
+    var gpuBudgetUSD: Double?
     /// A separately downloaded copy does not change a run's published Hub status.
     var localFolder: String?
     var previousGPUCostUSD = 0.0
@@ -69,7 +71,24 @@ struct TrainingRun: Codable, Equatable, Identifiable {
 
     var supportsGeneration: Bool {
         (trainer == "aitoolkit" && baseModel == "black-forest-labs/FLUX.1-dev")
+            || isH3
             || (trainer == "ltx" && baseModel == "Lightricks/LTX-2")
+    }
+
+    var isH3: Bool {
+        trainer == "aitoolkit" && baseModel == GPUWorkspace.h3BaseModel
+    }
+
+    var generatesVideo: Bool {
+        trainer == "ltx" || isH3
+    }
+
+    var defaultGenerationFrames: Int {
+        isH3 ? 39 : 49
+    }
+
+    var generationFrameChoices: [Int] {
+        isH3 ? [1, 5, 22, 39, 73, 124, 243] : [17, 49, 97, 129]
     }
 }
 
@@ -130,7 +149,9 @@ extension GPUWorkspace {
     func recordNewTrainingRun(
         _ agent: any PodAgent, datasetRepo: String, params: JSONObject, localInputDigest: String?
     ) async {
-        recordStartedRun(datasetRepo: datasetRepo, params: params, resumed: false, localInputDigest: localInputDigest)
+        if let index = runHistory.firstIndex(where: { $0.runID == runID }) {
+            runHistory[index].params = params
+        }
         if let info = try? await agent.runConfiguration(runID: runID),
            let index = runHistory.firstIndex(where: { $0.runID == runID }) {
             if !info.config.isEmpty { runHistory[index].params = info.config }
@@ -142,14 +163,22 @@ extension GPUWorkspace {
         saveProjectRecord()
     }
 
-    func recordStartedRun(datasetRepo: String, params: JSONObject, resumed: Bool, localInputDigest: String? = nil) {
+    func recordStartedRun(
+        datasetRepo: String,
+        params: JSONObject,
+        resumed: Bool,
+        localInputDigest: String? = nil,
+        budget: Double? = nil,
+        baseline: Double? = nil
+    ) {
         let now = Date()
         if resumed, let index = runHistory.firstIndex(where: { $0.runID == runID }) {
             runHistory[index].params = params
             runHistory[index].result = result
             runHistory[index].updatedAt = now
             runHistory[index].previousGPUCostUSD = runHistory[index].estimatedGPUCostUSD ?? 0
-            runHistory[index].podSpendAtStart = estimatedPodCost
+            runHistory[index].podSpendAtStart = baseline ?? estimatedPodCost
+            if let budget { runHistory[index].gpuBudgetUSD = budget }
             runHistory[index].hourlyRateUSD = saved?.hourlyRate
         } else {
             runHistory.append(TrainingRun(
@@ -158,7 +187,8 @@ extension GPUWorkspace {
                 datasetContainsVideo: datasetContainsVideo, localInputDigest: localInputDigest,
                 paramsJSON: JSONValue.object(params).pythonDumpsData(),
                 volumeID: currentVolumeID, startedAt: now, updatedAt: now, result: result,
-                hourlyRateUSD: saved?.hourlyRate, estimatedGPUCostUSD: nil, podSpendAtStart: estimatedPodCost
+                hourlyRateUSD: saved?.hourlyRate, estimatedGPUCostUSD: nil, gpuBudgetUSD: budget,
+                podSpendAtStart: baseline ?? estimatedPodCost
             ))
         }
         selectedHistoryRunID = runID
@@ -166,14 +196,23 @@ extension GPUWorkspace {
     }
 
     func captureRunProgress() {
-        guard let index = runHistory.firstIndex(where: { $0.runID == runID }) else { return }
+        guard let index = runHistory.firstIndex(where: { $0.runID == runID }) else {
+            // Global billing remains accurate while Welcome or a different project is open.
+            if var run = saved?.run, run.runID == runID, run.result?.state == .training {
+                if hasRunningPod { run.estimatedGPUCostUSD = currentRunCost(run, podCost: estimatedPodCost) }
+                run.result = result
+                run.points = points
+                run.updatedAt = Date()
+                saved?.run = run
+            }
+            return
+        }
         let ending = runHistory[index].result?.state == .training
         runHistory[index].points = points
         runHistory[index].result = result
         runHistory[index].updatedAt = Date()
         if saved != nil, hasRunningPod, result?.state == .training || ending {
-            runHistory[index].estimatedGPUCostUSD = runHistory[index].previousGPUCostUSD
-                + max(0, estimatedPodCost - runHistory[index].podSpendAtStart)
+            runHistory[index].estimatedGPUCostUSD = currentRunCost(runHistory[index], podCost: estimatedPodCost)
         }
     }
 
@@ -213,11 +252,20 @@ extension GPUWorkspace {
         baseModel = run.baseModel
         steps = run.targetSteps
         rank = run.rank
+        alpha = run.params["alpha"]?.intValue ?? rank
+        batchSize = run.params["batch_size"]?.intValue ?? 1
+        accumulation = run.params["gradient_accumulation"]?.intValue ?? 1
+        nativeRecipe = nil
+        nativeRecipeOriginal = nil
+        initialCheckpoint = nil
         learningRate = run.params["learning_rate"]?.doubleValue ?? learningRate
-        resolution = run.params["resolution"]?.intValue ?? resolution
+        if let values = run.params["resolution"]?.arrayValue?.compactMap(\.intValue) {
+            trainingResolutions = values
+        } else if let value = run.params["resolution"]?.intValue { trainingResolutions = [value] }
         triggerWords = run.params["triggers"]?.arrayValue?.compactMap(\.stringValue).joined(separator: ",") ?? ""
         profile = run.params["profile"]?.stringValue ?? "flux-image"
         seed = run.params["seed"]?.intValue ?? 42
+        if let cap = run.gpuBudgetUSD { runBudget = cap }
         datasetContainsVideo = run.datasetContainsVideo
         datasetRevision = run.datasetRevision ?? ""
         repeatSourceRunID = run.runID
@@ -237,6 +285,11 @@ extension GPUWorkspace {
             guard totalSteps > run.latestStep, !self.resultNeedsSaving else {
                 throw StudioError.message("Retrieve pending outputs first, then choose a total above the latest step.")
             }
+            let cap = run.gpuBudgetUSD ?? self.runBudget
+            guard cap.isFinite, cap > (run.estimatedGPUCostUSD ?? 0) else {
+                throw StudioError.message("This run has reached its budget. Raise its budget before continuing.")
+            }
+            let baseline = self.estimatedPodCost
             let local: LocalTrainingDataset?
             if let expected = run.localInputDigest {
                 guard let folder = self.projectFolder
@@ -258,21 +311,42 @@ extension GPUWorkspace {
                 throw StudioError.message("Finish the current GPU action before resuming training.")
             }
             let plan = try await agent.plan()
-            if let local {
-                try await self.installTrainingDataset(local, repo: "", revision: nil, name: run.runID, agent: agent)
-            }
-            try await self.prepareCaptionServerForTraining(agent, plan: plan)
+            if run.isH3 { try await self.validateH3Computer(agent, gpus: plan.train?.gpus ?? []) }
             var params = run.params
             params["steps"] = .int(totalSteps)
             params["resume"] = .bool(true)
-            try await agent.start("trainer-\(run.trainer)", gpus: plan.train?.gpus ?? [], params: params)
             self.runID = run.runID
             self.points = run.points
             self.result = run.result
             self.result?.state = .training
+            self.trainingState = "Preparing inputs"
+            self.recordStartedRun(
+                datasetRepo: run.datasetRepo,
+                params: params,
+                resumed: true,
+                budget: cap,
+                baseline: baseline
+            )
+            self.persist()
+            self.persistResult()
+            var startedTrainer = false
+            defer { if !startedTrainer { self.finishFailedPreparation(previousResult: run.result) } }
+            if let local {
+                try await self.installTrainingDataset(local, repo: "", revision: nil, name: run.runID, agent: agent)
+            }
+            try await self.prepareCaptionServerForTraining(agent, plan: plan)
+            try Task.checkCancellation()
+            try self.checkCurrentRunBudget()
+            try await agent.start("trainer-\(run.trainer)", gpus: plan.train?.gpus ?? [], params: params)
+            startedTrainer = true
             self.trainingState = "running"
             self.lastActivity = Date()
-            self.recordStartedRun(datasetRepo: run.datasetRepo, params: params, resumed: true)
+            await self.recordNewTrainingRun(
+                agent,
+                datasetRepo: run.datasetRepo,
+                params: params,
+                localInputDigest: run.localInputDigest
+            )
             self.persist()
             self.persistResult()
             self.message = "Continuing run \(run.runID) toward \(totalSteps) total steps from its latest checkpoint."

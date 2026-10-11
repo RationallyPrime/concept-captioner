@@ -66,18 +66,20 @@ struct ReviewView: View {
                     .tag(image.id)
                 }
             }.frame(minWidth: 190, idealWidth: 230, maxWidth: 280)
-            ScrollView {
-                if selection.count > 1 {
-                    batch.padding(.leading, 20)
-                } else if let image = session.selectedImage, selection.contains(image.id) {
-                    detail(for: image).padding(.leading, 20)
-                } else {
-                    ContentUnavailableView(
-                        "Choose a caption to review",
-                        systemImage: "checkmark.bubble",
-                        description: Text("Select one sample to edit or compare its caption, "
-                            + "or several to re-caption them together.")
-                    )
+            GeometryReader { geometry in
+                ScrollView {
+                    if selection.count > 1 {
+                        batch.padding(.leading, 20)
+                    } else if let image = session.selectedImage, selection.contains(image.id) {
+                        detail(for: image, availableWidth: max(0, geometry.size.width - 20)).padding(.leading, 20)
+                    } else {
+                        ContentUnavailableView(
+                            "Choose a caption to review",
+                            systemImage: "checkmark.bubble",
+                            description: Text("Select one sample to edit or compare its caption, "
+                                + "or several to re-caption them together.")
+                        )
+                    }
                 }
             }
         }
@@ -127,8 +129,11 @@ struct ReviewView: View {
 
     // MARK: One photo
 
-    private func detail(for image: ProjectImage) -> some View {
-        VStack(alignment: .leading, spacing: StudioStyle.contentSpacing) {
+    private func detail(for image: ProjectImage, availableWidth: CGFloat) -> some View {
+        let photoWidth: CGFloat = 240
+        let captionWidth: CGFloat = 280
+        let columnSpacing: CGFloat = 24
+        return VStack(alignment: .leading, spacing: StudioStyle.contentSpacing) {
             StudioSection(
                 title: image.id,
                 subtitle: "Check the caption against this exact training target. The trigger names the concept; "
@@ -137,11 +142,12 @@ struct ReviewView: View {
                 if !image.notes.isEmpty {
                     StudioNotice(image.notes.joined(separator: "\n"), symbol: "text.bubble")
                 }
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 24) {
-                        TrainingTargetPreview(url: image.url).frame(width: 240, height: 280)
-                        captionEditor(for: image).frame(minWidth: 280)
+                if availableWidth >= photoWidth + columnSpacing + captionWidth {
+                    HStack(alignment: .top, spacing: columnSpacing) {
+                        TrainingTargetPreview(url: image.url).frame(width: photoWidth, height: 280)
+                        captionEditor(for: image).frame(minWidth: captionWidth, maxWidth: .infinity)
                     }
+                } else {
                     VStack(alignment: .leading, spacing: 18) {
                         TrainingTargetPreview(url: image.url).frame(maxWidth: .infinity).frame(height: 200)
                         captionEditor(for: image)
@@ -152,7 +158,7 @@ struct ReviewView: View {
             DisclosureGroup("Compare captioning models") {
                 comparison(for: image).padding(.top, 12)
             }
-        }
+        }.frame(width: availableWidth, alignment: .leading)
     }
 
     private func comparison(for image: ProjectImage) -> some View {

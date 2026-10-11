@@ -1,6 +1,7 @@
 # POD-STATUS
 
-State after the 2026-10-11 source review repairs. The current tag,
+State after the 2026-10-11 source review repairs, with Phase 2 H3 source additions pending
+independent acceptance/publication. The current published tag,
 `v0.2.2-clean-20261011`, is a clean build of `main` at `2789c1d33a4aec015ad1728f24b72be3445e4b8f`
 (the review repairs and the direct dataset upload included) with the repository Dockerfiles and
 no overlay; it has had anonymous pulls by digest and a CPU smoke but no real-pod run yet. The
@@ -26,7 +27,7 @@ hash and billing bucket, is in
   authenticated `/tensorboard/` proxy. vLLM and LTX preprocessing arguments are allowlisted.
 - **Transfer scripts and trainer wrappers** (`pod/scripts`): Hub dataset pull or authenticated
   local dataset installation, AI Toolkit
-  (FLUX) and LTX launchers, LoRA push.
+  (FLUX/H3) and LTX launchers, LoRA push. The new H3 additions described below are source-only.
 - **podctl** (`pod/podctl`): command-line client for the agent.
 - **Images**, public on GHCR under tag `v0.2.2-clean-20261011` (clean build from commit
   `2789c1d3`; digests in [images/README](../images/README.md)): `concept-captioner-pod-base`,
@@ -224,17 +225,49 @@ The r2 history: runtime source
   The public template's image-only update to the final base was independently read back;
   all other fields were preserved.
 
+## Phase 2 H3 source (2026-10-11)
+
+- H3 now selects pinned `minimax_h3`, BF16 model/text encoder, the frozen image-training
+  adapter and the concrete AdamW quality recipe. Per-example captions carry mapped
+  concepts; no global first trigger is injected. Supplied old component paths are never
+  assumed installed. The canonical quality/known-asset policy has one shared native/pod JSON.
+- Exact approved clips use decoded 24 fps CFR timing, 17n+5 counts (5–243), 32-aligned
+  dimensions and a covering area cap. Explicit frame-count groups preserve all selected
+  frames/audio and separate still buckets; the native effective config and input facts
+  are saved. Metadata-only ffprobe preflight on all 18 prepared selected clips passed at
+  cap 1024. No private pixels/audio were inspected or uploaded by this verification.
+- The existing authenticated upload route admits only two additional fixed initializer
+  slots in a distinct stage. SHA-bound, validated H3 A/B weights and canonical recipe are
+  privately captured for a NEW warm-start run at 0. Imported precision/block selection
+  survives; requested rank/alpha/LR/steps/batch/accumulation are actual native settings.
+  Same-run Resume retains that binding, restores its own checkpoint and needs no old stage.
+- The generator attaches the actual pinned trained network to the registered H3 model
+  using saved effective native settings; base/LoRA arms use multiplier 0/1, identical
+  prompts/seeds and no frozen assistant. PNG or 24 fps MP4 is selected per request,
+  independently of training input type. Result manifests omit private initializer/native
+  paths and retain complete/failed semantics and all produced output files.
+- Offline checks: all **310 script tests** and **454 selected agent/catalog/API/supervisor
+  tests** passed at the first complete code gate; final narrow selector/initialization
+  closure is recorded separately in the private freeze receipt. The fake inference tests
+  verify call/recipe/output contracts; they are not GPU generation or a fake product gallery.
+- Deployment and actual H3 capacity/training/Resume/generation remain pending. No image
+  rebuild, hosted request, new pod, private-media training or quality experiment was done
+  in this source-only phase. Earlier FLUX/LTX receipts remain evidence for their exact images.
+
 ## Open
 
-- **Separate assigned tickets:** clean image rebuild/publication and app image-default update,
-  RunPod Hub-token secret reference, and CI's macOS runner repair. No image or CI work was
-  performed in this source-repair round. Direct uploads, cleanup and the repaired Resume/
-  generation behavior need the rebuilt agent before live acceptance; no new GPU was rented.
+- **Current baseline versus new H3:** the clean `v0.2.2-clean-20261011` build already includes
+  the previous review repairs/direct uploads; app RunPod secret references and the macOS CI
+  repair are landed. The new H3 initializer/recipe/clip/generator code has not been imaged
+  or run on hosted GPUs. Previous direct-upload/cleanup repairs have clean CPU/image proof,
+  with real-pod coverage limited to the earlier r1/r2 receipts. No new GPU was rented here.
 - **Caption quality.** The 3B and 8B captions failed the concept boundary in the cancelled
   five-image experiment; none is training data. The larger comparison is deferred by Hákon.
 - **Caption inference while training runs.** Both services were resident at once, but the
   caption request ran after training exited.
-- **Not run live:** H3 trainer keys, parquet datasets, recovery after an agent
+- **Not run live through this new app/pod path:** H3 training, external initialization,
+  same-run continuation, joint audio and matched generation. H3 registration/loader/network
+  keys are source-verified. Other live gaps: parquet datasets, recovery after an agent
   crash, CUDA driver R570.
 - **Pinned LTX download scope:** this round reused the previously populated network-volume
   model cache, resolved through the revision-pinned wrapper. A fresh empty-cache download at

@@ -59,6 +59,6 @@ struct StudioExplanationTests {
             #expect(layout.usedRect(for: container).height > 0)
             #expect(layout.usedRect(for: container).maxX <= 712)
         }
-        #expect(linked == Set(StudioTerm.allCases))
+        #expect(linked == Set(StudioTerm.introductory))
     }
 }

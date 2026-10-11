@@ -12,6 +12,7 @@ struct MediaEditorView: View {
     @State private var frames: [MediaFrame] = []
     @State private var player: AVPlayer?
     @State private var timeline: VideoTimeline?
+    @State private var format: VideoTrainingFormat
     @State private var startFrame = 0
     @State private var frameCount = 33
     @State private var longEdge = 512
@@ -19,6 +20,12 @@ struct MediaEditorView: View {
     @State private var previewLongEdge: Int?
     @State private var error = ""
     @State private var confirmReset = false
+
+    init(session: StudioSession, media: ProjectImage) {
+        self.session = session
+        self.media = media
+        _format = State(initialValue: VideoTrainingFormat(profile: session.project?.job.profile ?? "ltx-video"))
+    }
 
     private var isVideo: Bool {
         Sources.isVideo(Sources.suffix(of: media.id))
@@ -29,15 +36,16 @@ struct MediaEditorView: View {
     }
 
     private var selectedRange: CMTimeRange? {
-        timeline?.range(startFrame: startFrame, frameCount: frameCount)
+        timeline?.range(startFrame: startFrame, frameCount: frameCount, format: format)
     }
 
     private var constantRateSelection: Bool {
-        timeline?.isConstantRate(startFrame: startFrame, frameCount: frameCount) == true
+        timeline?.supportsTiming(startFrame: startFrame, frameCount: frameCount, format: format) == true
     }
 
     private var maximumStartFrame: Int {
-        guard let timeline, frameCount >= 9, frameCount <= timeline.maximumTrainingFrames else { return 0 }
+        guard let timeline, format.accepts(frameCount: frameCount),
+              frameCount <= timeline.maximumTrainingFrames(format: format) else { return 0 }
         return timeline.times.count - frameCount
     }
 
@@ -47,6 +55,8 @@ struct MediaEditorView: View {
             Text(media.id).foregroundStyle(StudioStyle.supportingText).lineLimit(1)
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    StudioTermsHelp(terms: isVideo ? [.trainingData, .fps, .resolution, .captionFormat]
+                        : [.trainingData, .resolution, .mapping])
                     if isVideo { videoControls } else { cropControls }
                     if hasCaptionToReset {
                         Text(
@@ -79,7 +89,7 @@ struct MediaEditorView: View {
                         info = details
                         let decoded = try await MediaEditor.videoTimeline(url: media.url)
                         timeline = decoded
-                        frameCount = min(33, decoded.maximumTrainingFrames)
+                        frameCount = format.initialSelectionFrames(available: decoded.times.count)
                         frames = try await MediaEditor.frames(url: media.url)
                     } else {
                         image = try await Task.detached {
@@ -102,6 +112,11 @@ struct MediaEditorView: View {
                 } catch is CancellationError {} catch { self.error = error.localizedDescription }
             }
             .onDisappear { player?.pause(); player?.replaceCurrentItem(with: nil); player = nil }
+            .onChange(of: format) { _, selected in
+                guard let timeline else { return }
+                frameCount = selected.initialSelectionFrames(available: timeline.times.count)
+                startFrame = min(max(0, startFrame), maximumStartFrame)
+            }
             .confirmationDialog("Replace this training target and reset its caption?", isPresented: $confirmReset) {
                 Button(isVideo ? "Approve segment and reset caption" : "Approve crop and reset caption") { approve() }
                 Button("Keep current target", role: .cancel) {}
@@ -110,18 +125,23 @@ struct MediaEditorView: View {
 
     @ViewBuilder private var cropControls: some View {
         if let image {
-            Image(decorative: image, scale: 1).resizable().scaledToFit()
-                .overlay {
-                    GeometryReader { geometry in
-                        Rectangle().stroke(.orange, lineWidth: 3)
-                            .frame(
-                                width: rectangle.width * geometry.size.width,
-                                height: rectangle.height * geometry.size.height
-                            )
-                            .position(x: rectangle.midX * geometry.size.width, y: rectangle.midY * geometry.size.height)
-                    }
+            GeometryReader { geometry in
+                let crop = CropPreviewGeometry(
+                    imageSize: CGSize(width: image.width, height: image.height),
+                    availableSize: geometry.size, crop: rectangle
+                )
+                ZStack(alignment: .topLeading) {
+                    Image(decorative: image, scale: 1).resizable()
+                        .frame(width: crop.imageRect.width, height: crop.imageRect.height)
+                        .position(x: crop.imageRect.midX, y: crop.imageRect.midY)
+                    crop.excludedPixels.fill(.black.opacity(0.5), style: FillStyle(eoFill: true))
+                    Rectangle().strokeBorder(.black, lineWidth: 4)
+                        .overlay { Rectangle().strokeBorder(.orange, lineWidth: 2) }
+                        .frame(width: crop.cropRect.width, height: crop.cropRect.height)
+                        .position(x: crop.cropRect.midX, y: crop.cropRect.midY)
                 }
-                .frame(maxHeight: 300)
+                .allowsHitTesting(false)
+            }.frame(height: 300)
             HStack {
                 Button("Whole image") { rectangle = CGRect(x: 0, y: 0, width: 1, height: 1) }
                 if let face = session.analyses[media.id]?.faces.first {
@@ -156,7 +176,20 @@ struct MediaEditorView: View {
 
     @ViewBuilder private var videoControls: some View {
         if let info {
-            if let timeline, timeline.maximumTrainingFrames >= 9 {
+            Picker("Training model", selection: $format) {
+                ForEach(VideoTrainingFormat.allCases) { Text($0.title).tag($0) }
+            }
+            .help("Choose the diffusion model that will learn this segment; its supported durations differ.")
+            Text(format == .h3
+                ? "H3 requires 24 frames per second and specific segment lengths. Approval keeps those exact frames."
+                : "LTX supports specific segment lengths. Approval keeps the selected frames at their original timing.")
+                .font(.callout).foregroundStyle(StudioStyle.supportingText)
+            if session.project?.job.profile != format.rawValue {
+                Text("Approving selects \(format.title) video captions for this project. Other existing captions "
+                    + "keep their text; review or re-caption them for the new format.")
+                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
+            }
+            if let timeline, timeline.maximumTrainingFrames(format: format) >= format.minimumFrames {
                 HStack {
                     Text("Start time")
                     Slider(value: Binding(
@@ -192,16 +225,18 @@ struct MediaEditorView: View {
                     startFrame = min(max(0, startFrame), timeline.times.count - count)
                 })) {
                     ForEach(
-                        Self.durationChoices(in: timeline, startFrame: startFrame, currentCount: frameCount),
+                        Self.durationChoices(
+                            in: timeline, startFrame: startFrame, currentCount: frameCount, format: format
+                        ),
                         id: \.self
                     ) { count in
-                        if let range = timeline.range(startFrame: startFrame, frameCount: count) {
+                        if let range = timeline.range(startFrame: startFrame, frameCount: count, format: format) {
                             Text("\(range.duration.seconds.formatted(.number.precision(.fractionLength(3)))) seconds")
                                 .tag(count)
                         }
                     }
                 }
-                Text("A video frame is one still image. LTX supports specific segment lengths; "
+                Text("A video frame is one still image. \(format.title) supports specific segment lengths; "
                     + "choose the duration closest to what you need.")
                     .font(.callout).foregroundStyle(StudioStyle.supportingText)
                 if let range = selectedRange {
@@ -210,7 +245,10 @@ struct MediaEditorView: View {
                     Text("Selected: \(start)–\(end) seconds")
                         .monospacedDigit().font(.callout)
                     if !constantRateSelection {
-                        Text("This segment has variable frame timing that LTX cannot preserve. "
+                        Text(format == .h3
+                            ? "This segment does not have constant timing at 24 frames per second. "
+                            + "Choose a compatible portion or import a 24 fps copy; approval never retimes it."
+                            : "This segment has variable frame timing that LTX cannot preserve. "
                             + "Choose a constant-rate portion or import a constant-frame-rate copy.")
                             .foregroundStyle(.orange)
                     }
@@ -222,12 +260,14 @@ struct MediaEditorView: View {
                         }
                     }
                 } else {
-                    Text("Choose an available start frame and a length of 8n+1 frames, "
-                        + "from 9 through \(MediaEditor.maximumVideoFrames), such as 17 or 33.")
+                    Text("Choose an available start frame and a length of \(format.gridDescription) frames, "
+                        + "from \(format.minimumFrames) through "
+                        + "\(format.maximumFrames(available: MediaEditor.maximumVideoFrames)).")
                         .foregroundStyle(.orange)
                 }
             } else if timeline != nil {
-                Text("This clip has fewer than 9 frames. Choose a longer clip for LTX video training.")
+                Text("This clip has fewer than \(format.minimumFrames) frames. "
+                    + "Choose a longer clip for \(format.title) video training.")
                     .foregroundStyle(.orange)
             } else if error.isEmpty {
                 ProgressView("Counting actual decoded frames…")
@@ -240,15 +280,19 @@ struct MediaEditorView: View {
             )
             .font(.callout).foregroundStyle(StudioStyle.supportingText)
             DisclosureGroup("Advanced: Exact frames and size") {
-                if let timeline, timeline.maximumTrainingFrames >= 9 {
+                if let timeline, timeline.maximumTrainingFrames(format: format) >= format.minimumFrames {
                     HStack {
                         Text("Start frame (from zero)")
                         TextField("Start frame", value: $startFrame, format: .number).frame(width: 70)
                         Stepper("Start frame", value: $startFrame, in: 0 ... maximumStartFrame).labelsHidden()
                         Text("Length (frames)")
                         TextField("Frame count", value: $frameCount, format: .number).frame(width: 70)
-                        Stepper("Frame count", value: $frameCount, in: 9 ... timeline.maximumTrainingFrames, step: 8)
-                            .labelsHidden()
+                        Stepper(
+                            "Frame count", value: $frameCount,
+                            in: format.minimumFrames ... timeline.maximumTrainingFrames(format: format),
+                            step: format.frameStep
+                        )
+                        .labelsHidden()
                     }
                 }
                 Picker("Maximum width or height", selection: $longEdge) {
@@ -284,10 +328,10 @@ struct MediaEditorView: View {
             }
             Text(
                 "Approval exports and recounts exactly the chosen frames at their original timing. "
-                    + "LTX uses buckets matching the approved frames and dimensions. "
+                    + "The training model must use these approved frames and dimensions. "
                     + "No frames or edges are silently removed. "
                     + "Caption timestamps begin at zero in the approved segment. "
-                    + "Native video captioning requires a Gemini video-capable model; "
+                    + "Use a video-capable Gemini, OpenRouter or vLLM model for captioning; "
                     + "unsupported providers give an explicit error."
             )
             .font(.callout).foregroundStyle(StudioStyle.supportingText)
@@ -307,9 +351,14 @@ struct MediaEditorView: View {
         return abs(times[lower - 1].seconds - seconds) <= abs(times[lower].seconds - seconds) ? lower - 1 : lower
     }
 
-    static func durationChoices(in timeline: VideoTimeline, startFrame: Int, currentCount: Int) -> [Int] {
-        Set([9, 17, 33, 49, 97, 129, 257, currentCount])
-            .filter { timeline.range(startFrame: startFrame, frameCount: $0) != nil }.sorted()
+    static func durationChoices(
+        in timeline: VideoTimeline, startFrame: Int, currentCount: Int, format: VideoTrainingFormat = .ltx
+    ) -> [Int] {
+        let counts = format == .ltx ? [9, 17, 33, 49, 97, 129, 257] : Array(stride(
+            from: format.minimumFrames, through: timeline.maximumTrainingFrames(format: format), by: format.frameStep
+        ))
+        return Set(counts + [currentCount])
+            .filter { timeline.range(startFrame: startFrame, frameCount: $0, format: format) != nil }.sorted()
     }
 
     private func adjustStartFrame(by direction: Int) {
@@ -323,7 +372,8 @@ struct MediaEditorView: View {
                 id: media.id,
                 startFrame: startFrame,
                 frameCount: frameCount,
-                longEdge: longEdge
+                longEdge: longEdge,
+                format: format
             )
         } else {
             session.approveCrop(id: media.id, rectangle: rectangle)

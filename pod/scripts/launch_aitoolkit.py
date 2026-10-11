@@ -92,6 +92,7 @@ _TOP_KEYS = frozenset(
         "hf_token",
         "extra",
         "resume",
+        "initialization",
     }
 )
 _REQUIRED_KEYS = ("run_id", "dataset", "triggers", "base_model")
@@ -263,6 +264,13 @@ def validate_run_config(
         errors.append("extra: must be an object")
         extra = {}
     cfg["extra"] = extra
+    cfg["initialization"] = raw.get("initialization")
+    if cfg["initialization"] is not None:
+        helper = runpy.run_path(str(Path(__file__).with_name("h3_recipe.py")))
+        try:
+            helper["validate_initialization"](cfg["initialization"])
+        except ValueError as error:
+            errors.append(str(error))
     cfg["resume"] = raw.get("resume", False)
     if not isinstance(cfg["resume"], bool):
         errors.append("resume: must be true or false")
@@ -700,8 +708,9 @@ def model_block(base_model: str) -> dict[str, Any]:
         block["is_flux"] = True  # VERIFY: legacy flag, kept for older checkouts
         block["quantize"] = True  # 8-bit mixed precision, as in ai-toolkit's FLUX examples
     elif _H3_RE.search(lowered) or any(marker in lowered for marker in _H3_MARKERS):
-        block["arch"] = "h3"  # VERIFY: ai-toolkit's arch name for the MiniMax H3 family
-        block["quantize"] = True  # VERIFY: quantization flags for H3
+        block["arch"] = "minimax_h3"
+        block["quantize"] = False
+        block["quantize_te"] = False
     # any other family: name_or_path only; set `extra.model.arch` in run.json
     return block
 
@@ -714,7 +723,7 @@ def build_native_config(cfg: dict[str, Any], run_dir: Path) -> dict[str, Any]:
         "type": "sd_trainer",
         "training_folder": str(run_dir / "output"),  # ai-toolkit writes output/<run_id>/ inside
         "device": "cuda:0",  # the agent sets CUDA_VISIBLE_DEVICES; the trainer sees cuda:0..k-1
-        "trigger_word": cfg["triggers"][0],  # VERIFY: still honoured by the pinned checkout
+        # Captions already contain their mapped concepts; no global trigger is injected.
         "log_dir": str(run_dir / "tensorboard"),  # VERIFY: native TensorBoard logging; ai-toolkit
         # creates <log_dir>/<name>_<timestamp>/ next to the scraper's own file. The agent's
         # events reader scans <run>/tensorboard recursively, so both reach /runs/{id}/events.
@@ -769,6 +778,59 @@ def build_native_config(cfg: dict[str, Any], run_dir: Path) -> dict[str, Any]:
         "meta": {"name": "[name]", "version": "1.0"},
     }
     document = deep_merge(document, {k: v for k, v in extra.items() if k in ROOT_KEYS})
+    if cfg["base_model"] == "Comfy-Org/MiniMax-H3":
+        rules = runpy.run_path(str(Path(__file__).with_name("h3_recipe.py")))
+        groups = runpy.run_path(str(Path(__file__).with_name("h3_dataset.py")))["dataset_groups"](
+            cfg, run_dir
+        )
+        quality = rules["quality_settings"](video=any(d["num_frames"] > 1 for d in groups))
+        if cfg.get("initialization"):
+            quality = deep_merge(
+                quality, rules["read_initialization"](run_dir, cfg["initialization"], cfg["rank"])
+            )
+        quality = deep_merge(quality, extra)
+        process = document["config"]["process"][0]
+        process.pop("dataset", None)
+        process.pop("trigger_word", None)
+        process["training_folder"] = str(run_dir / "output")
+        process["log_dir"] = str(run_dir / "tensorboard")
+        process["device"] = "cuda:0"
+        document["job"] = "extension"
+        document["config"]["name"] = cfg["run_id"]
+        document["config"]["process"] = [process]
+        model = quality["model"].copy()
+        adapter = model.pop("use_training_adapter", True)
+        process["model"] = deep_merge(
+            rules["model_config"](workspace_root(), training_adapter=adapter), model
+        )
+        process["network"] = deep_merge(process["network"], quality["network"])
+        process["network"].update(linear=cfg["rank"], linear_alpha=cfg["alpha"])
+        process["train"] = deep_merge(process["train"], quality["train"])
+        process["train"].update(
+            steps=cfg["steps"],
+            lr=cfg["learning_rate"],
+            batch_size=cfg["batch_size"],
+            gradient_accumulation=cfg["gradient_accumulation"],
+        )
+        process["train"].pop("gradient_accumulation_steps", None)
+        process["datasets"] = [deep_merge(quality["dataset"], row) for row in groups]
+        if cfg.get("initialization"):
+            process["network"]["pretrained_lora_path"] = str(run_dir / "initial-lora.safetensors")
+            rules["validate_weights"](
+                run_dir / "initial-lora.safetensors",
+                cfg["rank"],
+                process["network"].get("network_kwargs"),
+            )
+            if not cfg["resume"]:
+                if any((run_dir / "output").rglob("*.safetensors")):
+                    raise ConfigError(
+                        "External initial weights require a new run without old outputs"
+                    )
+                process["train"]["start_step"] = 0
+            else:
+                # A real same-run Resume restores the newest checkpoint's saved step.
+                process["train"].pop("start_step", None)
+        process["sample"].update(num_frames=1, fps=24)
     check_native_paths(document, run_dir)
     return document
 
@@ -853,6 +915,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     config_yaml = run_dir / "config.yaml"
     write_yaml(config_yaml, native, YAML_HEADER)
+    native_snapshot = run_dir / "native-config.json.tmp"
+    native_snapshot.write_text(json.dumps(native, indent=2) + "\n")
+    os.replace(native_snapshot, run_dir / "native-config.json")
     say(f"wrote {config_yaml}")
     cmd = trainer_argv(run_dir, cfg)
     say(f"trainer command: {shlex.join(cmd)}")
@@ -861,6 +926,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         say("dry run: trainer not started")
         return 0
+    if cfg["base_model"] == "Comfy-Org/MiniMax-H3":
+        rules = runpy.run_path(str(Path(__file__).with_name("h3_recipe.py")))
+        model = native["config"]["process"][0]["model"]
+        rules["download_assets"](
+            workspace_root(), training_adapter=bool(model.get("assistant_lora_path"))
+        )
     code = run_trainer(cmd, run_dir, cfg, sys.stdout)
     return finish(run_dir, cfg, code, sys.stdout)
 

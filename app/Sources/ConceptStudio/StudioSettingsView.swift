@@ -26,10 +26,13 @@ struct StudioSettingsView: View {
                 }
                 Spacer()
                 if session.demoMode { DemoBadge() }
+                Button("Help", systemImage: "questionmark.circle") { openWindow(id: "help") }
+                    .help("Open the training explanation and searchable definitions.")
             }.padding(24)
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: StudioStyle.contentSpacing) {
+                    StudioTermsHelp(terms: [.provider, .apiKey, .keychain, .gateway, .tokens])
                     ChatGPTSettingsSection(session: session)
                     Divider()
                     OpenRouterSettingsSection(session: session)
@@ -190,6 +193,7 @@ struct StudioSettingsView: View {
 
     private var advancedPreferences: some View {
         VStack(alignment: .leading, spacing: 12) {
+            StudioTermsHelp(terms: [.containerImage, .networkStorage, .provider])
             Form {
                 TextField("vLLM server URL", text: $session.customBaseURL)
                     .help(

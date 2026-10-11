@@ -4,7 +4,7 @@ import Foundation
 extension GPUWorkspace {
     func generateComparison(
         run: TrainingRun, checkpoint: RunFile, prompts: [String], seeds: [Int], inferenceSteps: Int = 20,
-        videoFrames: Int = 49
+        videoFrames: Int? = nil
     ) async {
         await perform {
             guard !self.demoMode else {
@@ -15,9 +15,14 @@ extension GPUWorkspace {
                 throw StudioError.message("Connect the matching trainer to this run's saved storage before generating.")
             }
             guard run.supportsGeneration else {
-                throw StudioError.message("Generation currently supports FLUX.1-dev and LTX-2 checkpoints.")
+                throw StudioError.message("Generation supports FLUX.1-dev, LTX-2 and MiniMax H3 checkpoints.")
             }
-            guard run.trainer != "ltx" || (videoFrames >= 9 && videoFrames <= 257 && (videoFrames - 1) % 8 == 0)
+            let frames = videoFrames ?? run.defaultGenerationFrames
+            guard !run.isH3 || frames == 1
+                || (frames >= 5 && frames <= 257 && (frames - 5) % 17 == 0) else {
+                throw StudioError.message("H3 video length must be 17n + 5 frames, from 5 through 243, at 24 fps.")
+            }
+            guard run.trainer != "ltx" || (frames >= 9 && frames <= 257 && (frames - 1) % 8 == 0)
             else {
                 throw StudioError.message("LTX video length must be 8n + 1 frames, from 9 through 257.")
             }
@@ -35,15 +40,17 @@ extension GPUWorkspace {
                 throw StudioError.message("Finish the active training or generation action first.")
             }
             let plan = try await agent.plan()
+            if run.isH3 { try await self.validateH3Computer(agent, gpus: plan.train?.gpus ?? []) }
             try await self.prepareCaptionServerForTraining(agent, plan: plan)
             let id = "generation-" + UUID().uuidString.prefix(12).lowercased()
-            let resolution = run.params["resolution"]?.intValue ?? 512
+            let resolution = run.params["resolution"]?.intValue
+                ?? run.params["resolution"]?.arrayValue?.compactMap(\.intValue).max() ?? 512
             let params: JSONObject = [
                 "run_id": .string(id), "source_run_id": .string(run.runID),
                 "checkpoint": .string(checkpoint.path), "prompts": .array(prompts.map(JSONValue.string)),
                 "seeds": .array(seeds.map(JSONValue.int)), "width": .int(resolution), "height": .int(resolution),
                 "inference_steps": .int(inferenceSteps), "guidance_scale": .double(4),
-                "num_frames": .int(run.trainer == "ltx" ? videoFrames : 1), "frame_rate": .double(24),
+                "num_frames": .int(run.generatesVideo ? frames : 1), "frame_rate": .double(24),
             ]
             try await agent.start("generate-\(run.trainer)", gpus: [plan.train?.gpus.first ?? 0], params: params)
             self.generation = GeneratedComparison(
