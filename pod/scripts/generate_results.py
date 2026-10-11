@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import hashlib
 import json
 import os
 import re
@@ -26,20 +27,26 @@ LTX_PIN = "9ec55f9f22798a3198d9c923856824821bc3317e"
 
 
 def source_config(request: dict[str, Any], workspace: Path) -> tuple[dict[str, Any], Path]:
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", request["source_run_id"]):
-        raise ValueError("invalid source run id")
-    source = workspace / "runs" / request["source_run_id"]
-    cfg = json.loads((source / "run.json").read_text(encoding="utf-8"))
-    root = (source / "output").resolve()
+    if any(
+        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", request[key])
+        for key in ("source_run_id", "run_id")
+    ):
+        raise ValueError("invalid source or generation run id")
     relative = request["checkpoint"]
     parts = relative.split("/")
     if any(p in {"", ".", ".."} for p in parts) or "\x00" in relative:
         raise ValueError("checkpoint must be relative to the source run's output")
-    checkpoint = (root / relative).resolve(strict=True)
-    if checkpoint != root.joinpath(*parts) or not checkpoint.is_file():
-        raise ValueError("checkpoint must be a regular, non-symlink run output")
-    if checkpoint.suffix != ".safetensors":
+    if Path(relative).suffix != ".safetensors":
         raise ValueError("checkpoint must be a safetensors file")
+    source = workspace / "runs" / request["run_id"]
+    cfg = json.loads((source / "source-run.json").read_text(encoding="utf-8"))
+    checkpoint = source / "selected-checkpoint.safetensors"
+    if checkpoint.is_symlink() or not checkpoint.is_file():
+        raise ValueError("selected checkpoint snapshot is unavailable")
+    with checkpoint.open("rb") as file:
+        actual = hashlib.file_digest(file, "sha256").hexdigest()
+    if actual != request["checkpoint_sha256"]:
+        raise ValueError("selected checkpoint snapshot checksum changed")
     return cfg, checkpoint
 
 
@@ -194,6 +201,7 @@ def generate(config_path: Path, trainer: str) -> int:
         "trainer": trainer,
         "base_model": cfg["base_model"],
         "upstream_revision": AI_PIN if trainer == "aitoolkit" else LTX_PIN,
+        "source_config": cfg,
         "state": "generating",
         "pairs": rows,
     }
@@ -219,6 +227,8 @@ def generate(config_path: Path, trainer: str) -> int:
         raise
     finally:
         path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        # Provenance stays in the manifest; keep large private copies only during sampling.
+        checkpoint.unlink()
     return 0
 
 

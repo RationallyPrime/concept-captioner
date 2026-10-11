@@ -1,5 +1,6 @@
 """Concrete control-plane witnesses; no GPU, model download or provider calls."""
 
+import hashlib
 import json
 
 import pytest
@@ -154,3 +155,23 @@ def test_run_config_reports_captured_revision_and_hides_token(client, settings):
     assert response.status_code == 200
     assert response.json()["dataset"] == {"revision": "abc123", "repo_id": "me/data", "count": 2}
     assert "hf_token" not in response.json()["config"]
+
+
+def test_generation_prepares_private_immutable_checkpoint_and_config_snapshot(settings):
+    paths = settings.paths
+    run, source = saved_run(paths)
+    source["hf_token"] = "private-not-real-token"
+    (run / "run.json").write_text(json.dumps(source))
+    params = parse_params("generate-aitoolkit", request(), paths)
+    CATALOG["generate-aitoolkit"].prepare(params, paths)
+    target = paths.run_dir(params.run_id)
+    prepared = json.loads((target / "generation.json").read_text())
+    captured = json.loads((target / "source-run.json").read_text())
+    original = run / "output/source-run/source-run_000002.safetensors"
+    original.write_bytes(b"resumed weights")
+    source["steps"] = 3
+    (run / "run.json").write_text(json.dumps(source))
+    assert (target / "selected-checkpoint.safetensors").read_bytes() == b"checkpoint"
+    assert prepared["checkpoint_sha256"] == hashlib.sha256(b"checkpoint").hexdigest()
+    assert captured["steps"] == 2 and "hf_token" not in captured
+    assert not (target / "output").exists()  # snapshots are outside served run outputs

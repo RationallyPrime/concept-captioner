@@ -727,6 +727,14 @@ the pinned preprocessor's actual bucket selection (aspect difference, then frame
 then area among fitting buckets) and refuses any choice that would truncate frames or
 change the approved clip's aspect ratio. No temporal subsampling flag is exposed.
 
+**Selected checkpoint custody.** Generation preparation privately captures the selected
+checkpoint and sanitized source run configuration before either inference variant starts.
+A resume on another GPU cannot change those inputs between base and LoRA sampling. The
+comparison manifest records the captured checkpoint SHA-256 and source settings. The large
+private checkpoint copy is removed when generation returns normally or through its error
+handler; forced process termination can leave it in the private run directory. It is outside
+the run output directory and is not offered by the files/download API.
+
 **Repeat and Resume.** Repeat prefills editable native settings and the saved dataset
 revision, then creates a new run and dataset folder. Resume sends `resume: true` with the
 same run ID; dataset, model, triggers, rank/alpha, learning rate, resolution, batch size,

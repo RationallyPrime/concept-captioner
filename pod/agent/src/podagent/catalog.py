@@ -19,6 +19,7 @@ stripped from ``run.json`` and the fake-mode argv, and are redacted by ``Service
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -679,15 +680,20 @@ def _validate_training_start(name: str, params: RunConfig, paths: Paths) -> None
             )
 
 
-def _validate_generation(name: str, params: GenerationParams, paths: Paths) -> None:
-    if paths.run_dir(params.run_id).exists():
-        _invalid(params, "Choose a new generation run_id; existing outputs are kept")
+def _generation_source(params: GenerationParams, paths: Paths) -> tuple[dict[str, Any], Path]:
     source = paths.run_dir(params.source_run_id)
     try:
         cfg = json.loads((source / RUN_JSON).read_text())
-        resolve_run_file(params.source_run_id, source, params.checkpoint)
+        checkpoint = resolve_run_file(params.source_run_id, source, params.checkpoint)
     except (OSError, ValueError, AgentError) as error:
         _invalid(params, f"The source run or checkpoint is unavailable: {error}")
+    return cfg, checkpoint
+
+
+def _validate_generation(name: str, params: GenerationParams, paths: Paths) -> None:
+    if paths.run_dir(params.run_id).exists():
+        _invalid(params, "Choose a new generation run_id; existing outputs are kept")
+    cfg, _ = _generation_source(params, paths)
     supported = "black-forest-labs/FLUX.1-dev" if name == "generate-aitoolkit" else LTX_HUB_MODEL
     if cfg.get("base_model") != supported or not params.checkpoint.endswith(".safetensors"):
         _invalid(params, f"This generation path supports {supported} checkpoints only")
@@ -864,10 +870,28 @@ def _trainer_prepare(params: ServiceParams, paths: Paths) -> None:
 
 def _generation_prepare(params: ServiceParams, paths: Paths) -> None:
     cfg = _as(params, GenerationParams)
+    source, checkpoint = _generation_source(cfg, paths)
+    for key in SECRET_FIELDS:
+        source.pop(key, None)
     run_dir = paths.run_dir(cfg.run_id)
     run_dir.mkdir(parents=True, exist_ok=False)
+    # A simultaneous resume may replace an unnumbered final save on another GPU. Capture
+    # both selected inputs before launching either inference variant, not after base sampling.
+    (run_dir / "source-run.json").write_text(json.dumps(source, indent=2) + "\n", encoding="utf-8")
+    digest = hashlib.sha256()
+    with (
+        checkpoint.open("rb") as src,
+        (run_dir / "selected-checkpoint.safetensors").open("wb") as out,
+    ):
+        while chunk := src.read(1024 * 1024):
+            out.write(chunk)
+            digest.update(chunk)
     (run_dir / "generation.json").write_text(
-        json.dumps(cfg.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8"
+        json.dumps(
+            {**cfg.model_dump(mode="json"), "checkpoint_sha256": digest.hexdigest()}, indent=2
+        )
+        + "\n",
+        encoding="utf-8",
     )
 
 
