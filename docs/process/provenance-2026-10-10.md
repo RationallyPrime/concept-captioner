@@ -60,9 +60,19 @@ day. The audience, GUI-walkthrough and DESIGN.md edits have no owner confirmatio
 
 ## After 2026-10-10
 
-Commits from the 2026-10-11 fix round were made by Claude workflows and carry a
-`Co-Authored-By: Claude Opus 5.5` trailer.
+Commits on `main` after `e620882`, 2026-10-11, as each commit records itself:
+
+| commit | time | author | trailer | subject |
+|---|---|---|---|---|
+| `1c622e3` | 00:28 | `gnomon <gnomon@sokrates.is>` | `Co-Authored-By: Claude Fable 5.1` | Refuse retention-controlling keys in a job's extra_body, in both languages |
+| `fc89ccb` | 00:33 | `gnomon <gnomon@sokrates.is>` | `Co-Authored-By: Claude Fable 5.1` | Python accepts only the unified job settings keys and forces OpenAI storage off |
+| `371c9ad` | 00:36 | Hákon Freyr Gunnarsson | none | Defer re-staging until the owner requests it |
+| `8cda07c` | 00:40 | Hákon Freyr Gunnarsson | none | Add video training data to the later roadmap |
+
+`371c9ad` and `8cda07c` carry Hákon's identity and no trailer, so the commits do not show who
+produced them; their producer is unrecorded unless Hákon or the integrator states it. Later
+commits are added here by hash in the same form when they reach `main`.
 
 The local narrative candidate in the private notes (`restage/candidate`) uses the placeholder
-identity `Codex narrative candidate <codex@local.invalid>`; a real identity must be chosen
-before that history is published.
+identity `Codex narrative candidate <codex@local.invalid>`. It is a historical draft, deferred
+under the re-stage rule in `docs/CODEX-HANDOFF.md`.
