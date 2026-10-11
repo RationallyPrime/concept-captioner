@@ -1,4 +1,5 @@
 import ConceptCore
+import CryptoKit
 import Foundation
 
 struct TrainingPlan: Decodable {
@@ -32,7 +33,7 @@ struct AgentService: Decodable {
     }
 }
 
-struct TrainingPoint: Identifiable {
+struct TrainingPoint: Identifiable, Codable, Equatable {
     var id: Int {
         step
     }
@@ -41,19 +42,64 @@ struct TrainingPoint: Identifiable {
     let loss: Double
 }
 
+/// One file of a finished run, as the agent's `GET /runs/{id}/files` lists it.
+struct RunFile: Codable, Equatable {
+    /// Relative to the run directory, `/`-separated.
+    let path: String
+    let size: Int
+    let sha256: String
+    var mtime: Double?
+}
+
 protocol PodAgent: Sendable {
     func plan() async throws -> TrainingPlan
     func services() async throws -> [AgentService]
     func start(_ service: String, gpus: [Int], params: JSONObject) async throws
     func stop(_ service: String) async throws
-    func logs(_ service: String) async throws -> String
+    /// The trainer log of a run, read from the volume (POD-SPEC 2.8), so it survives an agent restart.
+    func runLog(runID: String) async throws -> String
     func latest(runID: String) async throws -> TrainingPoint?
+    /// Every loss point TensorBoard holds for the run (through the agent's authenticated proxy).
+    func history(runID: String) async throws -> [TrainingPoint]
+    func runFiles(runID: String) async throws -> [RunFile]
+    /// Streams one run file to `destination` without holding it in memory.
+    func download(runID: String, path: String, to destination: URL) async throws
+}
+
+/// Streams a response body to disk. The seam exists so tests never touch the network.
+protocol FileDownloading: Sendable {
+    /// Writes the body to `destination` on a 2xx reply and returns the HTTP status either way.
+    func download(_ request: URLRequest, to destination: URL) async throws -> Int
+}
+
+struct URLSessionDownloader: FileDownloading {
+    func download(_ request: URLRequest, to destination: URL) async throws -> Int {
+        let (temporary, response) = try await URLSession.shared.download(for: request, delegate: NoRedirects())
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if (200 ..< 300).contains(status) {
+            try? FileManager.default.removeItem(at: destination)
+            try FileManager.default.moveItem(at: temporary, to: destination)
+        }
+        return status
+    }
+
+    /// The agent never redirects; refusing keeps its bearer token on its own host.
+    private final class NoRedirects: NSObject, URLSessionTaskDelegate, Sendable {
+        func urlSession(
+            _: URLSession, task _: URLSessionTask,
+            willPerformHTTPRedirection _: HTTPURLResponse, newRequest _: URLRequest
+        ) async -> URLRequest? {
+            nil
+        }
+    }
 }
 
 struct PodAgentClient: PodAgent {
     let baseURL: URL
     let token: String
     let transport: any HTTPTransport
+    var downloader: any FileDownloading = URLSessionDownloader()
 
     func plan() async throws -> TrainingPlan {
         try await JSONDecoder().decode(TrainingPlan.self, from: call(
@@ -78,8 +124,10 @@ struct PodAgentClient: PodAgent {
         _ = try await call("services/\(service)/stop", method: "POST", body: ["timeout_s": .int(30)])
     }
 
-    func logs(_ service: String) async throws -> String {
-        let json = try await JSONValue(parsing: call("services/\(service)/logs"))
+    func runLog(runID: String) async throws -> String {
+        let json = try await JSONValue(parsing: call("runs/\(runID)/log", query: [
+            URLQueryItem(name: "tail", value: "200"),
+        ]))
         let lines = json.objectValue?["lines"]?.arrayValue ?? []
         return lines.compactMap(\.stringValue).joined(separator: "\n")
     }
@@ -92,8 +140,51 @@ struct PodAgentClient: PodAgent {
         return TrainingPoint(step: step, loss: value)
     }
 
-    private func call(_ path: String, method: String = "GET", body: JSONObject? = nil) async throws -> Data {
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+    func history(runID: String) async throws -> [TrainingPoint] {
+        // TensorBoard names each event directory under /workspace/runs as a run: `<id>/tensorboard`,
+        // plus `<id>/tensorboard/<name>_<timestamp>` for ai-toolkit's native files.
+        let tags = try await JSONValue(parsing: call("tensorboard/data/plugin/scalars/tags")).objectValue ?? [:]
+        let runs = tags.keys.filter { $0.hasPrefix(runID + "/") }.sorted()
+        for tag in ["loss", "scraped/loss"] {
+            guard let run = runs.first(where: { tags[$0]?.objectValue?[tag] != nil }) else { continue }
+            let rows = try await JSONValue(parsing: call("tensorboard/data/plugin/scalars/scalars", query: [
+                URLQueryItem(name: "run", value: run), URLQueryItem(name: "tag", value: tag),
+            ])).arrayValue ?? []
+            // Each row is [wall_time, step, value].
+            return rows.compactMap { row in
+                guard let values = row.arrayValue, values.count == 3, let step = values[1].intValue,
+                      let loss = values[2].doubleValue ?? values[2].intValue.map(Double.init) else { return nil }
+                return TrainingPoint(step: step, loss: loss)
+            }
+        }
+        return []
+    }
+
+    func runFiles(runID: String) async throws -> [RunFile] {
+        struct Result: Decodable { let files: [RunFile] }
+        return try await JSONDecoder().decode(Result.self, from: call("runs/\(runID)/files")).files
+    }
+
+    func download(runID: String, path: String, to destination: URL) async throws {
+        var url = baseURL.appendingPathComponent("runs/\(runID)/files")
+        for component in path.split(separator: "/") {
+            url.appendPathComponent(String(component))
+        }
+        var request = URLRequest(url: url, timeoutInterval: 120)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let status = try await downloader.download(request, to: destination)
+        guard (200 ..< 300).contains(status) else { throw Self.failure(status) }
+    }
+
+    private func call(
+        _ path: String, method: String = "GET", body: JSONObject? = nil, query: [URLQueryItem] = []
+    ) async throws -> Data {
+        var url = baseURL.appendingPathComponent(path)
+        if !query.isEmpty, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            components.queryItems = query
+            url = components.url ?? url
+        }
+        var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if let body {
@@ -101,26 +192,28 @@ struct PodAgentClient: PodAgent {
             request.httpBody = JSONValue.object(body).pythonDumpsData()
         }
         let response = try await transport.send(request)
-        guard (200 ..< 300).contains(response.status) else {
-            if [502, 503, 504].contains(response.status) || (520 ... 526).contains(response.status) {
-                throw StudioError
-                    .message(
-                        "The computer is starting or unreachable. Refresh in a moment; you can still stop it."
-                    )
-            }
-            throw StudioError
-                .message(
-                    "The computer could not complete this action (\(response.status)). Check its status and logs."
-                )
-        }
+        guard (200 ..< 300).contains(response.status) else { throw Self.failure(response.status) }
         return response.body
+    }
+
+    private static func failure(_ status: Int) -> StudioError {
+        if [502, 503, 504].contains(status) || (520 ... 526).contains(status) {
+            return StudioError.message(
+                "The computer is starting or unreachable. Refresh in a moment; you can still stop it."
+            )
+        }
+        return StudioError.message(
+            "The computer could not complete this action (\(status)). Check its status and logs."
+        )
     }
 }
 
 actor DemoPodAgent: PodAgent {
     let count: Int
     private var states: [String: String] = [:]
+    private var runIDs: [String: String] = [:]
     private var ticks = 0
+    private let lora = Data("demo LoRA weights".utf8)
 
     init(count: Int) {
         self.count = count
@@ -135,11 +228,12 @@ actor DemoPodAgent: PodAgent {
     }
 
     func services() -> [AgentService] {
-        states.map { AgentService(name: $0.key, state: $0.value, groupAlive: false) }
+        states.map { AgentService(name: $0.key, state: $0.value, groupAlive: false, runID: runIDs[$0.key]) }
     }
 
     func start(_ service: String, gpus: [Int], params: JSONObject) {
         states[service] = ["pull-dataset", "push-lora"].contains(service) ? "exited" : "running"
+        runIDs[service] = params["run_id"]?.stringValue
         if service.hasPrefix("trainer-") { ticks = 0 }
     }
 
@@ -147,9 +241,9 @@ actor DemoPodAgent: PodAgent {
         states[service] = "stopped"
     }
 
-    func logs(_ service: String)
-        -> String {
-        "Demo · \(service): \(states[service] ?? "idle")\nNo remote computer is being billed."
+    func runLog(runID: String) -> String {
+        let trainer = states.first { $0.key.hasPrefix("trainer-") }
+        return "Demo · \(runID): \(trainer?.value ?? "idle")\nNo remote computer is being billed."
     }
 
     func latest(runID: String) -> TrainingPoint? {
@@ -161,5 +255,18 @@ actor DemoPodAgent: PodAgent {
             }
         }
         return TrainingPoint(step: ticks * 25, loss: 1 / Double(ticks + 1))
+    }
+
+    func history(runID: String) -> [TrainingPoint] {
+        (0 ..< ticks).map { TrainingPoint(step: ($0 + 1) * 25, loss: 1 / Double($0 + 2)) }
+    }
+
+    func runFiles(runID: String) -> [RunFile] {
+        let digest = SHA256.hash(data: lora).map { String(format: "%02x", $0) }.joined()
+        return [RunFile(path: "output/\(runID).safetensors", size: lora.count, sha256: digest)]
+    }
+
+    func download(runID: String, path: String, to destination: URL) throws {
+        try lora.write(to: destination)
     }
 }

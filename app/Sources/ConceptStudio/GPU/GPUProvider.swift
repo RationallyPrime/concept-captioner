@@ -34,52 +34,104 @@ struct GPUVolume: Identifiable, Codable {
     let dataCenter: String
 }
 
+/// A pod as the provider reports it. Every field added after the first release is optional so a
+/// record saved by an older build still decodes (startup recovery depends on it).
 struct RentedPod: Identifiable, Codable {
     struct GPUs: Codable { let count: Int }
+    struct Mounts: Codable { let network: [PodNetworkMount]? }
+
     let id: String
     let status: String
     let cost: Double
     let gpu: GPUs
+    var name: String?
+    var mounts: Mounts?
+
+    init(id: String, status: String, cost: Double, gpu: GPUs, name: String? = nil, mounts: Mounts? = nil) {
+        self.id = id
+        self.status = status
+        self.cost = cost
+        self.gpu = gpu
+        self.name = name
+        self.mounts = mounts
+    }
+
+    /// The network volume mounted at /workspace, when the provider reports it.
+    var volumeID: String? {
+        mounts?.network?.first?.volumeId
+    }
 
     var isRunning: Bool {
         !["EXITED", "ERROR", "TERMINATED"].contains(status)
     }
 
-    var agentURL: URL {
-        URL(string: "https://\(id)-8800.proxy.runpod.net")!
+    /// Pods this app creates are named `ConceptStudio-<project>`; earlier builds used the bare prefix.
+    var isFromThisApp: Bool {
+        guard let name else { return false }
+        return name == PodNaming.prefix || name.hasPrefix(PodNaming.prefix + "-")
+    }
+}
+
+struct PodNetworkMount: Codable {
+    let volumeId: String
+}
+
+/// The ports the app publishes on every pod (POD-SPEC §1). Which URL reaches a port is the
+/// provider's business, not the workspace's.
+enum PodPort {
+    static let agent = 8800
+    static let inference = 8000
+}
+
+enum PodNaming {
+    static let prefix = "ConceptStudio"
+
+    static func name(project: String) -> String {
+        let allowed = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+        let cleaned = String(project.map { allowed.contains($0) ? $0 : "-" }.prefix(48))
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return cleaned.isEmpty ? prefix : "\(prefix)-\(cleaned)"
     }
 }
 
 struct PodCreation {
+    let name: String
     let offer: GPUOffer
     let count: Int
     let image: String
+    /// Lowest host CUDA version the image's wheels run on, as `major.minor`.
+    let minCudaVersion: String
     let volume: GPUVolume
     let agentToken: String
     let hubToken: String
 }
 
 protocol GPUProvider: Sendable {
-    func offers(count: Int) async throws -> [GPUOffer]
+    func offers(count: Int, minCudaVersion: String) async throws -> [GPUOffer]
     func volumes() async throws -> [GPUVolume]
     func create(_ request: PodCreation) async throws -> RentedPod
     func status(id: String) async throws -> RentedPod
+    /// Every pod on the account this app created (named `ConceptStudio…`), any status.
+    func list() async throws -> [RentedPod]
     func stop(id: String) async throws
     func terminate(id: String) async throws
+    /// The HTTPS URL that reaches `port` on the pod.
+    func url(for pod: RentedPod, port: Int) -> URL
 }
 
-/// Uses RunPod's REST v2 schema, fetched from api.runpod.io/v2/openapi.json on 2026-10-10.
+/// Uses RunPod's REST v2 schema, fetched from api.runpod.io/v2/openapi.json on 2026-10-10 and
+/// re-read 2026-10-11 for `GET /v2/pods` (cursor-paginated, newest first, with `name` and `mounts`).
 struct RunPodProvider: GPUProvider {
     let key: String
     let transport: any HTTPTransport
     private let origin = URL(string: "https://api.runpod.io/v2")!
 
-    func offers(count: Int) async throws -> [GPUOffer] {
+    func offers(count: Int, minCudaVersion: String) async throws -> [GPUOffer] {
         struct Result: Decodable { let gpus: [GPUOffer] }
         let data = try await call("catalog/gpus", query: [
             URLQueryItem(name: "include", value: "AVAILABILITY"), URLQueryItem(name: "product", value: "POD"),
             URLQueryItem(name: "cloud", value: "SECURE"), URLQueryItem(name: "count", value: String(count)),
-            URLQueryItem(name: "minCudaVersion", value: "13.0"),
+            URLQueryItem(name: "minCudaVersion", value: minCudaVersion),
         ])
         return try JSONDecoder().decode(Result.self, from: data).gpus
             .filter { $0.secure && $0.maxCount.secure >= count && $0.price.secure > 0 }
@@ -96,11 +148,11 @@ struct RunPodProvider: GPUProvider {
             throw StudioError.message("Choose 1, 2 or 4 GPUs available for this computer.")
         }
         let payload: JSONObject = [
-            "name": .string("ConceptStudio"), "image": .string(request.image), "cloud": .string("SECURE"),
+            "name": .string(request.name), "image": .string(request.image), "cloud": .string("SECURE"),
             "gpu": .object([
                 "id": .string(request.offer.id),
                 "count": .int(request.count),
-                "minCudaVersion": .string("13.0"),
+                "minCudaVersion": .string(request.minCudaVersion),
                 "minRamPerGpu": .int(60),
             ]),
             "disk": .int(50),
@@ -108,7 +160,7 @@ struct RunPodProvider: GPUProvider {
             "mounts": .object(["network": .array([.object([
                 "volumeId": .string(request.volume.id), "path": .string("/workspace"),
             ])])]),
-            "ports": .array([.string("8800/http"), .string("8000/http")]),
+            "ports": .array([.string("\(PodPort.agent)/http"), .string("\(PodPort.inference)/http")]),
             "env": .object(["PODAGENT_TOKEN": .string(request.agentToken), "HF_TOKEN": .string(request.hubToken)]),
         ]
         return try await JSONDecoder().decode(RentedPod.self, from: call("pods", method: "POST", body: payload))
@@ -118,12 +170,39 @@ struct RunPodProvider: GPUProvider {
         try await JSONDecoder().decode(RentedPod.self, from: call("pods/\(id)"))
     }
 
+    func list() async throws -> [RentedPod] {
+        struct Pagination: Decodable {
+            let nextCursor: String?
+            let hasNextPage: Bool
+        }
+        struct Page: Decodable {
+            let pods: [RentedPod]
+            let pagination: Pagination?
+        }
+        var pods: [RentedPod] = []
+        var cursor: String?
+        for _ in 0 ..< 20 {
+            var query = [URLQueryItem(name: "limit", value: "200")]
+            if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+            let page = try await JSONDecoder().decode(Page.self, from: call("pods", query: query))
+            pods += page.pods.filter(\.isFromThisApp)
+            guard page.pagination?.hasNextPage == true, let next = page.pagination?.nextCursor else { break }
+            cursor = next
+        }
+        return pods
+    }
+
     func stop(id: String) async throws {
         _ = try await call("pods/\(id)/action", method: "POST", body: ["action": .string("stop")])
     }
 
     func terminate(id: String) async throws {
         _ = try await call("pods/\(id)", method: "DELETE")
+    }
+
+    /// RunPod's HTTP proxy: `https://<pod-id>-<port>.proxy.runpod.net` (POD-SPEC §1).
+    func url(for pod: RentedPod, port: Int) -> URL {
+        URL(string: "https://\(pod.id)-\(port).proxy.runpod.net")!
     }
 
     private func call(
@@ -158,7 +237,7 @@ struct RunPodProvider: GPUProvider {
 actor DemoGPUProvider: GPUProvider {
     private var pod = RentedPod(id: "demo", status: "EXITED", cost: 0, gpu: .init(count: 1))
 
-    func offers(count: Int) -> [GPUOffer] {
+    func offers(count: Int, minCudaVersion: String) -> [GPUOffer] {
         [GPUOffer(
             id: "demo-80",
             name: "Demo training computer",
@@ -179,7 +258,8 @@ actor DemoGPUProvider: GPUProvider {
             id: "demo",
             status: "RUNNING",
             cost: request.offer.price.secure * Double(request.count),
-            gpu: .init(count: request.count)
+            gpu: .init(count: request.count),
+            name: request.name
         )
         return pod
     }
@@ -188,11 +268,19 @@ actor DemoGPUProvider: GPUProvider {
         pod
     }
 
+    func list() -> [RentedPod] {
+        pod.status == "TERMINATED" ? [] : [pod]
+    }
+
     func stop(id: String) {
-        pod = RentedPod(id: id, status: "EXITED", cost: 0, gpu: pod.gpu)
+        pod = RentedPod(id: id, status: "EXITED", cost: 0, gpu: pod.gpu, name: pod.name)
     }
 
     func terminate(id: String) {
-        pod = RentedPod(id: id, status: "TERMINATED", cost: 0, gpu: pod.gpu)
+        pod = RentedPod(id: id, status: "TERMINATED", cost: 0, gpu: pod.gpu, name: pod.name)
+    }
+
+    nonisolated func url(for pod: RentedPod, port: Int) -> URL {
+        URL(string: "https://demo.invalid:\(port)")!
     }
 }
