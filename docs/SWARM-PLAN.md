@@ -113,10 +113,8 @@ intended statistical conclusions. Define the outcome, independent runs and evalu
 size before running it. Tiny trainer runs establish execution, curves and transfers, not
 caption-policy effectiveness or LoRA quality.
 
-Then prepare the second repository's proposed narrative commits from v0.1.0, each building and
-passing its tests, ending in a tree identical to the verified one, with the required one-page
-decision sheet per commit. Walk those sheets with Hákon before publishing that repository.
-This repository remains the exploration record.
+Re-staging follows the owner-triggered rule in `CODEX-HANDOFF.md`; do not schedule it as an
+automatic next step after implementation or verification.
 
 ## Where the rest went
 

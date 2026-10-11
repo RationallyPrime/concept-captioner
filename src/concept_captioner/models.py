@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import typing
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
@@ -32,6 +33,7 @@ import httpx2
 from pydantic import BaseModel
 from pydantic_ai import NativeOutput, PromptedOutput, ToolOutput, UserError
 from pydantic_ai.models import Model, infer_model
+from pydantic_ai.models.openai import OpenAIResponsesModel
 from pydantic_ai.settings import ModelSettings
 
 from .job import EndpointSpec, OutputMode, ThinkingLevel
@@ -157,8 +159,28 @@ def _model(spec: EndpointSpec) -> Model:
         raise ConfigurationError(f"{error}{hint}") from None
 
 
+_PRIVACY_BODY_KEYS = frozenset({"store", "metadata", "user", "safety_identifier"})
+"""Request-body keys that control what the provider retains or attributes; never from a job file."""
+
+JOB_SETTING_KEYS = frozenset(typing.get_type_hints(ModelSettings))
+"""The settings keys a job file may carry: pydantic-ai's unified ``ModelSettings`` and nothing else.
+
+Provider-prefixed keys (``openai_store``, ``openai_user``, ``anthropic_*``...) are refused, as the
+Swift core refuses them (CORE-SPEC, RequestSettings): a job file is portable between the two
+implementations, and the provider-specific keys include ones that control what a provider retains
+or attributes, which a downloaded file must not be able to set.
+"""
+
+
 def _settings(spec: EndpointSpec, thinking: ThinkingLevel) -> ModelSettings:
     settings: dict[str, Any] = dict(spec.settings)
+    for key in settings:
+        if key not in JOB_SETTING_KEYS:
+            raise ConfigurationError(
+                f"job setting {key!r} is not a job-file setting; provider-prefixed settings are "
+                "not portable and are refused in both implementations. Allowed: "
+                + ", ".join(sorted(JOB_SETTING_KEYS))
+            )
     for header in settings.get("extra_headers") or {}:
         name = header.lower().replace("-", "").replace("_", "")
         if (
@@ -168,6 +190,11 @@ def _settings(spec: EndpointSpec, thinking: ThinkingLevel) -> ModelSettings:
             or name in {"cookie", "setcookie", "host"}
         ):
             raise ConfigurationError(f"job setting header {header!r} is not allowed")
+    for key in settings.get("extra_body") or {}:
+        if str(key).lower().replace("-", "_") in _PRIVACY_BODY_KEYS:
+            # extra_body is merged over the request last, so a downloaded job could switch
+            # provider-side retention back on with it. Retention is not the job file's to set.
+            raise ConfigurationError(f"job setting extra_body may not set {key!r}")
     if thinking != "none":
         settings.setdefault("thinking", thinking)
     return ModelSettings(**settings)  # type: ignore[typeddict-item]
@@ -177,6 +204,10 @@ def resolve(spec: str | EndpointSpec, *, thinking: ThinkingLevel = "none") -> Re
     endpoint = parse_spec(spec) if isinstance(spec, str) else spec
     settings = _settings(endpoint, thinking)
     model = _model(endpoint)
+    if isinstance(model, OpenAIResponsesModel):
+        # Retention is not the job file's to set: off on every Responses route, after the job's
+        # own keys have been validated above.
+        settings["openai_store"] = False
     if endpoint.kind == "vllm" and not model.client.api_key:
         from openai import omit
 
