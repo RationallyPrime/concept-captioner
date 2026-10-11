@@ -58,3 +58,7 @@ preferences; the stale copy can write an old training image override back.
 9. **Observation: dataset advice looks like it drops samples.** Advice deliberately reviews at most
    48 photos, chosen evenly across the set; the progress line ("… of 48 samples") reads as if the
    rest were excluded. Say it is a sample, e.g. "reviewing 48 of 69, chosen evenly".
+10. **Decided: expandable sections open from the whole row.** Today a disclosure ("Advanced
+    settings", "Definitions" and the rest) opens only when the chevron itself is clicked; a click
+    on its label does nothing (reproduced in the concept editor). Clicking anywhere on the row
+    should toggle it, or at least the label as well as the chevron.
