@@ -6,7 +6,7 @@ import Testing
 @Suite("on-device image suggestions")
 struct VisionInspectorTests {
     @Test func pixelEquivalentReencodingIsSimilarButDistinctIllustrationsAreNot() async throws {
-        let project = try await DemoProject.create()
+        let project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
         let original = try #require(project.images.first?.url)
         let bitmap = try #require(NSBitmapImageRep(data: Data(contentsOf: original)))

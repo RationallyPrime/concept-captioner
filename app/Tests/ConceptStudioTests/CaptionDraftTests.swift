@@ -7,9 +7,9 @@ import Testing
 @MainActor
 struct CaptionDraftTests {
     private func makeSession() async throws -> StudioSession {
-        let session = StudioSession()
+        let session = makeTestSession()
         session.demoMode = true
-        session.project = try await DemoProject.create()
+        session.project = try await makeDemoProject()
         return session
     }
 
@@ -47,7 +47,7 @@ struct CaptionDraftTests {
         session.setCaptionDraft(draft, for: first.id)
         session.setCaptionDraft(CaptionDraft(text: "NORA7 in the garden.", isFinal: false), for: second.id)
         session.saveCaption(id: first.id, text: draft.text, final: draft.isFinal)
-        await session.task?.value
+        await session.editTask?.value
         let sink = try SidecarSink(directory: project.imagesDirectory)
         #expect(session.errorMessage == nil)
         #expect(try String(contentsOf: sink.captionURL(for: first.id), encoding: .utf8) == draft.text)
@@ -69,7 +69,7 @@ struct CaptionDraftTests {
         try FileManager.default.moveItem(at: project.imagesDirectory, to: held)
         try Data("not a directory".utf8).write(to: project.imagesDirectory)
         session.saveCaption(id: image.id, text: draft.text, final: draft.isFinal)
-        await session.task?.value
+        await session.editTask?.value
         #expect(session.errorMessage != nil)
         #expect(session.captionDraft(for: image) == draft)
         #expect(session.project?.images.first?.caption == image.caption)
@@ -77,7 +77,7 @@ struct CaptionDraftTests {
         try FileManager.default.removeItem(at: project.imagesDirectory)
         try FileManager.default.moveItem(at: held, to: project.imagesDirectory)
         session.saveCaption(id: image.id, text: draft.text, final: draft.isFinal)
-        await session.task?.value
+        await session.editTask?.value
         #expect(session.errorMessage == nil)
         #expect(session.captionDrafts[image.id] == nil)
         #expect(session.project?.images.first?.caption == draft.text)
@@ -93,7 +93,7 @@ struct CaptionDraftTests {
         session.setCaptionDraft(saved, for: image.id)
         session.saveCaption(id: image.id, text: saved.text, final: saved.isFinal)
         session.setCaptionDraft(later, for: image.id)
-        await session.task?.value
+        await session.editTask?.value
         #expect(session.errorMessage == nil)
         #expect(session.project?.images.first?.caption == saved.text)
         #expect(session.captionDraft(for: image) == later)
@@ -126,7 +126,7 @@ struct CaptionDraftTests {
         let draft = CaptionDraft(text: " \n", isFinal: true)
         session.setCaptionDraft(draft, for: image.id)
         session.saveCaption(id: image.id, text: draft.text, final: draft.isFinal)
-        await session.task?.value
+        await session.editTask?.value
         #expect(session.errorMessage?.contains("Write a caption") == true)
         #expect(session.captionDraft(for: image) == draft)
         #expect(session.project?.images.first?.caption == image.caption)

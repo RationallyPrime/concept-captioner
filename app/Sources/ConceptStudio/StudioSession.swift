@@ -7,6 +7,70 @@ struct CaptionDraft: Equatable {
     var isFinal: Bool
 }
 
+/// A question the session needs the user to answer before it continues. The session never
+/// presents UI itself: it publishes `pendingConfirmation`, a view presents it (an alert or a
+/// confirmation dialog built from these strings) and answers with `resolveConfirmation(_:)`.
+enum StudioConfirmation: Equatable {
+    /// Switching project, opening the demo or closing would discard unsaved caption edits.
+    case discardCaptionDrafts(count: Int)
+    /// Closing (the project, the window or the app) while work runs or a rented computer bills.
+    case stopAndClose(podRunning: Bool)
+
+    var title: String {
+        switch self {
+        case .discardCaptionDrafts: "Discard unsaved caption edits?"
+        case let .stopAndClose(podRunning):
+            podRunning ? "Stop the rented computer before closing?" : "Cancel the current work?"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case let .discardCaptionDrafts(count):
+            "\(count) unsaved caption edits will be discarded. "
+                + "Save those captions on Review to keep them. Saved captions are unchanged."
+        case let .stopAndClose(podRunning):
+            podRunning
+                ? "The computer is still running and costing money. Closing will cancel local work and stop it. "
+                + "If the stop cannot be confirmed, this project will stay open."
+                : "Completed captions are saved. Work still in progress will be cancelled before the project closes."
+        }
+    }
+
+    var confirmTitle: String {
+        switch self {
+        case .discardCaptionDrafts: "Discard edits"
+        case .stopAndClose: "Stop and close"
+        }
+    }
+
+    var cancelTitle: String {
+        switch self {
+        case .discardCaptionDrafts: "Keep editing"
+        case .stopAndClose: "Keep open"
+        }
+    }
+
+    /// Confirming loses work or stops something; present the confirm button as destructive.
+    var isDestructive: Bool {
+        true
+    }
+}
+
+/// The confirmation a view should present now, with the continuation that resumes the waiting action.
+struct PendingConfirmation: Identifiable {
+    let id = UUID()
+    let confirmation: StudioConfirmation
+    fileprivate let resume: (Bool) -> Void
+}
+
+/// Two independent work slots. `run` holds long work (caption runs, imports, publishing, opening a
+/// project, model requests); `edit` holds short saves the user makes while reviewing, so Review and
+/// Concepts stay usable while a run is in progress.
+enum WorkGate {
+    case run, edit
+}
+
 @MainActor @Observable
 final class StudioSession {
     var project: StudioProject?
@@ -15,18 +79,30 @@ final class StudioSession {
     var selectedImageID: String?
     var message = ""
     var errorMessage: String?
+    /// The run gate is occupied (see `WorkGate.run`).
     var busy = false
+    /// The edit gate is occupied (see `WorkGate.edit`).
+    var editing = false
     var completed = 0
     var task: Task<Void, Never>?
+    var editTask: Task<Void, Never>?
+    @ObservationIgnored var runTitle = ""
+    @ObservationIgnored var editTitle = ""
+    /// Photos the current caption run has not reported yet; saving one of them waits for its result.
+    var runPendingIDs: Set<String> = []
+    var pendingConfirmation: PendingConfirmation?
     var scenario: DemoScenario = .success
     var analyses: [String: ImageAnalysis] = [:]
+    var analyzing = false
+    @ObservationIgnored var analysisTask: Task<Void, Never>?
+    @ObservationIgnored var analysisGeneration = 0
     var datasetAdvice = ""
     var mappingProposals: [String: Job.Mapping] = [:]
     var comparison = ""
     private(set) var captionDrafts: [String: CaptionDraft] = [:]
     var usingPodCaptioner = false
     var startupRestored = false
-    var recentPaths = ProjectAccess.recentPaths
+    var recentPaths: [String] = []
     var endpointKind = ""
     var modelName = ""
     var criticKind = ""
@@ -44,25 +120,88 @@ final class StudioSession {
     var customBaseURL = ""
     var requestBaseURL = ""
     var criticRequestBaseURL = ""
-    var repoID = ""
-    var privateDataset = true
+    /// App-only settings for the open project (`<project>/.conceptstudio/project.json`).
+    var projectState = ProjectAppState()
     var podImageName = ""
     var volumeID = ""
-    var skillAccess: URL?
     var projectAccess: URL?
-    var gpu = GPUWorkspace(demoMode: false)
+    var gpu: GPUWorkspace
     let inspector = VisionInspector()
     let preferences: UserDefaults
+    let secrets: any SecretStore
+    let demoDirectory: URL
 
-    init(preferences: UserDefaults = .standard, chatGPT: ChatGPTAccounts? = nil) {
+    init(
+        preferences: UserDefaults = .standard,
+        chatGPT: ChatGPTAccounts? = nil,
+        secrets: any SecretStore = KeychainStore(),
+        demoDirectory: URL = DemoProject.defaultDirectory
+    ) {
         self.preferences = preferences
+        self.secrets = secrets
+        self.demoDirectory = demoDirectory
         self.chatGPT = chatGPT ?? ChatGPTAccounts(preferences: preferences)
+        gpu = Self.makeGPUWorkspace(demoMode: false, preferences: preferences, secrets: secrets)
+        recentPaths = recents.paths
         loadSavedChoices()
+    }
+
+    static func makeGPUWorkspace(demoMode: Bool, preferences: UserDefaults, secrets: any SecretStore) -> GPUWorkspace {
+        GPUWorkspace(
+            demoMode: demoMode,
+            preferences: preferences,
+            readAgentToken: { try secrets.read($0) },
+            saveAgentToken: { token, account in try secrets.save(token, account: account) }
+        )
+    }
+
+    func makeGPUWorkspace(demoMode: Bool) -> GPUWorkspace {
+        Self.makeGPUWorkspace(demoMode: demoMode, preferences: preferences, secrets: secrets)
+    }
+
+    var recents: RecentProjects {
+        RecentProjects(preferences: preferences)
     }
 
     var selectedImage: ProjectImage? {
         project?.images.first { $0.id == selectedImageID }
     }
+
+    // MARK: Project-only settings
+
+    /// The dataset repository Publish writes to; remembered per project, blank for a new project.
+    var repoID: String {
+        get { projectState.dataset.repo }
+        set { updateProjectState { $0.dataset.repo = newValue } }
+    }
+
+    var privateDataset: Bool {
+        get { projectState.dataset.isPrivate }
+        set { updateProjectState { $0.dataset.isPrivate = newValue } }
+    }
+
+    /// Where training uploads the LoRA; remembered per project like the dataset destination.
+    var trainingOutputRepo: String {
+        get { projectState.trainingOutput.repo }
+        set { updateProjectState { $0.trainingOutput.repo = newValue } }
+    }
+
+    var trainingOutputPrivate: Bool {
+        get { projectState.trainingOutput.isPrivate }
+        set { updateProjectState { $0.trainingOutput.isPrivate = newValue } }
+    }
+
+    /// Change the project's app-only settings and save them with the project (not in demo mode).
+    func updateProjectState(_ change: (inout ProjectAppState) -> Void) {
+        var state = projectState
+        change(&state)
+        guard state != projectState else { return }
+        projectState = state
+        guard let project, !demoMode else { return }
+        do { try state.save(to: project.directory) } catch { errorMessage = Self.describe(error) }
+    }
+
+    // MARK: Caption drafts
 
     func captionDraft(for image: ProjectImage) -> CaptionDraft {
         captionDrafts[image.id] ?? CaptionDraft(text: image.caption, isFinal: image.isFinal)
@@ -88,12 +227,11 @@ final class StudioSession {
 
     var captionDiscardWarning: String? {
         guard unsavedCaptionCount > 0 else { return nil }
-        return "\(unsavedCaptionCount) unsaved caption edits will be discarded. "
-            + "Save those captions on Review to keep them. Saved captions are unchanged."
+        return StudioConfirmation.discardCaptionDrafts(count: unsavedCaptionCount).message
     }
 
     var needsCloseConfirmation: Bool {
-        unsavedCaptionCount > 0 || busy || chatGPT.isBusy || gpu.hasRunningPod || gpu.isBusy
+        unsavedCaptionCount > 0 || busy || editing || chatGPT.isBusy || gpu.hasRunningPod || gpu.isBusy
     }
 
     func clearSavedCaptionDraft(_ draft: CaptionDraft, for id: String) {
@@ -105,18 +243,40 @@ final class StudioSession {
         project?.job.unmapped(project?.images.map(\.id) ?? []).count ?? 0
     }
 
-    var keyStore: KeychainStore {
-        KeychainStore(vllmBaseURL: customBaseURL.isEmpty ? nil : customBaseURL)
+    var keyStore: SessionKeyStore {
+        SessionKeyStore(secrets: secrets, vllmBaseURL: customBaseURL.isEmpty ? nil : customBaseURL)
     }
 
-    func perform(_ title: String, operation: @escaping @MainActor () async throws -> Void) {
-        guard !busy else { return }
-        busy = true
-        completed = 0
+    // MARK: Work gates
+
+    /// Start `operation` in the given gate and return true. When that gate is occupied the action
+    /// does not start, `errorMessage` says what it is waiting for, and the result is false.
+    @discardableResult
+    func perform(
+        _ title: String,
+        gate: WorkGate = .run,
+        operation: @escaping @MainActor () async throws -> Void
+    ) -> Bool {
+        switch gate {
+        case .run:
+            guard !busy else { refuse(title, waitingFor: runTitle); return false }
+            busy = true
+            runTitle = title
+            completed = 0
+        case .edit:
+            guard !editing else { refuse(title, waitingFor: editTitle); return false }
+            editing = true
+            editTitle = title
+        }
         message = title
         errorMessage = nil
-        task = Task {
-            defer { busy = false; task = nil }
+        let work = Task {
+            defer {
+                switch gate {
+                case .run: busy = false; task = nil
+                case .edit: editing = false; editTask = nil
+                }
+            }
             do {
                 try await operation()
                 if Task.isCancelled { message = "Cancelled. Your completed work is saved." }
@@ -126,6 +286,20 @@ final class StudioSession {
                 errorMessage = Self.describe(error)
             }
         }
+        switch gate {
+        case .run: task = work
+        case .edit: editTask = work
+        }
+        return true
+    }
+
+    private func refuse(_ title: String, waitingFor current: String) {
+        errorMessage = "“\(Self.plain(title))” did not start because “\(Self.plain(current))” is still in progress. "
+            + "Wait for it to finish, or choose Cancel and try again."
+    }
+
+    private static func plain(_ title: String) -> String {
+        title.trimmingCharacters(in: CharacterSet(charactersIn: "…. "))
     }
 
     static func describe(_ error: any Error) -> String {
@@ -137,6 +311,45 @@ final class StudioSession {
         task?.cancel()
     }
 
+    // MARK: Confirmations
+
+    /// Ask the user and wait for the answer. A newer question replaces (and declines) an older one.
+    func confirm(_ confirmation: StudioConfirmation) async -> Bool {
+        await withCheckedContinuation { continuation in
+            present(confirmation) { continuation.resume(returning: $0) }
+        }
+    }
+
+    /// Run `action` now when nothing needs confirming, otherwise after the user confirms.
+    func whenConfirmed(_ confirmation: StudioConfirmation?, _ action: @escaping @MainActor () -> Void) {
+        guard let confirmation else { return action() }
+        present(confirmation) { if $0 { action() } }
+    }
+
+    func resolveConfirmation(_ confirmed: Bool) {
+        guard let pending = pendingConfirmation else { return }
+        pendingConfirmation = nil
+        pending.resume(confirmed)
+    }
+
+    private func present(_ confirmation: StudioConfirmation, resume: @escaping (Bool) -> Void) {
+        resolveConfirmation(false)
+        pendingConfirmation = PendingConfirmation(confirmation: confirmation, resume: resume)
+    }
+
+    var discardDraftsConfirmation: StudioConfirmation? {
+        unsavedCaptionCount > 0 ? .discardCaptionDrafts(count: unsavedCaptionCount) : nil
+    }
+
+    /// Everything closing needs the user to agree to, in order: discarding drafts, then stopping work.
+    func confirmCloseIfNeeded() async -> Bool {
+        if let drafts = discardDraftsConfirmation, await !confirm(drafts) { return false }
+        guard gpu.hasRunningPod || busy || editing || chatGPT.isBusy || gpu.isBusy else { return true }
+        return await confirm(.stopAndClose(podRunning: gpu.hasRunningPod))
+    }
+
+    // MARK: Startup and projects
+
     static func startupNeedsPodRecovery(_ data: Data?) -> Bool {
         guard let data, let saved = try? JSONDecoder().decode(SavedPod.self, from: data) else { return false }
         return saved.pod.isRunning
@@ -145,7 +358,7 @@ final class StudioSession {
     func restoreStartupComputer() {
         guard !startupRestored else { return }
         startupRestored = true
-        guard !demoMode, Self.startupNeedsPodRecovery(UserDefaults.standard.data(forKey: "ConceptStudio.activePod"))
+        guard !demoMode, Self.startupNeedsPodRecovery(preferences.data(forKey: "ConceptStudio.activePod"))
         else { return }
         do {
             // Restore the known running state before credentials can fail or Welcome actions can replace it.
@@ -157,94 +370,96 @@ final class StudioSession {
         configureGPU()
     }
 
+    private func refuseWhileComputerBusy(_ reason: String) -> Bool {
+        guard gpu.hasRunningPod || gpu.isBusy else { return false }
+        errorMessage = reason
+        return true
+    }
+
     func useDemo() {
-        guard !gpu.hasRunningPod, !gpu.isBusy else {
-            errorMessage = "Stop the rented computer before switching to the demo."
-            return
-        }
-        guard confirmDiscardCaptionDrafts() else { return }
-        perform("Opening the offline demo…") {
-            await self.releaseProject()
-            self.demoMode = true
-            self.showChatGPTPlanNotice = false
-            self.gpu = GPUWorkspace(demoMode: true)
-            self.project = try await DemoProject.create()
-            self.repoID = "demo/concept-studio"
-            self.selectedImageID = self.project?.images.first?.id
-            self.step = .images
-            self.message = "Demo uses synthetic illustrations, fake services, and no money."
-            try await self.analyzeImages()
-        }
-    }
-
-    func createProject() {
-        guard !gpu.hasRunningPod, !gpu.isBusy else {
-            errorMessage = "Finish the current computer action or Stop everything before changing projects."
-            return
-        }
-        guard confirmDiscardCaptionDrafts() else { return }
-        guard let url = ProjectAccess.chooseFolder(prompt: "Create project here") else { return }
-        perform("Creating your project…") {
-            await self.releaseProject()
-            self.demoMode = false
-            self.loadSavedChoices()
-            self.gpu = GPUWorkspace(demoMode: false)
-            self.projectAccess = url
-            _ = url.startAccessingSecurityScopedResource()
-            self.project = try StudioProject.create(at: url)
-            try ProjectAccess.remember(url)
-            self.recentPaths = ProjectAccess.recentPaths
-            self.step = .images
-            self.message = "Project saved. Import your first photos."
-        }
-    }
-
-    func openProject(url: URL? = nil) {
-        guard !gpu.hasRunningPod, !gpu.isBusy else {
-            errorMessage = "Finish the current computer action or Stop everything before changing projects."
-            return
-        }
-        guard confirmDiscardCaptionDrafts() else { return }
-        guard let selected = url ?? ProjectAccess.chooseFolder(prompt: "Open project") else { return }
-        perform("Opening your project…") {
-            await self.releaseProject()
-            self.demoMode = false
-            self.loadSavedChoices()
-            self.gpu = GPUWorkspace(demoMode: false)
-            self.projectAccess = selected
-            _ = selected.startAccessingSecurityScopedResource()
-            self.project = try await StudioProject.open(at: selected)
-            if let skillPath = self.project?.job.skill,
-               let skillURL = try? ProjectAccess.restore(skillPath, collection: "skillBookmarks") {
-                _ = skillURL.startAccessingSecurityScopedResource()
-                self.skillAccess = skillURL
+        guard !refuseWhileComputerBusy("Stop the rented computer before switching to the demo.") else { return }
+        whenConfirmed(discardDraftsConfirmation) {
+            self.perform("Opening the offline demo…") {
+                await self.releaseProject()
+                self.demoMode = true
+                self.showChatGPTPlanNotice = false
+                self.gpu = self.makeGPUWorkspace(demoMode: true)
+                self.project = try await DemoProject.create(at: self.demoDirectory)
+                self.projectState = ProjectAppState(dataset: HubDestination(repo: "demo/concept-studio"))
+                self.selectedImageID = self.project?.images.first?.id
+                self.step = .images
+                self.message = "Demo uses synthetic illustrations, fake services, and no money."
+                self.startImageAnalysis()
             }
-            try ProjectAccess.remember(selected)
-            self.recentPaths = ProjectAccess.recentPaths
-            if let job = self.project?.job { self.applyJobChoices(job) }
-            self.selectedImageID = self.project?.images.first?.id
-            self.message = "Project opened. Your saved choices and final captions are preserved."
-            try await self.analyzeImages()
         }
     }
 
-    func openRecent(_ path: String) {
-        do { try openProject(url: ProjectAccess.restore(path)) } catch { errorMessage = Self.describe(error) }
+    func createProject(at url: URL) {
+        guard !refuseWhileComputerBusy(
+            "Finish the current computer action or Stop everything before changing projects."
+        ) else { return }
+        whenConfirmed(discardDraftsConfirmation) {
+            self.perform("Creating your project…") {
+                await self.releaseProject()
+                self.demoMode = false
+                self.loadSavedChoices()
+                self.gpu = self.makeGPUWorkspace(demoMode: false)
+                self.projectAccess = url
+                _ = url.startAccessingSecurityScopedResource()
+                self.project = try StudioProject.create(at: url)
+                self.projectState = ProjectAppState()
+                self.rememberRecent(url)
+                self.step = .images
+                self.message = "Project saved. Import your first photos."
+            }
+        }
+    }
+
+    func openProject(url selected: URL) {
+        guard !refuseWhileComputerBusy(
+            "Finish the current computer action or Stop everything before changing projects."
+        ) else { return }
+        whenConfirmed(discardDraftsConfirmation) {
+            self.perform("Opening your project…") {
+                await self.releaseProject()
+                self.demoMode = false
+                self.loadSavedChoices()
+                self.gpu = self.makeGPUWorkspace(demoMode: false)
+                self.projectAccess = selected
+                _ = selected.startAccessingSecurityScopedResource()
+                self.project = try await StudioProject.open(at: selected)
+                self.projectState = ProjectAppState.load(from: selected)
+                self.rememberRecent(selected)
+                if let job = self.project?.job { self.applyJobChoices(job) }
+                self.selectedImageID = self.project?.images.first?.id
+                self.message = "Project opened. Your saved choices and final captions are preserved."
+                self.migrateOutsideSkill()
+                self.startImageAnalysis()
+            }
+        }
     }
 
     func releaseProject() async {
         chatGPTWorkGeneration += 1
         await chatGPT.cancelAndWait()
+        stopImageAnalysis()
+        editTask?.cancel()
+        await editTask?.value
+        resolveConfirmation(false)
+        if demoMode, let directory = project?.directory,
+           directory.standardizedFileURL == demoDirectory.standardizedFileURL {
+            DemoProject.remove(at: directory)
+        }
         projectAccess?.stopAccessingSecurityScopedResource()
-        skillAccess?.stopAccessingSecurityScopedResource()
         projectAccess = nil
-        skillAccess = nil
         project = nil
+        projectState = ProjectAppState()
         analyses = [:]
         mappingProposals = [:]
         datasetAdvice = ""
         comparison = ""
         captionDrafts = [:]
+        runPendingIDs = []
         usingPodCaptioner = false
         requestBaseURL = ""
     }
@@ -259,7 +474,10 @@ final class StudioSession {
         chatGPTWorkGeneration += 1
         await chatGPT.cancelAndWait()
         task?.cancel()
+        editTask?.cancel()
+        stopImageAnalysis()
         await task?.value
+        await editTask?.value
         await gpu.stopEverything()
     }
 
@@ -277,6 +495,8 @@ final class StudioSession {
         step = StudioStep(rawValue: min((step ?? .images).rawValue + 1, 8))
     }
 
+    // MARK: Photos and analysis
+
     func importImages(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
         perform("Importing photos…") {
@@ -287,42 +507,24 @@ final class StudioSession {
                 self.completed += 1
             }
             self.selectedImageID = self.project?.images.first?.id
-            try await self.analyzeImages()
+            self.startImageAnalysis()
             self.message = "Photos imported. Warnings help you choose a varied, clear set."
         }
     }
 
-    func importFolder() {
-        guard let folder = ProjectAccess.chooseFolder(prompt: "Import photos") else { return }
+    func importFolder(_ folder: URL) {
         perform("Importing folder photos…") {
             let accessed = folder.startAccessingSecurityScopedResource()
             defer { if accessed { folder.stopAccessingSecurityScopedResource() } }
             let source = try LocalFolderSource(directory: folder)
             try self.project?.importFiles(source.files)
             self.selectedImageID = self.project?.images.first?.id
-            try await self.analyzeImages()
+            self.startImageAnalysis()
             self.message = "Photos imported."
         }
     }
 
-    func analyzeImages() async throws {
-        guard let project else { return }
-        analyses = try await inspector.analyze(project.images.map(\.url))
-    }
-
-    func chooseSkill() {
-        guard let url = ProjectAccess.chooseFolder(prompt: "Choose skill") else { return }
-        do {
-            _ = url.startAccessingSecurityScopedResource()
-            let skill = try Skills.load(url)
-            skillAccess?.stopAccessingSecurityScopedResource()
-            skillAccess = url
-            project?.job.skill = url.path
-            if let first = skill.profiles().first { project?.job.profile = first }
-            try ProjectAccess.remember(url, collection: "skillBookmarks")
-            saveProject()
-        } catch { url.stopAccessingSecurityScopedResource(); errorMessage = Self.describe(error) }
-    }
+    // MARK: Rented computer
 
     func configureGPU() {
         normalizePodImageChoice()
@@ -338,14 +540,5 @@ final class StudioSession {
                 networkVolumeID: volumeID.isEmpty ? nil : volumeID
             )
         } catch { errorMessage = Self.describe(error) }
-    }
-
-    func selectedSkill() throws -> Skill {
-        guard let path = project?.job.skill else { return try Skills.load() }
-        guard let skillAccess, skillAccess.path == path else {
-            throw StudioError
-                .message("Choose this project's skill folder on Captioning to grant access before running.")
-        }
-        return try Skills.load(skillAccess)
     }
 }

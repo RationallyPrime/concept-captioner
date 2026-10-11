@@ -4,11 +4,46 @@ import CryptoKit
 import ImageIO
 import Vision
 
-struct ImageAnalysis {
+struct ImageAnalysis: Codable, Equatable {
     var faces: [CGRect] = []
     var warnings: [String] = []
     var width = 0
     var height = 0
+}
+
+/// What the Mac learned about one file's content, cached in the project by content hash
+/// (`<project>/.conceptstudio/vision-cache.json`, app-only, never published). Warnings that compare
+/// photos with each other (duplicates, near-duplicates) are recomputed from the cached feature prints
+/// on every pass, because they depend on the whole set.
+struct CachedImageAnalysis: Codable, Equatable {
+    /// Bump when the per-file checks change so older entries are recomputed.
+    static let version = 1
+    var version = Self.version
+    var analysis: ImageAnalysis
+    /// The archived `VNFeaturePrintObservation`, nil when Vision produced none.
+    var featurePrint: Data?
+}
+
+struct VisionCache: Codable, Equatable {
+    static let fileName = "vision-cache.json"
+    var entries: [String: CachedImageAnalysis] = [:]
+
+    static func url(in projectDirectory: URL) -> URL {
+        ProjectAppState.folder(in: projectDirectory).appendingPathComponent(fileName)
+    }
+
+    static func load(from projectDirectory: URL) -> VisionCache {
+        guard let data = try? Data(contentsOf: url(in: projectDirectory)),
+              let cache = try? JSONDecoder().decode(VisionCache.self, from: data) else { return VisionCache() }
+        return cache
+    }
+
+    func save(to projectDirectory: URL) throws {
+        try FileManager.default.createDirectory(
+            at: ProjectAppState.folder(in: projectDirectory), withIntermediateDirectories: true
+        )
+        try AtomicFile.write(JSONEncoder().encode(self), to: Self.url(in: projectDirectory))
+    }
 }
 
 actor VisionInspector {
@@ -24,58 +59,112 @@ actor VisionInspector {
         return best.0
     }
 
-    func analyze(_ urls: [URL]) throws -> [String: ImageAnalysis] {
+    static func contentHash(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    func analyze(_ urls: [URL]) async throws -> [String: ImageAnalysis] {
+        try await analyze(urls, cacheIn: nil)
+    }
+
+    /// Analyse `urls` in order, reusing and updating the cache stored in `cacheDirectory` (a project
+    /// folder; nil keeps nothing). `progress` receives each photo's final result as soon as it is known.
+    func analyze(
+        _ urls: [URL],
+        cacheIn cacheDirectory: URL?,
+        progress: (@Sendable (String, ImageAnalysis) async -> Void)? = nil
+    ) async throws -> [String: ImageAnalysis] {
+        var cache = cacheDirectory.map(VisionCache.load(from:)) ?? VisionCache()
         var results: [String: ImageAnalysis] = [:]
         var hashes: [String: String] = [:]
         var prints: [(String, VNFeaturePrintObservation)] = []
+        var used: Set<String> = []
         for url in urls {
             try Task.checkCancellation()
+            let name = url.lastPathComponent
             let data = try Data(contentsOf: url)
-            let hash = SHA256.hash(data: data).description
-            var analysis = ImageAnalysis()
-            guard let image = Self.image(data) else {
-                analysis.warnings = ["This photo cannot be decoded. Import another copy."]
-                results[url.lastPathComponent] = analysis
-                continue
-            }
-            analysis.width = image.width
-            analysis.height = image.height
-            if min(image.width, image.height) < 512 {
-                analysis.warnings.append("Small image: details may not survive training. Prefer a larger original.")
-            }
-            let faces = VNDetectFaceCaptureQualityRequest()
-            let text = VNRecognizeTextRequest()
-            text.recognitionLevel = .fast
-            let feature = Self.featureRequest()
-            try VNImageRequestHandler(cgImage: image).perform([faces, text, feature])
-            analysis.faces = faces.results?.map(\.boundingBox).sorted { $0.midX < $1.midX } ?? []
-            if faces.results?.contains(where: { ($0.faceCaptureQuality ?? 1) < 0.3 }) == true {
-                analysis.warnings.append("A face is hard to see. Check focus, angle and lighting before using it.")
-            }
-            if !(text.results ?? []).isEmpty {
-                analysis.warnings
-                    .append(
-                        "Readable text detected. Captions should describe signs and logos without copying the words."
-                    )
-            }
-            if let original = hashes[hash] {
-                analysis.warnings.append("Exact duplicate of \(original). Repeated photos can overemphasize one scene.")
-            } else if let observation = feature.results?.first {
-                for (name, other) in prints {
-                    var distance: Float = 0
-                    try observation.computeDistance(&distance, to: other)
-                    if distance <= Self.similarPhotoDistance {
-                        analysis.warnings
-                            .append("Visually similar to \(name). Keep enough variety in scenes and clothing.")
-                        break
-                    }
-                }
-                prints.append((url.lastPathComponent, observation))
-            }
-            hashes[hash] = url.lastPathComponent
-            results[url.lastPathComponent] = analysis
+            let hash = Self.contentHash(data)
+            used.insert(hash)
+            let entry = try cache.entries[hash].flatMap { $0.version == CachedImageAnalysis.version ? $0 : nil }
+                ?? Self.inspect(data)
+            cache.entries[hash] = entry
+            let observation = entry.featurePrint.flatMap(Self.unarchive)
+            let analysis = try Self.compare(
+                entry.analysis, name: name, hash: hash, observation: observation, hashes: hashes, prints: prints
+            )
+            if hashes[hash] == nil, let observation { prints.append((name, observation)) }
+            hashes[hash] = hashes[hash] ?? name
+            results[name] = analysis
+            await progress?(name, analysis)
+        }
+        if let cacheDirectory {
+            cache.entries = cache.entries.filter { used.contains($0.key) }
+            try? cache.save(to: cacheDirectory)
         }
         return results
+    }
+
+    /// The checks that depend only on this file's content.
+    private static func inspect(_ data: Data) throws -> CachedImageAnalysis {
+        var analysis = ImageAnalysis()
+        guard let image = image(data) else {
+            analysis.warnings = ["This photo cannot be decoded. Import another copy."]
+            return CachedImageAnalysis(analysis: analysis, featurePrint: nil)
+        }
+        analysis.width = image.width
+        analysis.height = image.height
+        if min(image.width, image.height) < 512 {
+            analysis.warnings.append("Small image: details may not survive training. Prefer a larger original.")
+        }
+        let faces = VNDetectFaceCaptureQualityRequest()
+        let text = VNRecognizeTextRequest()
+        text.recognitionLevel = .fast
+        let feature = featureRequest()
+        try VNImageRequestHandler(cgImage: image).perform([faces, text, feature])
+        analysis.faces = faces.results?.map(\.boundingBox).sorted { $0.midX < $1.midX } ?? []
+        if faces.results?.contains(where: { ($0.faceCaptureQuality ?? 1) < 0.3 }) == true {
+            analysis.warnings.append("A face is hard to see. Check focus, angle and lighting before using it.")
+        }
+        if !(text.results ?? []).isEmpty {
+            analysis.warnings
+                .append(
+                    "Readable text detected. Captions should describe signs and logos without copying the words."
+                )
+        }
+        let print = try feature.results?.first.map {
+            try NSKeyedArchiver.archivedData(withRootObject: $0, requiringSecureCoding: true)
+        }
+        return CachedImageAnalysis(analysis: analysis, featurePrint: print)
+    }
+
+    /// Add the warnings that compare this photo with the ones before it.
+    private static func compare(
+        _ base: ImageAnalysis,
+        name: String,
+        hash: String,
+        observation: VNFeaturePrintObservation?,
+        hashes: [String: String],
+        prints: [(String, VNFeaturePrintObservation)]
+    ) throws -> ImageAnalysis {
+        var analysis = base
+        if let original = hashes[hash] {
+            analysis.warnings.append("Exact duplicate of \(original). Repeated photos can overemphasize one scene.")
+        } else if let observation {
+            for (other, print) in prints {
+                var distance: Float = 0
+                try observation.computeDistance(&distance, to: print)
+                if distance <= similarPhotoDistance {
+                    analysis.warnings
+                        .append("Visually similar to \(other). Keep enough variety in scenes and clothing.")
+                    break
+                }
+            }
+        }
+        return analysis
+    }
+
+    private static func unarchive(_ data: Data) -> VNFeaturePrintObservation? {
+        try? NSKeyedUnarchiver.unarchivedObject(ofClass: VNFeaturePrintObservation.self, from: data)
     }
 
     func proposals(images: [URL], references: [String: URL]) throws -> [String: Job.Mapping] {
@@ -142,5 +231,42 @@ actor VisionInspector {
             )
             return image.cropping(to: rectangle.integral)
         }
+    }
+}
+
+@MainActor
+extension StudioSession {
+    /// Check the project's photos on this Mac in the background. Results for unchanged files come
+    /// from the project's cache; the project stays usable while the rest are analysed.
+    func startImageAnalysis() {
+        stopImageAnalysis()
+        guard let project else { return }
+        analysisGeneration += 1
+        let generation = analysisGeneration
+        let urls = project.images.map(\.url)
+        let current = Set(urls.map(\.lastPathComponent))
+        analyses = analyses.filter { current.contains($0.key) }
+        analyzing = true
+        let cacheDirectory = demoMode ? nil : project.directory
+        analysisTask = Task { [weak self, inspector] in
+            let result = try? await inspector.analyze(urls, cacheIn: cacheDirectory) { [weak self] name, analysis in
+                await self?.receiveAnalysis(name, analysis, generation: generation)
+            }
+            guard let self, generation == analysisGeneration else { return }
+            if let result { analyses = result }
+            analyzing = false
+        }
+    }
+
+    func stopImageAnalysis() {
+        analysisGeneration += 1
+        analysisTask?.cancel()
+        analysisTask = nil
+        analyzing = false
+    }
+
+    private func receiveAnalysis(_ name: String, _ analysis: ImageAnalysis, generation: Int) {
+        guard generation == analysisGeneration else { return }
+        analyses[name] = analysis
     }
 }

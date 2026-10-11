@@ -9,12 +9,17 @@ enum DemoScenario: String, CaseIterable, Identifiable {
 }
 
 enum DemoProject {
-    static func create() async throws -> StudioProject {
+    /// The one place the offline demo lives. "Try the demo" replaces it and closing the demo
+    /// removes it, so demo copies never pile up.
+    static var defaultDirectory: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("ConceptStudio-demo", isDirectory: true)
+    }
+
+    static func create(at destination: URL = defaultDirectory) async throws -> StudioProject {
         guard let source = Bundle.module.url(forResource: "Demo", withExtension: nil) else {
             throw StudioError.message("The demo resources are missing. Rebuild the app bundle.")
         }
-        let destination = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ConceptStudio-demo-\(UUID().uuidString)", isDirectory: true)
+        remove(at: destination)
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
         try FileManager.default.copyItem(
             at: source.appendingPathComponent("images"),
@@ -33,6 +38,11 @@ enum DemoProject {
         )
         try FileManager.default.copyItem(at: project.images[0].url, to: reference)
         return project
+    }
+
+    /// Remove a demo copy. Only ever called with a demo directory, never a user's project.
+    static func remove(at directory: URL) {
+        try? FileManager.default.removeItem(at: directory)
     }
 }
 

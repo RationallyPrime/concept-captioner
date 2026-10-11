@@ -15,7 +15,7 @@ private actor EndpointWire: HTTPTransport {
 @MainActor
 struct StudioEndpointTests {
     @Test func chatGPTChoiceNeverFallsBackToSavedAPIKey() throws {
-        let session = StudioSession()
+        let session = makeTestSession()
         session.endpointKind = "openai"
         session.openAIUsesChatGPT = true
         session.modelName = "account-model"
@@ -29,7 +29,7 @@ struct StudioEndpointTests {
         let preferences = try #require(UserDefaults(suiteName: name))
         defer { preferences.removePersistentDomain(forName: name) }
         let session = StudioSession(preferences: preferences)
-        let project = try await DemoProject.create()
+        let project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
         session.project = project
         session.endpointKind = "openai"
@@ -49,7 +49,7 @@ struct StudioEndpointTests {
     }
 
     @Test func demoUsesFakeModelWithChatGPTSelectedAndNoAccount() async throws {
-        let session = StudioSession()
+        let session = makeTestSession()
         session.demoMode = true
         session.endpointKind = "openai"
         session.openAIUsesChatGPT = true
@@ -60,8 +60,8 @@ struct StudioEndpointTests {
     }
 
     @Test func chatGPTSettingsRecoveryKeepsOtherProviderSettings() async throws {
-        let session = StudioSession()
-        var project = try await DemoProject.create()
+        let session = makeTestSession()
+        var project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
         project.job.endpoints = try Endpoints(
             captioner: EndpointSpec(
@@ -87,7 +87,7 @@ struct StudioEndpointTests {
     }
 
     @Test func downloadedJobTargetDoesNotBecomeTheConfiguredKeyHost() async throws {
-        let session = StudioSession()
+        let session = makeTestSession()
         session.customBaseURL = "https://trusted.example/v1"
         let downloaded = try Job(
             concepts: [Concept(trigger: "NORA7")],
@@ -141,7 +141,7 @@ struct StudioEndpointTests {
         preferences.set("https://user-server.example/v1", forKey: "vllmBaseURL")
         preferences.set("owner/real-dataset", forKey: "hubRepo")
         preferences.set("openrouter", forKey: "endpointKind")
-        let session = StudioSession(preferences: preferences)
+        let session = makeTestSession(preferences: preferences)
         session.useDemo()
         await session.task?.value
         let directory = try #require(session.project?.directory)
@@ -159,7 +159,8 @@ struct StudioEndpointTests {
         #expect(session.requestBaseURL.isEmpty)
         #expect(!session.usingPodCaptioner)
         #expect(session.endpointKind == "openrouter")
-        #expect(session.repoID == "owner/real-dataset")
+        // The dataset destination belongs to each project; an app-wide value never seeds it.
+        #expect(session.repoID.isEmpty)
         #expect(session.vllmTargetURL == "https://user-server.example/v1")
     }
 }
