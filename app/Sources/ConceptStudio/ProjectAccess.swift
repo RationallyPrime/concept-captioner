@@ -78,12 +78,13 @@ struct RecentProjects {
         write(entries.filter { $0.path != path })
     }
 
-    /// Resolve a recent project's bookmark. An entry that no longer resolves is removed, and the
-    /// error says what to do instead.
+    /// Resolve a recent project's bookmark. Only a confirmed missing folder is removed;
+    /// access and bookmark failures keep the entry so the user can grant access again.
     func restore(_ path: String) throws -> URL {
         guard let entry = entries.first(where: { $0.path == path }) else {
             throw StudioError.message("Choose Open project and select this folder again.")
         }
+        var target = URL(fileURLWithPath: path)
         do {
             var stale = false
             let url = try URL(
@@ -92,22 +93,35 @@ struct RecentProjects {
                 relativeTo: nil,
                 bookmarkDataIsStale: &stale
             )
+            target = url
             let accessed = url.startAccessingSecurityScopedResource()
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-            guard FileManager.default.fileExists(atPath: url.appendingPathComponent("job.yaml").path) else {
-                throw StudioError.message("missing job")
-            }
+            _ = try FileManager.default.attributesOfItem(atPath: url.appendingPathComponent("job.yaml").path)
             if stale || url.path != path {
                 // The folder moved or was renamed: keep its place in the list under the new path.
-                forget(path)
                 try remember(url)
+                if url.path != path { forget(path) }
             }
             return url
         } catch {
-            forget(path)
+            var missing = false
+            do {
+                _ = try FileManager.default.attributesOfItem(atPath: target.path)
+            } catch {
+                let cause = error as? CocoaError
+                missing = cause?.code == .fileNoSuchFile || cause?.code == .fileReadNoSuchFile
+            }
+            if missing {
+                forget(path)
+                throw StudioError.message(
+                    "\(target.lastPathComponent) could not be found any more, so it was removed "
+                        + "from recent projects. If you moved it, choose Open project and select its new location."
+                )
+            }
             throw StudioError.message(
-                "\(URL(fileURLWithPath: path).lastPathComponent) could not be found any more, so it was removed "
-                    + "from recent projects. If you moved it, choose Open project and select its new location."
+                "Access to \(target.lastPathComponent) could not be restored. "
+                    + "Choose Open project and select the folder again to grant access. "
+                    + error.localizedDescription
             )
         }
     }

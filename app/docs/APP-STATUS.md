@@ -77,7 +77,8 @@ check passed, including preserving custom style details through reopening and un
   links AVKit, whose absence was caught by a valid video-editor render.
 - Updated focused renders cover the actual video editor in both appearances, with start time
   and duration visible before approval. Exact frames and image size remain in Advanced.
-  The final native keyboard/video playback checks await an unlocked Mac.
+  The unlocked-Mac follow-up verified keyboard activation and actual video frame selection;
+  see the native follow-up below.
 
 ## Live evidence and remaining acceptance
 
@@ -124,8 +125,8 @@ checks and their limits are recorded in POD-STATUS.
 Owner acceptance and distribution still pending:
 
 - Live ChatGPT and OpenRouter consent and authenticated captioning under the owner's account.
-- Final keyboard/focus, video import/playback, real gallery/Save/Reveal and native TensorBoard
-  checks after the Mac lock prevented further physical-window inspection.
+- Native TensorBoard rendering during an actual run. Offline state and the live backend
+  handshake are verified separately; no GPU was restarted solely for this UI check.
 - The owner's full morning walkthrough and first real dataset training run.
 - VoiceOver acceptance, Photos permission/bookmark persistence in a signed sandboxed build,
   Developer ID signing and notarization. The preview remains unsigned.
@@ -134,3 +135,39 @@ The app's budget and idle limits run on the Mac. They cannot stop a rented compu
 app is absent or the Mac is asleep. Launch reconciliation resumes those guards. Separately
 billed saved storage remains after GPU stop. This limitation is unchanged; there is no claim of
 server-side budget enforcement.
+
+## Unlocked-Mac follow-up, 2026-10-11
+
+Native file import and playback passed with synthetic clips. A selected 17-frame segment
+starting at frame 19 exported as exactly 17 frames at 30 fps and 512 × 288; Undo restored the
+original file hash. Actual thumbnail clicks exposed imprecise AVPlayer seeking; the repair
+pauses playback, clears the old segment boundary and seeks with zero tolerance. The rebuilt
+window displayed the selected first and late frames correctly. Keyboard Tab reached glossary
+definitions; Space and Return now open the existing popover, and Escape dismisses it.
+All three keys passed in the final rebuilt window.
+
+The real retained FLUX comparison appeared as two labelled images. Its gallery and model
+Reveal actions selected the correct folders in Finder. Save with stopped storage displayed the
+required connection instruction. The retained LTX comparison reopened as two native video
+players and playback was exercised. These checks reuse the earlier actual downloads; they are
+not another live training or download claim. Command-number navigation and Go Back worked.
+OpenRouter opened its real browser authorization entry and native Cancel returned to an
+unconnected state. ChatGPT reached the owner's two-factor challenge; cancellation also passed. Live consent remains pending.
+
+Recent-project restoration passed after quitting and reopening the same preview build. A
+rebuild exposed an access-restoration failure that was incorrectly reported as a deleted
+folder. The development bundle uses an executable-specific ad hoc identity; signed-build
+bookmark persistence remains unverified. The error handling now preserves entries on access
+failures and asks users to reselect the folder rather than claiming it disappeared. The final
+rebuilt native check confirmed both the correct error and the retained Recent entry. These
+repairs passed 25 focused Swift tests, strict lint/format checks and independent source review.
+
+### Known limits before an existing H3 project can train here
+
+The app's ordinary H3 launch currently selects `arch: h3`, whereas the pinned AI Toolkit
+registers `minimax_h3`. Its global first-trigger setting also injects that trigger into captions
+for other concepts. Neither path is suitable for an existing dual-identity H3 continuation.
+Built-in result generation supports FLUX.1-dev and LTX-2, not H3; actual video training currently
+uses LTX. Importing and faithfully continuing an externally trained H3 checkpoint and its
+specialized recipe is not established by the same-storage FLUX/LTX Resume proofs. These are
+concrete integration gaps, not likeness-quality findings. No family training was started.

@@ -92,6 +92,16 @@ struct StudioTermButton: View {
             // button navigation. The default includes editing as well as activation focus.
             .focusable()
             .focused(focusedTerm, equals: term)
+            .onKeyPress(keys: [.space, .return, .escape], phases: .down) { press in
+                guard press.modifiers.isEmpty else { return .ignored }
+                if press.key == .escape {
+                    guard showingDefinition else { return .ignored }
+                    showingDefinition = false
+                } else {
+                    showingDefinition = true
+                }
+                return .handled
+            }
             .help(term.definition)
             .accessibilityLabel("Define \(term.title)")
             .accessibilityHint(term.definition)

@@ -188,6 +188,47 @@ struct ProjectContractTests {
         #expect(restored.resolvingSymlinksInPath().path == folders[6].resolvingSymlinksInPath().path)
     }
 
+    @Test(arguments: [true, false])
+    func invalidRecentBookmarkOnlyPrunesAConfirmedMissingFolder(folderExists: Bool) throws {
+        let preferences = IsolatedDefaults()
+        defer { preferences.remove() }
+        let folder = try newProject()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        _ = try StudioProject.create(at: folder)
+        if !folderExists { try FileManager.default.removeItem(at: folder) }
+        let entry = RecentProjects.Entry(path: folder.path, bookmark: Data("invalid bookmark".utf8))
+        try preferences.defaults.set(JSONEncoder().encode([entry]), forKey: RecentProjects.key)
+        let recents = RecentProjects(preferences: preferences.defaults)
+        do {
+            _ = try recents.restore(folder.path)
+            Issue.record("Invalid bookmark unexpectedly restored project access")
+        } catch {
+            if folderExists {
+                #expect(recents.entries == [entry])
+                #expect(error.localizedDescription.contains("Access to"))
+                #expect(error.localizedDescription.contains("Open project"))
+                #expect(!error.localizedDescription.contains("removed from recent projects"))
+            } else {
+                #expect(recents.entries.isEmpty)
+                #expect(error.localizedDescription.contains("removed from recent projects"))
+            }
+        }
+    }
+
+    @Test func existingRecentFolderWithMissingJobKeepsItsBookmark() throws {
+        let preferences = IsolatedDefaults()
+        defer { preferences.remove() }
+        let folder = try newProject()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let project = try StudioProject.create(at: folder)
+        let recents = RecentProjects(preferences: preferences.defaults)
+        try recents.remember(folder)
+        let original = recents.entries
+        try FileManager.default.removeItem(at: project.jobURL)
+        #expect(throws: StudioError.self) { try recents.restore(folder.path) }
+        #expect(recents.entries == original)
+    }
+
     @Test func startupRecoveryUsesInjectedPreferencesAndSecrets() throws {
         let preferences = IsolatedDefaults()
         defer { preferences.remove() }

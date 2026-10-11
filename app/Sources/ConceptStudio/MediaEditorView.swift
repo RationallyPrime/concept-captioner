@@ -271,7 +271,12 @@ struct MediaEditorView: View {
                             Image(decorative: frame.image, scale: 1).resizable().aspectRatio(contentMode: .fit)
                                 .frame(width: 96, height: 66)
                             Button("\(frame.seconds.formatted(.number.precision(.fractionLength(2)))) s") {
-                                player?.seek(to: CMTime(seconds: frame.seconds, preferredTimescale: 600))
+                                player?.pause()
+                                player?.currentItem?.forwardPlaybackEndTime = .invalid
+                                player?.seek(
+                                    to: CMTime(seconds: frame.seconds, preferredTimescale: 600),
+                                    toleranceBefore: .zero, toleranceAfter: .zero
+                                )
                             }.accessibilityLabel("Seek to \(frame.seconds) seconds")
                         }
                     }
