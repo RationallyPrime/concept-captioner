@@ -144,6 +144,17 @@ def check_base_url(url: str) -> str:
     )
 
 
+def _origin(url: str) -> tuple[str, str, int]:
+    """``(scheme, host, port)`` with the default port filled in, for key binding."""
+    parts = urlsplit(url)
+    scheme = parts.scheme.lower()
+    return (
+        scheme,
+        (parts.hostname or "").lower(),
+        parts.port or (443 if scheme == "https" else 80),
+    )
+
+
 async def _drop_authorization(request: httpx2.Request) -> None:
     # A request hook runs for every send, redirects included, after the SDK has set its headers.
     request.headers.pop("Authorization", None)
@@ -165,9 +176,10 @@ def _model(spec: EndpointSpec, http_client: httpx2.AsyncClient | None) -> Model:
         if not target:
             raise ConfigurationError("kind vllm needs base_url or VLLM_BASE_URL")
         base_url = check_base_url(target)
-        host = urlsplit(base_url).hostname
-        configured_host = urlsplit(check_base_url(configured)).hostname if configured else None
-        key = os.getenv("VLLM_API_KEY", "") if host == configured_host else ""
+        # The key is bound to the configured origin (scheme, host, port), as in the Swift core:
+        # a job naming the same host on another port or over plain http gets no key.
+        same_origin = bool(configured) and _origin(base_url) == _origin(check_base_url(configured))
+        key = os.getenv("VLLM_API_KEY", "") if same_origin else ""
         client = http_client or create_async_httpx2_client()
         if not key:
             # The SDK insists on some key and would otherwise read OPENAI_API_KEY / VLLM_API_KEY

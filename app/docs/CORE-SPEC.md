@@ -188,8 +188,8 @@ Deviation 10 lands.
    governs.
 9. **The vLLM key is bound to an origin.** Swift attaches the stored vLLM key only when the
    job's `base_url` has the same scheme, host and port (default ports filled in) as the
-   configured endpoint; another port on the same host is another service. Python still compares
-   the host alone. (Python fix to file.)
+   configured endpoint; another port on the same host is another service. Python has matched
+   since 2026-10-11 (`models.py` `_origin`). Closed; kept for the record.
 10. **Relative `skill` and `.md` profile paths in a job file resolve against the job file's
     folder in Swift, against the working directory in Python.** The app's working directory is
     `/`, so under the working-directory rule the app could not load a project's custom
@@ -1272,8 +1272,8 @@ extension Endpoints {
   origin: scheme and host compared case-insensitively, port compared with the scheme's default
   (80, 443) filled in. An absent configured endpoint, or any difference, means no key.
   Python uses `VLLM_BASE_URL` for that user configuration, including when it supplies the
-  endpoint omitted by the job, and still compares hosts only (Deviation 9). Neither
-  implementation reads the configured endpoint from the job.
+  endpoint omitted by the job, and compares the same origin since 2026-10-11 (Deviation 9 is
+  closed). Neither implementation reads the configured endpoint from the job.
 - Reject URL userinfo, escaped hosts, whitespace, control characters, backslashes and invalid
   ports before requests. Check and send the same parsed URL in Swift.
 - Job `extra_headers` cannot set authentication or routing: reject names containing
