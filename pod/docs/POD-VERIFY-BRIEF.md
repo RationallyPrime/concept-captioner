@@ -16,8 +16,8 @@ the spec and say so.
 - The GPU rule: one GPU means caption then train, sequentially; two or more means captioning on
   GPU 0 and training on the rest, concurrently; double-booking is refused.
 - Placeholder triggers only (NORA7 / IVAN9); no real names anywhere.
-- Commit and push to this repository freely; the curated history is re-staged in a second
-  repository later.
+- Commit and push to this repository freely. Curated history is deferred under the re-stage
+  rule in `docs/CODEX-HANDOFF.md`: nothing is re-staged until Hákon asks for it.
 
 ## What must be shown to work, in order
 

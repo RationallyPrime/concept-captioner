@@ -16,4 +16,49 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
       - run: ruff check src tests
+      - run: ruff format --check src tests
       - run: pytest -q
+
+  swift:
+    name: swift (app/)
+    runs-on: macos-26
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - run: swift --version
+      - run: brew install swiftlint swiftformat
+      - run: swift build
+      - run: swift test
+      - run: swiftlint lint --strict --quiet
+      - run: swiftformat Sources Tests --lint
+
+  pod:
+    name: pod (${{ matrix.tree }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tree: [agent, podctl, scripts]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install
+        run: |
+          if [ "${{ matrix.tree }}" = podctl ]; then
+            cd pod/podctl && uv venv -p 3.12 && uv pip install -e ".[dev]"
+          else
+            # scripts/ is tested from the agent venv (pod/README.md)
+            cd pod/agent && uv venv -p 3.12 && uv pip install -e ".[dev]" huggingface_hub datasets Pillow
+          fi
+      - name: Test and lint
+        working-directory: pod/${{ matrix.tree }}
+        run: |
+          if [ "${{ matrix.tree }}" = scripts ]; then py=../agent/.venv/bin; else py=.venv/bin; fi
+          $py/python -m pytest tests -q
+          $py/ruff check .
+          $py/ruff format --check .

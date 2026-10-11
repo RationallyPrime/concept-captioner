@@ -2,7 +2,7 @@
 
 This plan executes `CODEX-HANDOFF.md`, `app/docs/APP-BRIEF.md` and
 `pod/docs/POD-VERIFY-BRIEF.md`; those remain the product and delivery requirements.
-Prepared 2026-10-10; execution launched on the same day after Hákon enabled ULTRA.
+Prepared 2026-10-10. Current state lives in the status documents, not here.
 
 ## Target and acceptance
 
@@ -36,9 +36,7 @@ The core owner covers the Swift findings alongside gateway work. Confirm or repa
 defect; do not reimplement completed work based on stale status counts.
 
 Before app provider integration or any real pod exposure, independently accept the relevant
-foundation changes. Key routing and pod argument/proxy repairs have independent acceptance.
-Swift gateway/core work also has independent acceptance. App implementation and real pod
-builds and verification continue in parallel. Current verification details belong in the respective status documents.
+foundation changes. Verification details belong in the respective status documents.
 
 ## Then: two delivery streams
 
@@ -89,10 +87,9 @@ During key review, the core owner starts the Hub/thinking findings in separate f
 resolver edits wait until the key repair is accepted. Review a frozen change, then assess any
 later resolver delta. Do not let concurrent edits invalidate the review input.
 
-Dispatch only after Hákon's effort-setting change and launch instruction. Use Codex agents
-with the model assignment in the handoff's Conventions section. The coordinator handles
-integration and product decisions, keeps ownership explicit, and moves a free seat to necessary
-adjacent work when an outcome finishes.
+Use Codex agents with the model assignment in the handoff's Conventions section. The
+coordinator handles integration and product decisions, keeps ownership explicit, and moves a
+free seat to necessary adjacent work when an outcome finishes.
 
 Each assignment names the user-visible outcome, owned paths, consumed contracts, focused
 checks and terminal artifact. Shared files have one writer. Authors do not accept their own
@@ -106,46 +103,23 @@ preserve unresolved findings. Never put keys or private project material in the 
 
 ## Integration proof and final artifacts
 
-Current boundary: the initial app and GPU implementation have independent acceptance, and
-the measured caption-server settings and reuse repair are published. The app now also has an
-Impeccable-guided native photo-workspace refinement with protected
-caption drafts, clearer controls and offscreen layout checks. Current test counts, native
-rendering boundaries and the refreshed unsigned bundle are recorded in `app/docs/APP-STATUS.md`.
-Real Swift Hub upload/verify/download, native RunPod catalog/volume reads, and one direct
-Gemini structured caption request also passed. The GUI reached Welcome, demo Images and
-Concepts; the user confirmed the app responds normally. Native control disconnects on input,
-so the remaining interactive journey is pending.
-The pod owner built/pushed all three images and proved authenticated control on one and
-two GPUs. Real open-weights Python and Swift caption requests passed. Both tiny trainers
-produced checkpoints, readable curves and downloaded Hub LoRAs; native app code decoded an
-actual loss point from each. Caption quality has not passed the experiment's boundary review.
-The two-GPU run recorded simultaneous service residency on separate physical devices and
-rejected double-booking. Its final caption request ran after training exited, so simultaneous
-inference during training remains unproved. All three images are anonymously pullable and
-the base RunPod template is public. The app now selects its included trainer image by default,
-preserving custom overrides. The native provider performed the final stop, and all three
-task-created pods were independently confirmed EXITED. The latest billing read returns
-$1.431296959 for the pods and $1.489630294 including posted network storage; the retained
-network volume costs $14/month. The GUI-control connection remains an external blocker.
-Historical narrative drafts live in the sibling notes repository. They are deferred under
-the re-stage rule in `CODEX-HANDOFF.md` and are not part of current acceptance work.
-The five-image comparison configs had independent offline acceptance,
-but Hákon rejected that dataset as too small; neither treatment was trained. That proposed
-comparison is superseded, not ready to run.
-
 Connect the Mac to the verified agent through the provider proxy. Demonstrate the full shared
 data flow, user-configured endpoint/key behavior, observable failures, cancellation, cost
 controls, result publication and pod shutdown. Actual hardware behavior and API outcomes are
 recorded separately from automated app checks and observed GUI behavior.
 
-Hákon has deferred the comparison until this evening, with a dataset and experiment design
-large enough to support the intended statistical conclusions. Do not run the five-image
-proposal or make further experimental GPU rentals now. Define the outcome, independent runs
-and evaluation sample size before that later comparison. Hákon has provided a Gemini API key
-source for ordinary hosted captioning; the required
-open-weights inference path has already been demonstrated separately. Complete the functional
-app and pod handoff work now. Tiny trainer runs establish execution, curves and transfers,
-not caption-policy effectiveness or LoRA quality.
+The caption-policy comparison needs a dataset and experiment design large enough for the
+intended statistical conclusions. Define the outcome, independent runs and evaluation sample
+size before running it. Tiny trainer runs establish execution, curves and transfers, not
+caption-policy effectiveness or LoRA quality.
 
 Re-staging follows the owner-triggered rule in `CODEX-HANDOFF.md`; do not schedule it as an
 automatic next step after implementation or verification.
+
+## Where the rest went
+
+Current state: [APP-STATUS](../app/docs/APP-STATUS.md), [CORE-STATUS](../app/docs/CORE-STATUS.md)
+and [POD-STATUS](../pod/docs/POD-STATUS.md). The owner's interactive instructions and the live
+figures this plan carried until 2026-10-11 are kept in the private notes
+(`~/Projects/concept-captioner-notes/process/swarm-plan-record-2026-10-10.md`), not in this
+repository.

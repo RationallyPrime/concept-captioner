@@ -57,24 +57,36 @@ connection, demo mode).
 ## Required features
 
 - **Project on disk in the same layout the CLI uses** (images, job file, caption sidecars with
-  response records), so the app and the CLI interoperate and nothing is proprietary.
+  response records), so the app and the CLI interoperate and nothing is proprietary. A custom
+  skill the user picks is copied into the project (`skill/<name>/`, written as `skill: ./skill/<name>`); the
+  job never points outside the project. *(Owner decision, 2026-10-11.)*
 - **Keys in the Keychain**, entered once in Settings. For key-based access, lead with "one gateway key" (OpenRouter,
   Vercel AI Gateway, Pydantic AI Gateway) and put direct provider keys under Advanced. The app
   sells nothing; users bring accounts they already hold.
-- **Log in with ChatGPT** as an alternative to a key: eligible users can caption with their
-  ChatGPT plan. Show the active account, available models, plan usage and its management link.
-  Keep credentials in Keychain; never silently switch to separately billed API credits.
+- **Log in with ChatGPT** as an alternative to a key: eligible users can caption with OpenAI
+  models on their ChatGPT plan. Captions stream, so progress shows while each one is written.
+  Show the active account, available models, plan usage and its management link. Keep
+  credentials in Keychain; never silently switch to separately billed API credits.
+  *(Owner decision, 2026-10-11.)*
 - **Demo mode**: a bundled sample project and fake model, provider and pod backends that walk the
   entire journey, every status included, with a visible Demo badge and no network use. This is
   for first runs, screenshots and App Review.
 - **Money safety**: price before creating a pod, running cost while it is up, a per-run budget cap
   that stops the pod, an idle watchdog, a warning on quit while a pod runs, and an always-visible
-  stop-everything action.
+  stop-everything action. Keep the Mac awake while a pod runs; on launch, find pods this app
+  created that are still running and show them. *(Owner decision, 2026-10-11.)*
+- **The trained LoRA reaches the user**: by default, if the user is signed in somewhere the
+  LoRA can be pushed to, push it to a private repo there when training finishes; otherwise
+  save the `.safetensors` file into the project. Many users have no GitHub or Hugging Face
+  account, so saving to disk is a first-class outcome, not an error. Today the push target is a
+  Hugging Face model repo, used when a Hub write token is configured. No stop discards a result
+  that has been neither pushed nor saved. *(Owner decision, 2026-10-11.)*
 - **GPU provider abstraction** with RunPod first; the app creates pods from the project's own
   images and talks to the pod only through the control agent's HTTP API.
 - **Sandbox-compatible from day one** so the Mac App Store stays an option: user-selected
   folders only, no subprocesses, outbound networking plus a temporary `127.0.0.1` callback
   listener for ChatGPT sign-in. Close the listener on completion, cancellation or timeout.
+  *(Owner decision, 2026-10-11.)*
 - **Cancel everything long-running**, and nothing left running when a project closes without
   the user knowing.
 - Not in v1, leave room for: Google Photos (via the Picker), Google Drive, Gemini batch.
