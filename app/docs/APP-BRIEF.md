@@ -53,8 +53,9 @@ Keep substantive explanations; follow the native design conventions.
 ## The user journey (one screen each, in this order)
 
 The nine screen names remain unchanged. Mapping is conditional on a concept needing a locator;
-style and motion skip that screen under the owner’s 2026-10-11 afternoon decision. The direct
-no-Hub upload path is an approved requirement pending Thread 6, not existing release behavior.
+style and motion skip that screen under the owner’s 2026-10-11 afternoon decision. Direct
+dataset upload without a Hub token is implemented in source and requires the updated pod
+agent; the published r2 images predate it.
 
 1. **Images**: import from a folder, a Hugging Face dataset or Apple Photos; see the set with
    duplicate, low-quality and readable-text warnings; ask for a dataset-level critique before
@@ -92,7 +93,7 @@ no-Hub upload path is an approved requirement pending Thread 6, not existing rel
    training. With a Hub account, publish to its dataset with progress and a recorded revision.
    Without a Hub token, upload to the pod’s network volume through the authenticated,
    path-confined, size-limited endpoint in the same layout used by dataset pull before training.
-   This direct-upload path is required by the owner and is not implemented yet (Thread 6).
+   Publish checks saved inputs locally; Start training captures and uploads them before launch.
 
 7. **GPU pods**: provider key status, GPU type with price, 1/2/4 GPUs, create, running cost,
    stop, terminate with confirmation.
@@ -154,15 +155,15 @@ Original Publish clause:
 
 The five tagged paragraphs retain their exact original wording. Notes describe the current
 partial or implemented state without retiring any requirement; the ADR log holds the longer
-implementation snapshots. These notes are the 2026-10-11 snapshot at `ce52a22`, before the
-assigned fix-round repairs.
+implementation snapshots. These notes include the 2026-10-11 review repairs; live evidence
+and remaining acceptance stay in the status documents.
 
 - **Project on disk in the same layout the CLI uses** (images, job file, caption sidecars with
   response records), so the app and the CLI interoperate and nothing is proprietary. A custom
   skill the user picks is copied into the project (`skill/<name>/`, written as `skill: ./skill/<name>`); the
   job never points outside the project. *(Owner decision, 2026-10-11.)*
 
-Implementation: **Implemented for project storage and copied skills; partial CLI interoperability.** Relative skill/profile resolution and mixed image/clip Hub intake remain assigned repairs. See [ADR-0001](../../docs/ADR-LOG.md#adr-0001--project-files-and-custom-skills).
+Implementation: **Project storage, copied skills, job-relative paths and mixed image/clip Hub intake are implemented.** Parquet support remains outside the native app's scope. See [ADR-0001](../../docs/ADR-LOG.md#adr-0001--project-files-and-custom-skills).
 
 - **Keys in the Keychain**, entered once in Settings. For key-based access, lead with "one gateway key" (OpenRouter,
   Vercel AI Gateway, Pydantic AI Gateway) and put direct provider keys under Advanced. The app
@@ -173,7 +174,7 @@ Implementation: **Implemented for project storage and copied skills; partial CLI
   credentials in Keychain; never silently switch to separately billed API credits.
   *(Owner decision, 2026-10-11.)*
 
-Implementation: **Sign-in, model selection, Keychain storage and separate billing routes are implemented.** Visible partial caption text is assigned to Thread 3; in-app plan usage/remaining allowance is still missing. See [ADR-0002](../../docs/ADR-LOG.md#adr-0002--chatgpt-plan-access-and-streaming).
+Implementation: **Sign-in, model selection, Keychain storage, separate billing routes and visible partial caption text are implemented.** In-app plan usage/remaining allowance is still missing. See [ADR-0002](../../docs/ADR-LOG.md#adr-0002--chatgpt-plan-access-and-streaming).
 
 - **Demo mode**: a bundled sample project and fake model, provider and pod backends that walk the
   entire journey, every status included, with a visible Demo badge and no network use. This is
@@ -192,7 +193,7 @@ Implementation: **Tracked-rental controls are implemented; the full decision is 
   Hugging Face model repo, used when a Hub write token is configured. No stop discards a result
   that has been neither pushed nor saved. *(Owner decision, 2026-10-11.)*
 
-Implementation: **Private Hub delivery, local collection and pending-result preservation are implemented, with admission gaps.** Hub write permission is not checked before choosing push, and an existing public destination is not made private. Training-data upload without a Hub account is approved but remains assigned to Thread 6. See [ADR-0004](../../docs/ADR-LOG.md#adr-0004--delivery-of-the-trained-lora).
+Implementation: **Private Hub delivery, local collection and pending-result preservation are implemented, with admission gaps.** Hub write permission is not checked before choosing push, and an existing public destination is not made private. Direct training-data upload without a Hub token is implemented in source; updated pod images remain a separate delivery step. See [ADR-0004](../../docs/ADR-LOG.md#adr-0004--delivery-of-the-trained-lora).
 
 - **GPU provider abstraction** with RunPod first; the app creates pods from the project's own
   images and talks to the pod only through the control agent's HTTP API.
@@ -217,12 +218,12 @@ Assigned repairs are requirements, not claims of completed behavior.
   cancellation closes callback listeners. Never reuse another application's credentials.
 - The explicitly synthetic demo uses prepared captions/advice and simulated services, with no
   network or charges. Never imply live evaluation or ask for real photos in the prepared lesson.
-  The owner-approved badge reads **Demo · no charges**; that label update is assigned to Thread 5.
+  The owner-approved badge reads **Demo · no charges**.
 - Categories guide questions, mapping help and caption/reviewer prompts.
   Keep “learn these traits” and “describe these details” lists out of the ordinary flow.
   A sample is unusable when its declared training target cannot be found; person-only schema
-  wording must not contradict style, object or motion jobs. The shared-schema/mapping repair
-  is assigned to Thread 4.
+  wording must not contradict style, object or motion jobs. Style and motion use automatic
+  whole-target assignments; Mapping appears only when a concept needs a locator.
 - Curation groups duplicate candidates and supports Keep/Exclude with Undo, reliable HEIC/TIFF
   intake, approved crop previews, clip trimming and frame inspection. Captions, publication and
   training use the exact included crop or segment. No generic aesthetics score.
@@ -237,7 +238,7 @@ Assigned repairs are requirements, not claims of completed behavior.
 - Training without a Hub account is a required input path: the app uploads approved images or
   clips, captions and the job to the network volume through the authenticated agent. Keep the
   same dataset layout and path/size limits; do not require a Hub account or silently upload
-  elsewhere. Thread 6 implements this after Thread 2.
+  elsewhere. This does not remove the chosen base model's account or license requirements.
 
 ## Constraints
 

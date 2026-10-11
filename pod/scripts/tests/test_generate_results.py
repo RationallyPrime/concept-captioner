@@ -3,6 +3,11 @@
 import hashlib
 import importlib.util
 import json
+import os
+import select
+import signal
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -148,3 +153,94 @@ def test_changed_snapshot_fails_before_inference(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="snapshot checksum changed"):
         generation.generate(path, "aitoolkit")
     assert not (path.parent / "output").exists()
+    assert not (path.parent / "selected-checkpoint.safetensors").exists()
+
+
+@pytest.mark.parametrize("failure", ["request", "source", "family"])
+def test_early_failures_remove_private_copy_and_preserve_source(tmp_path, monkeypatch, failure):
+    path, _ = setup(tmp_path, monkeypatch)
+    if failure == "request":
+        path.write_text("not json")
+    elif failure == "source":
+        (path.parent / "source-run.json").unlink()
+    else:
+        (path.parent / "source-run.json").write_text(json.dumps({"base_model": "unsupported"}))
+    with pytest.raises((OSError, ValueError)):
+        generation.generate(path, "aitoolkit")
+    assert not (path.parent / "selected-checkpoint.safetensors").exists()
+    assert (
+        tmp_path / "runs/source/output/chosen.safetensors"
+    ).read_bytes() == b"synthetic checkpoint"
+
+
+def test_real_sigterm_finalizes_failed_manifest_and_keeps_partial_outputs(tmp_path, monkeypatch):
+    path, _ = setup(tmp_path, monkeypatch)
+    script = """
+import runpy, sys, time
+from pathlib import Path
+module = runpy.run_path(sys.argv[1])
+generate = module['generate']
+def wait(cfg, checkpoint, request, rows, output):
+    (output / rows[0]['base_path']).write_bytes(b'partial output')
+    print('ready', flush=True)
+    time.sleep(30)
+generate.__globals__['flux_generate'] = wait
+try:
+    generate(Path(sys.argv[2]), 'aitoolkit')
+except InterruptedError:
+    sys.exit(1)
+"""
+    proc = subprocess.Popen(
+        [sys.executable, "-c", script, str(Path(generation.__file__)), str(path)],
+        env={**os.environ, "PODAGENT_WORKSPACE": str(tmp_path)},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert select.select([proc.stdout], [], [], 5)[0], "synthetic inference did not start"
+        assert proc.stdout.readline().strip() == "ready"
+        proc.send_signal(signal.SIGTERM)
+        proc.communicate(timeout=5)
+        assert proc.returncode == 1
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+    manifest = json.loads((path.parent / "output/comparison.json").read_text())
+    assert manifest["state"] == "failed"
+    assert (path.parent / "output/pair-000-base.png").read_bytes() == b"partial output"
+    assert not (path.parent / "selected-checkpoint.safetensors").exists()
+    assert (
+        tmp_path / "runs/source/output/chosen.safetensors"
+    ).read_bytes() == b"synthetic checkpoint"
+
+
+def test_ltx_generation_uses_retained_config_without_pruned_training_inputs(tmp_path, monkeypatch):
+    monkeypatch.setenv("PODAGENT_WORKSPACE", str(tmp_path))
+    wrapper = generation.runpy.run_path(str(Path(generation.__file__).with_name("launch_ltx.py")))
+    calls = []
+    wrapper["download_hub_model"] = lambda _: None  # model preparation is outside this CPU witness
+    monkeypatch.setattr(generation.runpy, "run_path", lambda _: wrapper)
+    monkeypatch.setattr(generation.subprocess, "run", lambda argv, **_: calls.append(argv))
+    cfg = {
+        "run_id": "source",
+        "dataset": {"path": str(tmp_path / "datasets/pruned")},
+        "triggers": ["NORA7"],
+        "base_model": "Lightricks/LTX-2",
+        "steps": 2,
+    }
+    request = {
+        "width": 512,
+        "height": 512,
+        "num_frames": 49,
+        "frame_rate": 24,
+        "inference_steps": 2,
+        "guidance_scale": 4,
+    }
+    row = {"prompt": "NORA7 moves", "seed": 42, "base_path": "base.mp4", "lora_path": "lora.mp4"}
+    checkpoint = tmp_path / "runs/comparison/selected-checkpoint.safetensors"
+    generation.ltx_generate(cfg, checkpoint, request, [row], tmp_path)
+    assert len(calls) == 2
+    assert "--lora" not in calls[0] and str(checkpoint) in calls[1]
+    assert not Path(cfg["dataset"]["path"]).exists()  # no restore/pull for inference

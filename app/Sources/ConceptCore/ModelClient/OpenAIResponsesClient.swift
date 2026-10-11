@@ -27,7 +27,8 @@ public struct OpenAIResponsesClient: ModelClient {
         instructions: String,
         messages: [ChatMessage],
         output: OutputRequest,
-        settings: RequestSettings
+        settings: RequestSettings,
+        onPartialText: (@Sendable (String) async -> Void)? = nil
     ) async throws -> ModelReply {
         var headers = ["Authorization": "Bearer \(apiKey)"]
         settings.mergeExtraHeaders(into: &headers)

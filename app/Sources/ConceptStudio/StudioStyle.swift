@@ -68,7 +68,7 @@ struct StudioNotice: View {
 
 struct DemoBadge: View {
     var body: some View {
-        Label("Demo · $0", systemImage: "leaf")
+        Label("Demo · no charges", systemImage: "leaf")
             .font(.callout.weight(.semibold))
             .foregroundStyle(StudioStyle.accent)
             .padding(.horizontal, 10).padding(.vertical, 6)

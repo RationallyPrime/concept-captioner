@@ -131,10 +131,30 @@ struct GPUJourneyView: View {
                    let url = URL(string: "https://console.runpod.io/storage") {
                     Link("Create project storage in RunPod", destination: url)
                 }
+                if workspace.hasRunningPod {
+                    if let storage = workspace.storage {
+                        LabeledContent("Workspace used", value: bytes(storage.usedBytes))
+                        LabeledContent("Workspace free", value: bytes(storage.freeBytes))
+                        LabeledContent("Workspace total", value: bytes(storage.totalBytes))
+                        LabeledContent("Dataset copies", value: bytes(storage.datasetsBytes))
+                        LabeledContent("Eligible dataset cleanup", value: bytes(storage.reclaimableDatasetBytes))
+                    }
+                    HStack {
+                        Button("Refresh storage usage") { Task { await workspace.refreshStorage() } }
+                        Button("Clean completed dataset copies") { Task { await workspace.cleanupDatasets() } }
+                    }.disabled(workspace.isBusy || workspace.isStopping)
+                    Text("Cleanup keeps active inputs and the last three resumable datasets. "
+                        + "Checkpoints, models, generated results and unknown or failed runs stay on storage.")
+                        .font(.caption).foregroundStyle(StudioStyle.supportingText)
+                }
             }
             Divider()
             spending
         }
+    }
+
+    private func bytes(_ value: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: value, countStyle: .file)
     }
 
     private var spending: some View {
@@ -214,16 +234,21 @@ struct GPUJourneyView: View {
                     ?? "Rent a computer first. Its control agent will tell us which GPUs each service can use.")
                     .fixedSize(horizontal: false, vertical: true)
                 LabeledContent(
-                    "Published dataset",
-                    value: trainingDatasetRepo.isEmpty
+                    workspace.usesLocalDataset ? "Training inputs" : "Published dataset",
+                    value: workspace.usesLocalDataset ? "Included media and saved captions in this project"
+                        : trainingDatasetRepo.isEmpty
                         ? "Publish your training media first" : trainingDatasetRepo
                 )
                 LabeledContent(
-                    "Published revision",
-                    value: trainingDatasetRevision ?? "Latest revision on first download"
+                    workspace.usesLocalDataset ? "Transfer" : "Published revision",
+                    value: workspace.usesLocalDataset ? "Direct authenticated upload when training starts"
+                        : trainingDatasetRevision ?? "Latest revision on first download"
                 )
                 .font(.callout).textSelection(.enabled)
-                Text("Training downloads this published dataset. Publish again after changing included media, crops, "
+                Text(workspace.usesLocalDataset
+                    ? "Training uploads the included media, selected segments and saved captions "
+                    + "directly from this project."
+                    : "Training downloads this published dataset. Publish again after changing included media, crops, "
                     + "segments or captions on this Mac.")
                     .font(.callout).foregroundStyle(StudioStyle.supportingText)
                 Button("Refresh the plan") { Task { await workspace.refresh() } }
@@ -260,15 +285,20 @@ struct GPUJourneyView: View {
                 }.formStyle(.columns)
                 DisclosureGroup("Advanced training controls") { advancedTraining.padding(.top, 12) }
                 Button("Start training", systemImage: "play.fill") {
-                    Task { await workspace.train(datasetRepo: datasetRepo) }
+                    Task { await workspace.train(datasetRepo: datasetRepo, captureLocal: session.captureTrainingInputs)
+                    }
                 }
                 .buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
                 .keyboardShortcut(.return, modifiers: .command)
                 .help("Start training (⌘↩)")
-                .disabled(workspace.isBusy || workspace.isTraining || !workspace.hasRunningPod || datasetRepo.isEmpty)
+                .disabled(workspace.isBusy || workspace.isTraining || !workspace
+                    .hasRunningPod || session.busy || session
+                    .editing || (!workspace.usesLocalDataset && datasetRepo.isEmpty))
             }
             if !workspace.repeatSourceRunID.isEmpty {
-                StudioNotice(repeatedRun?.datasetRevision == nil
+                StudioNotice(workspace.usesLocalDataset
+                    ? "Saved settings are loaded. Training captures the current included media and saved captions."
+                    : repeatedRun?.datasetRevision == nil
                     ? "Saved settings are loaded. This run did not record a dataset revision; "
                     + "the current remote dataset will be used."
                     : "The next run repeats a saved dataset revision. Settings above remain editable.")

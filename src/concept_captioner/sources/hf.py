@@ -89,12 +89,46 @@ class HFDatasetSource:
         token: str | None = None,
     ) -> None:
         _require_datasets()
-        from datasets import Video, load_dataset
+        from datasets import Dataset, Video, load_dataset
+        from huggingface_hub import HfApi, hf_hub_download
 
         self.repo_id = repo_id
         self.split = split
         self.image_column = image_column
         self.id_column = id_column
+        self.revision = revision
+        self._token = _token(token)
+        self._files: list[str] | None = None
+        self._metadata: list[dict[str, Any]] = []
+        files = HfApi(token=self._token).list_repo_files(
+            repo_id, repo_type="dataset", revision=revision
+        )
+        media = sorted(name for name in files if Path(name).suffix.lower() in MEDIA_SUFFIXES)
+        # Root metadata declares an imagefolder even when unrelated tabular files are retained.
+        # Without that declaration, tabular shards retain datasets' feature path.
+        if media and (
+            "metadata.jsonl" in files
+            or not any(Path(name).suffix.lower() in {".parquet", ".arrow"} for name in files)
+        ):
+            self._files = media
+            if "metadata.jsonl" in files:
+                path = hf_hub_download(
+                    repo_id,
+                    "metadata.jsonl",
+                    repo_type="dataset",
+                    revision=revision,
+                    token=self._token,
+                )
+                for line in Path(path).read_text(encoding="utf-8").splitlines():
+                    if not line.strip():
+                        continue
+                    row = json.loads(line)
+                    if not isinstance(row, dict) or not isinstance(row.get("file_name"), str):
+                        raise ConfigurationError("metadata.jsonl rows need a string file_name")
+                    self._metadata.append(row)
+            self._dataset = Dataset.from_dict({"file_name": media})
+            self._video = False
+            return
         self._dataset = load_dataset(repo_id, split=split, revision=revision, token=_token(token))
         if image_column not in self._dataset.column_names:
             raise ConfigurationError(
@@ -110,6 +144,8 @@ class HFDatasetSource:
 
     @property
     def sample_ids(self) -> list[str]:
+        if self._files is not None:
+            return list(self._files)
         ids: list[str] = []
         for index, row in enumerate(self._dataset.remove_columns([self.image_column])):
             ids.append(_sample_id(row, index, self.id_column))
@@ -118,10 +154,31 @@ class HFDatasetSource:
     async def count(self) -> int:
         return len(self._dataset)
 
-    async def samples(self) -> AsyncIterator[Sample]:
+    def _download(self, name: str) -> Path:
+        from huggingface_hub import hf_hub_download
+
+        return Path(
+            hf_hub_download(
+                self.repo_id, name, repo_type="dataset", revision=self.revision, token=self._token
+            )
+        )
+
+    def _samples(self):
+        if self._files is not None:
+            for name in self._files:
+                yield Sample(
+                    sample_id=name,
+                    data=self._download(name).read_bytes(),
+                    suffix=Path(name).suffix.lower(),
+                )
+            return
         for index, row in enumerate(self._dataset):
             data, suffix = _encode(row[self.image_column], video=self._video)
             yield Sample(sample_id=_sample_id(row, index, self.id_column), data=data, suffix=suffix)
+
+    async def samples(self) -> AsyncIterator[Sample]:
+        for sample in self._samples():
+            yield sample
 
 
 class HFDatasetSink:
@@ -170,17 +227,32 @@ class HFDatasetSink:
         self._existing_captions: dict[str, str] = {}
         self._existing_records: dict[str, dict[str, Any]] = {}
         if isinstance(source, HFDatasetSource):
-            existing = source.dataset
-            ids = source.sample_ids
-            if caption_column in existing.column_names:
-                for sample_id, caption in zip(ids, existing[caption_column], strict=True):
-                    if caption:
-                        self._existing_captions[sample_id] = caption
-            if self.record_column in existing.column_names:
-                for sample_id, record in zip(ids, existing[self.record_column], strict=True):
-                    if record:
-                        with contextlib.suppress(TypeError, json.JSONDecodeError):
-                            self._existing_records[sample_id] = json.loads(record)
+            if source._files is not None:
+                indexed = ((row["file_name"], row) for row in source._metadata)
+            else:
+                indexed = zip(
+                    source.sample_ids,
+                    source.dataset.remove_columns([source.image_column]),
+                    strict=True,
+                )
+            for sample_id, row in indexed:
+                caption = row.get(caption_column)
+                if (
+                    source._files is not None
+                    and caption is not None
+                    and not isinstance(caption, str)
+                ):
+                    raise ConfigurationError(
+                        f"metadata caption {caption_column!r} must be text or null"
+                    )
+                if caption:
+                    self._existing_captions[sample_id] = caption
+                record = row.get(self.record_column)
+                if record:
+                    with contextlib.suppress(TypeError, json.JSONDecodeError):
+                        parsed = record if isinstance(record, dict) else json.loads(record)
+                        if isinstance(parsed, dict):
+                            self._existing_records[sample_id] = parsed
 
     async def exists(self, sample_id: str) -> bool:
         return sample_id in self._captions or sample_id in self._existing_captions
@@ -232,7 +304,46 @@ class HFDatasetSink:
             "captions": sum(1 for c in dataset[self.caption_column] if c),
             "pushed": False,
         }
-        if self._push:
+        if (
+            self._push
+            and isinstance(self.source, HFDatasetSource)
+            and self.source._files is not None
+        ):
+            from huggingface_hub import CommitOperationAdd, HfApi
+
+            api = HfApi(token=self._token)
+            rows = {row["file_name"]: dict(row) for row in self.source._metadata}
+            for name in self.source.sample_ids:
+                row = rows.setdefault(name, {"file_name": name})
+                if name in self._captions:
+                    row[self.caption_column] = self._captions[name]
+                if name in self._records:
+                    row[self.record_column] = json.dumps(self._records[name], ensure_ascii=False)
+            content = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows.values())
+            operations = [
+                CommitOperationAdd(
+                    path_in_repo="metadata.jsonl", path_or_fileobj=content.encode("utf-8")
+                )
+            ]
+            if self.target_repo_id != self.source.repo_id:
+                api.create_repo(
+                    self.target_repo_id, repo_type="dataset", private=self.private, exist_ok=True
+                )
+                operations.extend(
+                    CommitOperationAdd(
+                        path_in_repo=name, path_or_fileobj=str(self.source._download(name))
+                    )
+                    for name in self.source._files
+                )
+            info = api.create_commit(
+                repo_id=self.target_repo_id,
+                repo_type="dataset",
+                operations=operations,
+                commit_message=self.commit_message,
+            )
+            summary["pushed"] = True
+            summary["commit_oid"] = info.oid
+        elif self._push:
             split = self.source.split if isinstance(self.source, HFDatasetSource) else "train"
             dataset.push_to_hub(
                 self.target_repo_id,
@@ -289,14 +400,17 @@ def pull_images(
     out = Path(destination)
     out.mkdir(parents=True, exist_ok=True)
     written = 0
-    for index, row in enumerate(source.dataset):
-        data, suffix = _encode(row[image_column], video=source._video)
-        sample_id = _sample_id(row, index, None)
+    for sample in source._samples():
         name = (
-            sample_id
-            if Path(sample_id).suffix.lower() in MEDIA_SUFFIXES
-            else Path(sample_id).stem + suffix
+            sample.sample_id
+            if Path(sample.sample_id).suffix.lower() in MEDIA_SUFFIXES
+            else Path(sample.sample_id).stem + sample.suffix
         )
-        (out / name).write_bytes(data)
+        # Hub filenames may include directories; the resolved output stays within the destination.
+        target = out / name
+        if not target.resolve().is_relative_to(out.resolve()):
+            raise ConfigurationError("dataset filename escapes the download folder")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(sample.data)
         written += 1
     return written

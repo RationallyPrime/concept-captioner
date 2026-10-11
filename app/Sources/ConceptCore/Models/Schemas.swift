@@ -51,8 +51,8 @@ public struct Caption: Codable, Sendable, Equatable {
             "usable": .object([
                 "type": .string("boolean"),
                 "description": .string(
-                    "False when a mapped subject is absent, too small, obscured, or cannot be bound to "
-                        + "one visible person. Then leave the caption empty and explain in note."
+                    "False when the declared training target cannot be found in the sample. "
+                        + "Then leave the caption empty and explain in note."
                 ),
             ]),
             "note": .object([

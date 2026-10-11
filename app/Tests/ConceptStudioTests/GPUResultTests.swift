@@ -55,6 +55,9 @@ struct GPUResultTests {
         workspace.outputRepo = "me/lora"
         await workspace.refreshOffers()
         await workspace.rent()
+        let inputProject = try await captionedUploadProject(at: workspace.projectFolder)
+        workspace.projectFolder = inputProject.directory
+        defer { try? FileManager.default.removeItem(at: inputProject.directory) }
         await workspace.train(datasetRepo: "test/images")
         #expect(try await trainerParams(transport, "aitoolkit")["hub"] == nil)
         let runID = workspace.runID
@@ -123,6 +126,9 @@ struct GPUResultTests {
         try workspace.configure(runpodKey: "provider-only", hubToken: "", imageName: "test")
         await workspace.refreshOffers()
         await workspace.rent()
+        let inputProject = try await captionedUploadProject(at: workspace.projectFolder)
+        workspace.projectFolder = inputProject.directory
+        defer { try? FileManager.default.removeItem(at: inputProject.directory) }
         await workspace.train(datasetRepo: "test/images")
         await transport.finish("trainer-aitoolkit", state: "exited")
         workspace.idleMinutes = 0
@@ -148,6 +154,9 @@ struct GPUResultTests {
         await workspace.refreshOffers()
         await workspace.rent()
         #expect(!workspace.resultNeedsSaving)
+        let inputProject = try await captionedUploadProject(at: workspace.projectFolder)
+        workspace.projectFolder = inputProject.directory
+        defer { try? FileManager.default.removeItem(at: inputProject.directory) }
         await workspace.train(datasetRepo: "test/images")
         #expect(workspace.result?.state == .training)
         #expect(workspace.result?.runID == workspace.runID)
@@ -166,6 +175,9 @@ struct GPUResultTests {
         try workspace.configure(runpodKey: "provider-only", hubToken: "", imageName: "test")
         await workspace.refreshOffers()
         await workspace.rent()
+        let inputProject = try await captionedUploadProject(at: workspace.projectFolder)
+        workspace.projectFolder = inputProject.directory
+        defer { try? FileManager.default.removeItem(at: inputProject.directory) }
         await workspace.train(datasetRepo: "test/images")
         await transport.finish("trainer-aitoolkit", state: "exited")
         await workspace.refresh()

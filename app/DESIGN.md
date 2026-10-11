@@ -66,9 +66,11 @@ These apply the direction above. The two marked owner decisions are not open to 
   Publish, Start training, Retrieve now). Renting a computer starts billing and has no shortcut.
   File › Open Recent lists recent projects.
 - **Selection.** Lists use native selection. Review selects several photos with ⌘- or ⇧-click.
-- **Suggestions prefill, people confirm.** Person/object/motion proposals fill the editor and
-  require confirmation. A sole whole-image style is assigned directly to every included target;
-  that assignment does not require a face or a model inference.
+- **Suggestions prefill, people confirm.** Person, object, character and custom-concept
+  proposals fill the editor and require confirmation. Style and motion are assigned directly
+  to each whole target. Mapping appears only when a concept needs a locator; mixed jobs merge
+  the automatic entries into the confirmed mapping. This follows the owner's afternoon
+  review decision on 2026-10-11 and supersedes the earlier motion-confirmation/sole-style rule.
 - **One concept by default.** Category, a description and a trigger define the ordinary flow.
   Multiple concepts and detailed caption-policy overrides live under Advanced settings.
 - **Operating copy.** Every surface explains its inputs, operation and consequences. Menus and

@@ -694,3 +694,17 @@ def test_metadata_only_pull_refuses_unlisted_training_media(tmp_path):
         pull.collect_imagefolder(
             tmp_path, split="train", caption_column="caption", only_metadata=True
         )
+
+
+@pytest.mark.parametrize("suffix", [".mp4", ".MOV", ".m4v"])
+def test_generic_imagefolder_pull_retains_supported_unlisted_video_suffixes(tmp_path, suffix):
+    media = tmp_path / ("segment" + suffix)
+    media.write_bytes(b"exact video bytes")
+    media.with_suffix(".txt").write_text("NORA7 moving")
+    (tmp_path / "unrelated.exe").write_bytes(b"not training media")
+    entries = pull.collect_imagefolder(tmp_path, split="train", caption_column="caption")
+    assert [entry.file_name for entry in entries] == [media.name]
+    assert entries[0].caption == "NORA7 moving"
+    assert pull.detect_convention([media.name]) == pull.IMAGEFOLDER
+    with pytest.raises(pull.PullError, match="not an image file"):
+        pull.image_payload({"path": str(tmp_path / "unrelated.exe")}, allowed_roots=[tmp_path])

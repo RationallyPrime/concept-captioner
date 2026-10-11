@@ -61,7 +61,8 @@ public actor FakeModelClient: ModelClient {
         instructions: String,
         messages: [ChatMessage],
         output: OutputRequest,
-        settings: RequestSettings
+        settings: RequestSettings,
+        onPartialText: (@Sendable (String) async -> Void)? = nil
     ) async throws -> ModelReply {
         let request = Request(instructions: instructions, messages: messages, output: output, settings: settings)
         requests.append(request)

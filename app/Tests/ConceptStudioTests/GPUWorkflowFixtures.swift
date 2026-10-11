@@ -238,7 +238,7 @@ func makeWorkspace(
     GPUWorkspace(
         demoMode: false, transport: transport, preferences: preferences, readAgentToken: readAgentToken,
         saveAgentToken: saveAgentToken, deleteAgentToken: deleteAgentToken, downloader: downloader,
-        keepAwake: sleep.assertion
+        uploader: RecordingUploader(), keepAwake: sleep.assertion
     )
 }
 

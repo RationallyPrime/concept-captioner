@@ -31,7 +31,7 @@ struct StudioRootView: View {
                         .lineLimit(2).help(session.project?.directory.path ?? "")
                 }.padding(20)
                 List(selection: $session.step) {
-                    Section("Prepare training data") { steps(StudioStep.allCases.prefix(3)) }
+                    Section("Prepare training data") { steps(session.journeySteps.filter { $0.rawValue < 3 }) }
                     Section("Write captions") { steps(StudioStep.allCases.dropFirst(3).prefix(3)) }
                     Section("Train your model") { steps(StudioStep.allCases.suffix(3)) }
                 }
@@ -114,12 +114,11 @@ struct StudioRootView: View {
                         .font(.callout.weight(.medium)).monospacedDigit()
                 }
                 Spacer(minLength: 8)
-                let current = session.step ?? .images
-                if let previous = current.stepBefore {
-                    Button("Back") { session.step = previous }.help("Back to \(previous.title) (⌘[)")
+                if let previous = session.previousStep {
+                    Button("Back") { session.goBack() }.help("Back to \(previous.title) (⌘[)")
                 }
-                if let following = current.stepAfter {
-                    Button("Next: \(following.title)") { session.step = following }.help("⌘]")
+                if let following = session.nextStep {
+                    Button("Next: \(following.title)") { session.goForward() }.help("⌘]")
                 }
             }
         }.padding(.horizontal, 24).padding(.vertical, 16)
@@ -140,19 +139,6 @@ struct StudioRootView: View {
 }
 
 extension StudioStep {
-    /// Journey order comes from `allCases`, so no view hard-codes the number of screens.
-    var stepBefore: StudioStep? {
-        let steps = Self.allCases
-        guard let index = steps.firstIndex(of: self), index > steps.startIndex else { return nil }
-        return steps[steps.index(before: index)]
-    }
-
-    var stepAfter: StudioStep? {
-        let steps = Self.allCases
-        guard let index = steps.firstIndex(of: self), steps.index(after: index) < steps.endIndex else { return nil }
-        return steps[steps.index(after: index)]
-    }
-
     var usesRentedComputer: Bool {
         [.pods, .training, .monitor].contains(self)
     }

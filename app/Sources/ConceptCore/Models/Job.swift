@@ -240,12 +240,6 @@ public struct Endpoints: Sendable, Equatable {
 public struct Job: Sendable, Equatable {
     public typealias Mapping = OrderedDictionary<String, String>
 
-    /// A single style applies to the selected training target as a whole; no face locator is involved.
-    public var wholeImageStyleMapping: Mapping? {
-        guard concepts.count == 1, let concept = concepts.first, concept.targetConcept == .style else { return nil }
-        return [concept.trigger: "the visual style of the entire image or clip"]
-    }
-
     /// A skill directory path. Relative paths resolve against `directory`, the folder that holds
     /// the job file, never against the process's working directory (see `resolvedURL(for:)`).
     public var skill: String?

@@ -146,7 +146,7 @@ struct CaptioningView: View {
                         Text(
                             "These are prepared FLUX captions for the three synthetic demo photos. "
                                 + "No captioning model is called. Enable the reviewer to simulate rejection, "
-                                + "or clear an assignment on Mapping to see a sample held for review."
+                                + "or choose Failed or Unusable to inspect those outcomes."
                         )
                         .font(.callout).foregroundStyle(StudioStyle.supportingText)
                     }
@@ -178,6 +178,13 @@ struct CaptioningView: View {
                                         systemImage: status.symbol
                                     )
                                     .font(.callout)
+                                    if let partial = session.partialCaptions[image.id], !partial.isEmpty {
+                                        Text("Writing — not saved yet").font(.caption)
+                                            .foregroundStyle(StudioStyle.supportingText)
+                                        Text(partial).textSelection(.enabled)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                            .accessibilityLabel("Caption in progress. Not saved yet. \(partial)")
+                                    }
                                     if !image.notes.isEmpty {
                                         Text(image.notes.joined(separator: "; "))
                                             .foregroundStyle(StudioStyle.supportingText)

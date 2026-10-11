@@ -3,7 +3,7 @@ import Foundation
 import Synchronization
 import Testing
 
-private actor ChatGPTStreamWire: HTTPStreamingTransport {
+actor ChatGPTStreamWire: HTTPStreamingTransport {
     private(set) var requests: [URLRequest] = []
     private let reply: @Sendable (URLRequest) async throws -> HTTPStreamResponse
 
@@ -49,7 +49,7 @@ private actor StreamStarted {
 
 /// Serves a scripted event stream through the real URLSession loading system. The script is
 /// chosen by the request's bearer token, so parallel tests never share state.
-private final class ChatGPTStreamingProtocol: URLProtocol {
+final class ChatGPTStreamingProtocol: URLProtocol {
     override static func canInit(with _: URLRequest) -> Bool {
         true
     }
@@ -93,7 +93,7 @@ private final class ChatGPTStreamingProtocol: URLProtocol {
     }
 }
 
-private enum ChatGPTWire {
+enum ChatGPTWire {
     static let caption = #"{"caption":"NORA7 wears a jacket.","usable":true,"note":null}"#
     static let output = OutputRequest(name: Caption.schemaName, schema: Caption.jsonSchema, mode: .native)
     static let messages: [ChatMessage] = [
@@ -175,7 +175,7 @@ private enum ChatGPTWire {
 
 @Suite("ChatGPT plan captioning")
 struct ChatGPTModelClientTests {
-    private static func offlineClient(token: String, session: URLSession) -> ChatGPTModelClient {
+    static func offlineClient(token: String, session: URLSession) -> ChatGPTModelClient {
         ChatGPTModelClient(
             model: "gpt-6.1-sol",
             accessToken: { token },

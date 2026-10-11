@@ -26,44 +26,12 @@ struct MappingView: View {
         images.first { $0.id == session.selectedImageID }
     }
 
-    var body: some View {
-        if let mapping = session.project?.job.wholeImageStyleMapping {
-            styleMapping(mapping)
-        } else {
-            mappingEditor
-        }
+    private var locatorConcepts: [Concept] {
+        (session.project?.job.concepts ?? []).filter(\.targetConcept.requiresLocator)
     }
 
-    private func styleMapping(_ mapping: Job.Mapping) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                Text("The style applies to each included sample")
-                    .font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
-                Text("Your concept is the visual style of the whole image or clip. "
-                    + "There is no person or object to locate. Each included sample is assigned to "
-                    + (mapping.keys.first ?? "the trigger") + ".")
-                Text("Check that every included sample shows the intended style. Exclude unrelated examples "
-                    + "on Images. Captions will describe the subject matter and leave the style to the trigger.")
-                    .foregroundStyle(StudioStyle.supportingText)
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 180, maximum: 260))],
-                    alignment: .leading,
-                    spacing: 20
-                ) {
-                    ForEach(session.project?.images ?? []) { image in
-                        VStack(alignment: .leading, spacing: 8) {
-                            PhotoView(url: image.url).frame(height: 180)
-                            Text(image.id).lineLimit(1).help(image.id)
-                            Label("Style assigned", systemImage: "checkmark.circle")
-                                .font(.caption).foregroundStyle(StudioStyle.supportingText)
-                        }
-                    }
-                }
-                if session.project?.images.isEmpty != false {
-                    Text("Import images or clips on Images before captioning.")
-                }
-            }
-        }
+    var body: some View {
+        mappingEditor
     }
 
     private var mappingEditor: some View {
@@ -85,7 +53,7 @@ struct MappingView: View {
                     Toggle("Show unconfirmed only", isOn: $onlyUnmapped).toggleStyle(.checkbox)
                 }.font(.callout)
                 HStack(spacing: 10) {
-                    if session.project?.job.concepts.allSatisfy(\.targetConcept.isPersonIdentity) == true {
+                    if !locatorConcepts.isEmpty, locatorConcepts.allSatisfy(\.targetConcept.isPersonIdentity) {
                         Button("Compare reference faces on this Mac", systemImage: "person.crop.rectangle") {
                             session.proposeMappings(useModel: false)
                         }
@@ -116,7 +84,7 @@ struct MappingView: View {
                             Text(image.id).font(.title3.weight(.semibold)).textSelection(.enabled)
                             if fromSuggestion {
                                 StudioNotice(
-                                    "Filled in from a suggestion. Check every subject against this image or clip, "
+                                    "Filled in from a suggestion. Check every concept against this image or clip, "
                                         + "then confirm the assignment.",
                                     symbol: "person.crop.rectangle.badge.checkmark"
                                 )
@@ -179,7 +147,7 @@ struct MappingView: View {
 
     private var presentSubjects: some View {
         StudioSection(title: "Concept assignment") {
-            ForEach(session.project?.job.concepts ?? [], id: \.trigger) { concept in
+            ForEach(locatorConcepts, id: \.trigger) { concept in
                 VStack(alignment: .leading, spacing: 10) {
                     Toggle(
                         "\(concept.trigger) · \(concept.classNoun)",
@@ -205,11 +173,21 @@ struct MappingView: View {
                     }
                 }.padding(.vertical, 4)
             }
-            Text(
-                "Select only concepts visible in this sample. If none appears, exclude the sample on Images; "
-                    + "it cannot be captioned for this LoRA."
-            )
-            .font(.callout).foregroundStyle(StudioStyle.supportingText)
+            if let job = session.project?.job, !job.wholeTargetMapping.isEmpty {
+                ForEach(job.concepts.filter { !$0.targetConcept.requiresLocator }, id: \.trigger) { concept in
+                    Label("\(concept.trigger) · assigned to the whole target", systemImage: "checkmark.circle")
+                        .font(.callout)
+                }
+                Text("Style and motion are assigned automatically. Select only the locator concepts present "
+                    + "in this sample, then confirm the combined assignment.")
+                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
+            } else {
+                Text("Select only concepts visible in this sample. If none appears, exclude the sample on Images; "
+                    + "it cannot be captioned for this LoRA.")
+                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
+            }
+            Text("Check each selected concept against this exact training target.")
+                .font(.callout).foregroundStyle(StudioStyle.supportingText)
         }
     }
 
@@ -222,7 +200,8 @@ struct MappingView: View {
                     .buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
                     .keyboardShortcut(.return, modifiers: .command)
                     .help("Confirm this sample and open the next unconfirmed one (⌘↩)")
-                    .disabled(enabled.isEmpty || enabled.contains { (locators[$0] ?? "").isBlank } || session.busy)
+                    .disabled((enabled.isEmpty && session.project?.job.wholeTargetMapping.isEmpty != false)
+                        || enabled.contains { (locators[$0] ?? "").isBlank } || session.busy)
                 Text("⌘↩").font(.callout).foregroundStyle(StudioStyle.supportingText)
                     .accessibilityHidden(true)
                 Spacer(minLength: 8)
@@ -272,7 +251,7 @@ struct MappingView: View {
         let confirmed = session.project?.job.mapping(for: id)
         let suggestion = confirmed == nil ? session.mappingProposals[id] : nil
         locators = Dictionary(uniqueKeysWithValues: (confirmed ?? suggestion ?? [:]).map { ($0.key, $0.value) })
-        enabled = Set(locators.keys)
+        enabled = Set(locators.keys).intersection(locatorConcepts.map(\.trigger))
         fromSuggestion = suggestion != nil
         edited = false
     }

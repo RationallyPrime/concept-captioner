@@ -62,9 +62,11 @@ class Runner:
         overwrite: bool = False,
     ) -> None:
         self.job = job
-        self.skill = skill or skills.load(job.skill)
+        self.skill = skill or skills.load(job.skill, relative_to=job.directory)
         self.profile_name = profile or job.profile
-        self.profile_text = self.skill.profile(self.profile_name)
+        self.profile_text = self.skill.profile(
+            self.profile_name, relative_to=job.directory if profile is None else None
+        )
         self.captioner_spec = captioner
         self.critic_spec = critic
         self.captioner = build_captioner(captioner)
@@ -128,6 +130,10 @@ class Runner:
         if not self.overwrite and await sink.exists(sample.sample_id):
             return Outcome(sample.sample_id, "skipped", record=existing or {})
 
+        if sample.suffix.lower() in VIDEO_SUFFIXES:
+            self.captioner_spec.require_video()
+            if self.critic_spec is not None:
+                self.critic_spec.require_video()
         record = self._base_record(sample, "rejected")
         image = image_content(sample)
         deps = CaptionDeps(mapping=mapping, triggers=tuple(self.job.triggers))

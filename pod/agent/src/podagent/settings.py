@@ -23,6 +23,10 @@ class Paths:
         return self.workspace / "datasets"
 
     @property
+    def uploads(self) -> Path:
+        return self.workspace / "uploads"
+
+    @property
     def runs(self) -> Path:
         return self.workspace / "runs"
 

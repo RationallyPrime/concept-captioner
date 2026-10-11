@@ -68,6 +68,19 @@ actor VisionInspector {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
+    /// Hash files in bounded chunks on the nonisolated async executor, including large clips.
+    static func contentHash(fileURL: URL) async throws -> String {
+        let file = try FileHandle(forReadingFrom: fileURL)
+        defer { try? file.close() }
+        var hash = SHA256()
+        while true {
+            try Task.checkCancellation()
+            guard let data = try file.read(upToCount: 1024 * 1024), !data.isEmpty else { break }
+            hash.update(data: data)
+        }
+        return hash.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
     func analyze(_ urls: [URL]) async throws -> [String: ImageAnalysis] {
         try await analyze(urls, cacheIn: nil)
     }
@@ -87,8 +100,7 @@ actor VisionInspector {
         for url in urls {
             try Task.checkCancellation()
             let name = url.lastPathComponent
-            let data = try Data(contentsOf: url)
-            let hash = Self.contentHash(data)
+            let hash = try await Self.contentHash(fileURL: url)
             used.insert(hash)
             let entry: CachedImageAnalysis
             if Sources.isVideo(Sources.suffix(of: name)) {
@@ -100,6 +112,7 @@ actor VisionInspector {
                 if let cached = cache.entries[hash], cached.version == CachedImageAnalysis.version {
                     entry = cached
                 } else {
+                    let data = try Data(contentsOf: url)
                     entry = try await Self.performVision { _ in try Self.inspect(data) }
                 }
             }
@@ -191,7 +204,7 @@ actor VisionInspector {
         var analysis = base
         if let original = hashes[hash] {
             analysis.duplicateOf = original
-            analysis.warnings.append("Exact duplicate of \(original). Repeated photos can overemphasize one scene.")
+            analysis.warnings.append("Exact duplicate of \(original). Repeated samples can overemphasize one scene.")
         } else if let observation {
             for (other, print) in prints {
                 var distance: Float = 0

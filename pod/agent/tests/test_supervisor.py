@@ -377,6 +377,7 @@ def test_transfer_exits_zero(sup: Supervisor, settings: Settings) -> None:
     assert state.stopped_by_request is False
     assert state.params == {
         "repo_id": "org/faces",
+        "local_name": None,
         "name": "faces",
         "split": "train",
         "revision": None,

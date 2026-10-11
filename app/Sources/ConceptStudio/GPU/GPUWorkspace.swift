@@ -22,6 +22,7 @@ final class GPUWorkspace {
     }
 
     var plan: TrainingPlan?
+    var storage: AgentStorageUsage?
     var message = "Refresh available computers to see current prices."
     var isBusy = false
     private(set) var isStopping = false
@@ -80,6 +81,7 @@ final class GPUWorkspace {
     @ObservationIgnored let saveAgentToken: (String, String) throws -> Void
     @ObservationIgnored let readAgentToken: (String) throws -> String?
     @ObservationIgnored let deleteAgentToken: (String) throws -> Void
+    @ObservationIgnored let uploader: any FileUploading
     @ObservationIgnored let downloader: any FileDownloading
     @ObservationIgnored let sleepGuard: SleepAssertion
     @ObservationIgnored var provider: (any GPUProvider)?
@@ -112,6 +114,7 @@ final class GPUWorkspace {
         // KeychainStore.save with an empty value deletes the item (SecItemDelete).
         deleteAgentToken: @escaping (String) throws -> Void = { try KeychainStore().save("", account: $0) },
         downloader: any FileDownloading = URLSessionDownloader(),
+        uploader: any FileUploading = URLSessionUploader(),
         keepAwake: SleepAssertion? = nil
     ) {
         self.demoMode = demoMode
@@ -121,6 +124,7 @@ final class GPUWorkspace {
         self.readAgentToken = readAgentToken
         self.deleteAgentToken = deleteAgentToken
         self.downloader = downloader
+        self.uploader = uploader
         sleepGuard = keepAwake ?? .system()
         if demoMode {
             provider = DemoGPUProvider()
@@ -137,6 +141,7 @@ final class GPUWorkspace {
         if let networkVolumeID { selectedVolume = networkVolumeID }
         if result == nil, let data = preferences.data(forKey: Self.pendingResultKey) {
             result = try? JSONDecoder().decode(TrainingResult.self, from: data)
+            if let result, !RunArtifacts.validRunID(result.runID) { self.result = nil }
         }
         if pod == nil, let data = preferences.data(forKey: Self.activePodKey),
            let previous = try? JSONDecoder().decode(SavedPod.self, from: data) {
@@ -218,6 +223,7 @@ final class GPUWorkspace {
             ))
             self.pod = created
             self.plan = nil
+            self.storage = nil
             self.runID = ""
             self.trainingState = "Not started"
             self.points = []
@@ -266,7 +272,10 @@ final class GPUWorkspace {
             guard let agent else {
                 throw StudioError.message("Open Settings to restore this computer’s saved connection.")
             }
-            if plan == nil { plan = try await agent.plan() }
+            if plan == nil {
+                plan = try await agent.plan()
+                storage = try? await agent.storageUsage()
+            }
             let services = try await agent.services()
             agentAnswered = true
             if message.hasPrefix("Your computer is rented and its control agent is connecting.") {
@@ -328,7 +337,7 @@ final class GPUWorkspace {
         } else if let provider {
             agent = PodAgentClient(
                 baseURL: provider.url(for: pod, port: PodPort.agent), token: agentToken,
-                transport: transport, downloader: downloader
+                transport: transport, downloader: downloader, uploader: uploader
             )
         }
     }

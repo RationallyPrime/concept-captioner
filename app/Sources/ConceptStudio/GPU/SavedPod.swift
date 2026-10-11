@@ -34,5 +34,10 @@ extension SavedPod {
         result = try values.decodeIfPresent(TrainingResult.self, forKey: .result)
         run = try values.decodeIfPresent(TrainingRun.self, forKey: .run)
         generation = try values.decodeIfPresent(GeneratedComparison.self, forKey: .generation)
+        if !runID.isEmpty, !RunArtifacts.validRunID(runID) { runID = "" }
+        if let result, !RunArtifacts.validRunID(result.runID) { self.result = nil }
+        if let run, !RunArtifacts.validRunID(run.runID) { self.run = nil }
+        if let generation, !RunArtifacts.validRunID(generation.runID)
+            || !RunArtifacts.validRunID(generation.sourceRunID) { self.generation = nil }
     }
 }

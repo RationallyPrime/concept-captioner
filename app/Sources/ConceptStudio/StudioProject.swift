@@ -26,7 +26,7 @@ enum StudioStep: Int, CaseIterable, Identifiable, Codable {
         [
             "Import and curate the images or clips used for training.",
             "Define each concept, its category and the trigger used in captions.",
-            "Identify the subject or style each concept applies to in each training sample.",
+            "Locate the subject each concept applies to in each training sample.",
             "Generate descriptions with your chosen captioning provider.",
             "Inspect and edit captions, then protect the ones you finish.",
             "Upload included media and saved captions for training.",
@@ -134,14 +134,16 @@ struct StudioProject {
             ))
         }
         var project = StudioProject(directory: directory, job: job, images: images)
-        if let mapping = job.wholeImageStyleMapping {
-            var changed = false
-            for image in images where project.job.mapping(for: image.id) != mapping {
+        var changed = false
+        for image in images {
+            let previous = project.job.mapping(for: image.id)
+            let mapping = project.job.mappingIncludingWholeTargets(previous)
+            if previous != mapping {
                 try project.job.setMapping(mapping, for: image.id)
                 changed = true
             }
-            if changed { try project.job.save(to: project.jobURL) }
         }
+        if changed { try project.job.save(to: project.jobURL) }
         project.mediaState = ProjectMediaState.load(in: directory)
         if FileManager.default.fileExists(atPath: project.excludedDirectory.path) {
             let excluded = try LocalFolderSource(directory: project.excludedDirectory)
@@ -257,7 +259,11 @@ struct StudioProject {
             guard Sources.mediaSuffixes.contains(suffix) || MediaEditor.convertibleImageSuffixes.contains(suffix) else {
                 continue
             }
-            _ = try importData(Data(contentsOf: source), name: source.lastPathComponent)
+            if Sources.isVideo(suffix) {
+                _ = try importVideo(source, name: source.lastPathComponent)
+            } else {
+                _ = try importData(Data(contentsOf: source), name: source.lastPathComponent)
+            }
         }
         try save()
     }
@@ -267,8 +273,30 @@ struct StudioProject {
         let target = availableTarget(for: imported.name)
         try AtomicFile.write(imported.data, to: target)
         images.append(ProjectImage(url: target))
-        try job.setMapping(job.wholeImageStyleMapping, for: target.lastPathComponent)
+        try job.setMapping(job.mappingIncludingWholeTargets(nil), for: target.lastPathComponent)
         try save()
+        return target.lastPathComponent
+    }
+
+    mutating func importVideo(_ source: URL, name: String) throws -> String {
+        guard Sources.isVideo(Sources.suffix(of: name)) else {
+            throw StudioError.message("Import this clip as an MP4, MOV or M4V file.")
+        }
+        let target = availableTarget(for: URL(fileURLWithPath: name).lastPathComponent)
+        try Task.checkCancellation()
+        try FileManager.default.copyItem(at: source, to: target)
+        let previousJob = job
+        do {
+            try Task.checkCancellation()
+            try job.setMapping(job.mappingIncludingWholeTargets(nil), for: target.lastPathComponent)
+            images.append(ProjectImage(url: target))
+            try save()
+        } catch {
+            images.removeAll { $0.url == target }
+            job = previousJob
+            try? FileManager.default.removeItem(at: target)
+            throw error
+        }
         return target.lastPathComponent
     }
 

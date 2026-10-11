@@ -17,6 +17,7 @@ import json
 import os
 import re
 import runpy
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -175,7 +176,11 @@ def ltx_generate(
     out: Path,
 ) -> None:
     wrapper = runpy.run_path(str(Path(__file__).with_name("launch_ltx.py")))
-    normalized = wrapper["validate_run_config"](cfg, wrapper["workspace_root"]())
+    # Inference needs the captured model/config/weights, not the source training images.
+    # Completed dataset copies may already have been reclaimed by retention.
+    normalized = wrapper["validate_run_config"](
+        cfg, wrapper["workspace_root"](), allow_missing_dataset=True
+    )
     resolved = wrapper["resolve_hub_model"](normalized)
     model = wrapper["build_native_config"](resolved, checkpoint.parent.parent)["model"]
     wrapper["download_hub_model"](normalized)
@@ -184,30 +189,38 @@ def ltx_generate(
             subprocess.run(ltx_command(model, checkpoint, request, row, variant, out), check=True)
 
 
+def _stopped(_signum: int, _frame: Any) -> None:
+    raise InterruptedError("generation stopped by SIGTERM")
+
+
 def generate(config_path: Path, trainer: str) -> int:
-    request = json.loads(config_path.read_text(encoding="utf-8"))
-    workspace = Path(os.environ.get("PODAGENT_WORKSPACE", "/workspace"))
-    cfg, checkpoint = source_config(request, workspace)
-    supported = (
-        trainer == "aitoolkit" and cfg["base_model"] == "black-forest-labs/FLUX.1-dev"
-    ) or (trainer == "ltx" and cfg["base_model"] == "Lightricks/LTX-2")
-    if not supported:
-        raise ValueError("Generation supports FLUX.1-dev with AI Toolkit and LTX-2 with LTX only")
-    out = config_path.parent / "output"
-    out.mkdir(exist_ok=True)
-    rows = pairs(request, trainer)
-    manifest = {
-        **request,
-        "trainer": trainer,
-        "base_model": cfg["base_model"],
-        "upstream_revision": AI_PIN if trainer == "aitoolkit" else LTX_PIN,
-        "source_config": cfg,
-        "state": "generating",
-        "pairs": rows,
-    }
-    path = out / "comparison.json"
-    path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    # Own the private copy before reading either config: validation can fail before inference.
+    checkpoint = config_path.parent / "selected-checkpoint.safetensors"
+    manifest: dict[str, Any] | None = None
+    path = config_path.parent / "output" / "comparison.json"
+    previous_handler = signal.signal(signal.SIGTERM, _stopped)
     try:
+        request = json.loads(config_path.read_text(encoding="utf-8"))
+        workspace = Path(os.environ.get("PODAGENT_WORKSPACE", "/workspace"))
+        cfg, checkpoint = source_config(request, workspace)
+        supported = (
+            trainer == "aitoolkit" and cfg["base_model"] == "black-forest-labs/FLUX.1-dev"
+        ) or (trainer == "ltx" and cfg["base_model"] == "Lightricks/LTX-2")
+        if not supported:
+            raise ValueError("Generation supports FLUX.1-dev with AI Toolkit and LTX-2 only")
+        out = config_path.parent / "output"
+        out.mkdir(exist_ok=True)
+        rows = pairs(request, trainer)
+        manifest = {
+            **request,
+            "trainer": trainer,
+            "base_model": cfg["base_model"],
+            "upstream_revision": AI_PIN if trainer == "aitoolkit" else LTX_PIN,
+            "source_config": cfg,
+            "state": "generating",
+            "pairs": rows,
+        }
+        path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         (flux_generate if trainer == "aitoolkit" else ltx_generate)(
             cfg, checkpoint, request, rows, out
         )
@@ -222,14 +235,21 @@ def generate(config_path: Path, trainer: str) -> int:
                 "Inference ended without the expected output files: " + ", ".join(missing)
             )
         manifest["state"] = "complete"
+        return 0
     except BaseException:
-        manifest["state"] = "failed"
+        if manifest is not None:
+            manifest["state"] = "failed"
         raise
     finally:
-        path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-        # Provenance stays in the manifest; keep large private copies only during sampling.
-        checkpoint.unlink()
-    return 0
+        try:
+            if manifest is not None:
+                path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        finally:
+            try:
+                # The source checkpoint and available outputs remain. SIGKILL cannot run this.
+                checkpoint.unlink(missing_ok=True)
+            finally:
+                signal.signal(signal.SIGTERM, previous_handler)
 
 
 def main() -> int:

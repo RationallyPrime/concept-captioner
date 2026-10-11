@@ -307,3 +307,31 @@ pull's local mode, the app's upload step and PublishView). Runs after Thread 2 f
 it edits the same pod and GPU files.
 
 All six threads are Ari's. Thread 1 first; 2, 3, 4, 5 in parallel; 6 after 2.
+
+## Repair disposition, 2026-10-11
+
+The findings and owner decisions above are retained as the review record. The docs-first
+checkpoint `4a2f809` was committed and pushed before source work started. Threads 2–5 then
+ran in parallel; Thread 6 began after Thread 2's implementation and independent acceptance.
+
+| Thread | Source outcome |
+| --- | --- |
+| 1 — specifications and records | CORE-SPEC revisions are ratified and match category, media, profile, prompts, clients and progress APIs. POD-SPEC defines generation manifests/services and the later storage/upload contracts. APP-BRIEF and ADR-LOG retain all five original owner decisions verbatim; corrected status distinguishes source, published images and live acceptance. |
+| 2 — results and storage | Comparison completion requires a complete manifest and all pairs; partial files remain visibly failed. SIGTERM/early errors clean the private checkpoint. Pod Resume validates actual saved steps and immutable settings. Dataset cleanup, exact Hub restore, storage readout/action and native run-path validation are implemented. |
+| 3 — media and progress | Python reads mixed Hub media by filename, preserving opaque response metadata even when unrelated tabular files remain. Supported video routes and encoded-body limits match the ratified table; category/video parity fixtures cover both languages. Job-relative paths and actual ChatGPT partial-caption previews are implemented. |
+| 4 — concepts and mapping | Neutral usable wording, whole-target style/motion assignments, locator-only Mapping, approval reassignment and Concepts ⌘↩ are implemented. |
+| 5 — native behavior and wording | Missing-job recovery/removal, streaming clip hashing, file-backed Photos transfer, compressed presentation timestamps, media-aware wording and the exact Demo badge are implemented. |
+| 6 — direct dataset inputs | With no Hub token, the app captures included approved inputs, uploads through the bounded authenticated endpoint and waits for atomic local installation. Local Resume requires identical input digests; Repeat permits edits. Project edits resume after capture without changing the submitted training settings. |
+
+Independent review found and closed two direct-upload integration races: project defaults
+changing during an upload and a finishing installation deleting newly arriving staged files.
+Focused regressions exercise those sequences. Verification counts and native inspection limits
+are recorded in [APP-STATUS](../../app/docs/APP-STATUS.md),
+[CORE-STATUS](../../app/docs/CORE-STATUS.md) and [POD-STATUS](../../pod/docs/POD-STATUS.md).
+
+This repair round does **not** deliver the separately assigned CI fix, clean image rebuild or
+Hub-token RunPod-secret change. The published r2 images predate it; the new pod behavior needs
+rebuilt images before live acceptance. No GPU resource, caption-quality experiment or family
+training was started. The owner's 2026-10-11 successful ChatGPT and OpenRouter sign-in and
+captioning are recorded as owner-reported acceptance; their credential mechanism does not
+independently settle the OpenRouter callback-URL question.

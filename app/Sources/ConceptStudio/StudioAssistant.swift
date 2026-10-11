@@ -111,7 +111,9 @@ struct StudioAssistant {
                 + "this demo does not evaluate whether a real dataset is sufficient for training."
         }
         let sampled = Self.critiqueSample(project.images)
-        guard !sampled.isEmpty else { throw StudioError.message("Import photos before asking for dataset advice.") }
+        guard !sampled.isEmpty else {
+            throw StudioError.message("Import images or clips before asking for dataset advice.")
+        }
         let stage = StructuredStage<DatasetAdvice>(
             name: "dataset advice", endpoint: endpoint, schemaName: "DatasetAdvice", schema: DatasetAdvice.schema
         )
@@ -125,7 +127,7 @@ struct StudioAssistant {
             let notes = batch.flatMap { image in (warnings[image.id]?.warnings ?? []).map { "\(image.id): \($0)" } }
             var content: [UserContent] = [.text(
                 "Intended concepts: " + JSONValue.array(concepts).pythonDumps()
-                    + "\nThis request shows \(batch.count) of \(sampled.count) photos reviewed from a set of "
+                    + "\nThis request shows \(batch.count) of \(sampled.count) samples reviewed from a set of "
                     + "\(project.images.count).\nOn-device warnings: "
                     + (notes.isEmpty ? "none" : notes.joined(separator: "; "))
             )]
@@ -139,7 +141,7 @@ struct StudioAssistant {
                     + "viewpoints and context; for style, variety of subject matter within the intended style; "
                     + "for motion, require actual temporal evidence. Sparse frames cannot establish motion or sound. "
                     + "Do not score aesthetics or judge a style dataset by face visibility. summary is "
-                    + "two or three sentences; suggestions are at most five specific actions, naming photos where "
+                    + "two or three sentences; suggestions are at most five specific actions, naming samples where "
                     + "useful. Do not infer biography.",
                 messages: [.user(content)]
             )
@@ -156,14 +158,14 @@ struct StudioAssistant {
                 ])
             })
             advice = try await stage.run(
-                instructions: "These are reviews of consecutive batches of one training photo set. Merge them into "
+                instructions: "These are reviews of consecutive batches of one training dataset. Merge them into "
                     + "one review of the whole set: summary is two or three sentences, suggestions are at most six "
-                    + "specific actions. Keep photo names where they help. Drop repetition.",
+                    + "specific actions. Keep sample names where they help. Drop repetition.",
                 messages: [.user(combined.pythonDumps())]
             ).output
         }
         let note = sampled.count < project.images.count
-            ? "\n\nReviewed \(sampled.count) of \(project.images.count) photos, chosen evenly across the set."
+            ? "\n\nReviewed \(sampled.count) of \(project.images.count) samples, chosen evenly across the set."
             : ""
         return advice.text + note
     }

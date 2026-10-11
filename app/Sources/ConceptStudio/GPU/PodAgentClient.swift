@@ -81,12 +81,26 @@ struct RunFile: Codable, Equatable {
     }
 }
 
+struct AgentStorageUsage: Decodable, Equatable {
+    let totalBytes: Int64
+    let usedBytes: Int64
+    let freeBytes: Int64
+    let datasetsBytes: Int64
+    let reclaimableDatasetBytes: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case totalBytes = "total_bytes", usedBytes = "used_bytes", freeBytes = "free_bytes"
+        case datasetsBytes = "datasets_bytes", reclaimableDatasetBytes = "reclaimable_dataset_bytes"
+    }
+}
+
 struct AgentRunConfiguration {
     let config: JSONObject
     let dataset: JSONObject
 }
 
 protocol PodAgent: Sendable {
+    func upload(name: String, fileName: String, from file: URL, size: Int64) async throws
     func plan() async throws -> TrainingPlan
     func services() async throws -> [AgentService]
     func start(_ service: String, gpus: [Int], params: JSONObject) async throws
@@ -100,9 +114,18 @@ protocol PodAgent: Sendable {
     /// Streams one run file to `destination` without holding it in memory.
     func download(runID: String, path: String, to destination: URL) async throws
     func runConfiguration(runID: String) async throws -> AgentRunConfiguration
+    func storageUsage() async throws -> AgentStorageUsage
 }
 
 extension PodAgent {
+    func upload(name: String, fileName: String, from file: URL, size: Int64) async throws {
+        throw StudioError.message("This computer does not support direct training uploads. Update its training image.")
+    }
+
+    func storageUsage() async throws -> AgentStorageUsage {
+        throw StudioError.message("This agent does not expose workspace storage usage.")
+    }
+
     func runConfiguration(runID: String) async throws -> AgentRunConfiguration {
         throw StudioError.message("This agent does not expose saved run configuration.")
     }
@@ -142,6 +165,7 @@ struct PodAgentClient: PodAgent {
     let token: String
     let transport: any HTTPTransport
     var downloader: any FileDownloading = URLSessionDownloader()
+    var uploader: any FileUploading = URLSessionUploader()
 
     func plan() async throws -> TrainingPlan {
         try await JSONDecoder().decode(TrainingPlan.self, from: call(
@@ -152,6 +176,10 @@ struct PodAgentClient: PodAgent {
     func services() async throws -> [AgentService] {
         struct Result: Decodable { let services: [AgentService] }
         return try await JSONDecoder().decode(Result.self, from: call("services")).services
+    }
+
+    func storageUsage() async throws -> AgentStorageUsage {
+        try await JSONDecoder().decode(AgentStorageUsage.self, from: call("storage"))
     }
 
     func start(_ service: String, gpus: [Int], params: JSONObject) async throws {
@@ -269,6 +297,16 @@ actor DemoPodAgent: PodAgent {
         self.count = count
     }
 
+    func storageUsage() -> AgentStorageUsage {
+        AgentStorageUsage(
+            totalBytes: 100_000_000_000,
+            usedBytes: 25_000_000_000,
+            freeBytes: 75_000_000_000,
+            datasetsBytes: 2_000_000_000,
+            reclaimableDatasetBytes: 0
+        )
+    }
+
     func plan() -> TrainingPlan {
         TrainingPlan(
             mode: count == 1 ? "sequential" : "concurrent",
@@ -282,7 +320,7 @@ actor DemoPodAgent: PodAgent {
     }
 
     func start(_ service: String, gpus: [Int], params: JSONObject) {
-        states[service] = ["pull-dataset", "push-lora"].contains(service) ? "exited" : "running"
+        states[service] = ["pull-dataset", "push-lora", "cleanup-datasets"].contains(service) ? "exited" : "running"
         runIDs[service] = params["run_id"]?.stringValue
         if service.hasPrefix("trainer-") { ticks = 0 }
     }

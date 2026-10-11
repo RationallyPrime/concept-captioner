@@ -124,7 +124,9 @@ def _sink(args: argparse.Namespace, source):
 
 async def _run(args: argparse.Namespace) -> int:
     job = Job.load(args.job)
-    skill = skills.load(args.skill or job.skill)
+    skill = (
+        skills.load(args.skill) if args.skill else skills.load(job.skill, relative_to=job.directory)
+    )
     source = _source(args)
     ids = source.sample_ids
     unmapped = job.unmapped(ids)
@@ -172,8 +174,8 @@ def main(argv: list[str] | None = None) -> int:
             return asyncio.run(_run(args))
         if args.command == "validate":
             job = Job.load(args.job)
-            skill = skills.load(job.skill)
-            skill.profile(job.profile)
+            skill = skills.load(job.skill, relative_to=job.directory)
+            skill.profile(job.profile, relative_to=job.directory)
             _print(
                 {
                     "ok": True,
@@ -192,10 +194,20 @@ def main(argv: list[str] | None = None) -> int:
             mapping = job.mapping_for(args.sample_id)
             if mapping is None:
                 raise ConfigurationError(f"sample {args.sample_id!r} has no mapping in the job")
-            skill = skills.load(job.skill)
-            profile_text = skill.profile(job.profile)
+            skill = skills.load(job.skill, relative_to=job.directory)
+            profile_text = skill.profile(job.profile, relative_to=job.directory)
+            from .sources.local import VIDEO_SUFFIXES
+
             build = critic_instructions if args.critic else captioner_instructions
-            sys.stdout.write(build(skill, profile_text, job, mapping))
+            sys.stdout.write(
+                build(
+                    skill,
+                    profile_text,
+                    job,
+                    mapping,
+                    is_video=Path(args.sample_id).suffix.lower() in VIDEO_SUFFIXES,
+                )
+            )
             return 0
         if args.command == "hf":
             from .sources import hf as hfmod

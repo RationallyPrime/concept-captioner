@@ -37,9 +37,12 @@ struct RunHistoryView: View {
     private func runDetails(_ run: TrainingRun) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             LabeledContent("Starting model", value: run.baseModel).textSelection(.enabled)
-            LabeledContent("Dataset", value: run.datasetRepo).textSelection(.enabled)
-            LabeledContent("Dataset revision", value: run.datasetRevision ?? "Not recorded by this agent")
-                .font(.callout).textSelection(.enabled)
+            LabeledContent("Dataset", value: run.datasetDescription).textSelection(.enabled)
+            LabeledContent(
+                run.localInputDigest == nil ? "Dataset revision" : "Local input digest",
+                value: run.localInputDigest ?? run.datasetRevision ?? "Not recorded by this agent"
+            )
+            .font(.callout).textSelection(.enabled)
             LabeledContent("Training", value: "\(run.targetSteps) total steps · rank \(run.rank) · \(run.trainer)")
             LabeledContent("Result", value: run.result?.summary ?? "Run submitted")
             if let cost = run.estimatedGPUCostUSD {
@@ -60,7 +63,10 @@ struct RunHistoryView: View {
                     Task { await workspace.refreshRunFiles(run.runID) }
                 }.disabled(workspace.isBusy || !workspace.hasRunningPod)
             }
-            Text((run.datasetRevision == nil
+            Text((run.localInputDigest != nil
+                    ? "Repeat starts a new run using current project inputs. Resume re-uploads the original inputs "
+                    + "only when the included media, saved captions and job are unchanged. "
+                    : run.datasetRevision == nil
                     ? "No dataset revision was recorded. Repeat loads these settings using the current remote dataset. "
                     : "Repeat loads these settings and the recorded dataset revision. ")
                 +
@@ -70,10 +76,14 @@ struct RunHistoryView: View {
                 TextField("Resume to total steps", value: $totalSteps, format: .number)
             }.formStyle(.columns)
             Button("Resume latest checkpoint", systemImage: "play.circle") {
-                Task { await workspace.resumeRun(run, totalSteps: totalSteps) }
+                Task { await workspace.resumeRun(
+                    run,
+                    totalSteps: totalSteps,
+                    captureLocal: session.captureTrainingInputs
+                ) }
             }
             .disabled(workspace.isBusy || workspace.isTraining || !workspace.hasRunningPod
-                || run.checkpoints.isEmpty || totalSteps <= run.latestStep)
+                || session.busy || session.editing || run.checkpoints.isEmpty || totalSteps <= run.latestStep)
             .help("Keeps this run's dataset, model, rank and preprocessing. Refresh checkpoints on its storage first.")
             if !run.checkpoints.isEmpty {
                 Text("\(run.checkpoints.count) checkpoints available on storage \(run.volumeID).")

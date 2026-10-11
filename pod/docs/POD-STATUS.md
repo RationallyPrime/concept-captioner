@@ -1,6 +1,8 @@
 # POD-STATUS
 
-State of the pod side during the 2026-10-11 overnight feature round. The new generation,
+State after the 2026-10-11 source review repairs. The published-image/live evidence below
+remains the overnight snapshot; the repairs have not been rebuilt into images or GPU-tested.
+The overnight generation,
 run-history and approved-video code is published in public images at the accepted source
 `98708207` (tag `v0.2.0-overnight20261011-r2`). Actual FLUX generation and Resume passed on
 the r1 AI Toolkit image; r2 AI Toolkit has a CPU witness only, and its checkpoint-snapshot
@@ -16,10 +18,12 @@ hash and billing bucket, is in
 ## What exists
 
 - **Control agent** (`pod/agent`): authenticated HTTP API for GPU inventory, topology plan,
-  a fixed service catalog (vLLM, both trainers, TensorBoard), supervisor, logs and training
+  a nine-service catalog (vLLM, both trainers, both generators, TensorBoard, dataset pull,
+  LoRA push and dataset cleanup), supervisor, logs and training
   events. TensorBoard listens on loopback and is reached only through the agent's
   authenticated `/tensorboard/` proxy. vLLM and LTX preprocessing arguments are allowlisted.
-- **Transfer scripts and trainer wrappers** (`pod/scripts`): Hub dataset pull, AI Toolkit
+- **Transfer scripts and trainer wrappers** (`pod/scripts`): Hub dataset pull or authenticated
+  local dataset installation, AI Toolkit
   (FLUX) and LTX launchers, LoRA push.
 - **podctl** (`pod/podctl`): command-line client for the agent.
 - **Images**, public on GHCR under tag `v0.2.0-overnight20261011-r2`: `concept-captioner-pod-base`,
@@ -50,6 +54,25 @@ published), with a SHA-256 manifest. Build and push logs are on cx53 under
 
 ## Verified offline only
 
+- **Review repairs, 2026-10-11:** agent **660 passed**, scripts **291 passed**, podctl
+  **125 passed**; Ruff and formatting clean. Independent source review covers generation
+  completion, SIGTERM custody, Resume/retention and the direct-upload integration. These are
+  source/CPU checks, not evidence that the published images contain these changes.
+- The app reads `comparison.json.state` and preserves partial failed files with a visible
+  error. The generator catches ordinary SIGTERM, marks an existing manifest failed and
+  removes its private checkpoint copy on Stop and early validation errors. A real local
+  subprocess SIGTERM test exercises this; SIGKILL/container loss cannot guarantee cleanup.
+- Resume validates total steps against the checkpoint itself and refuses overrides that bypass
+  the saved LTX state. Dataset cleanup runs at validated training/generation start or by
+  explicit catalog action. It preserves current/active/failed/unknown/shared inputs and the
+  latest three resumable completed runs; checkpoints, results and caches are retained.
+  Pruned Hub inputs restore from their recorded revision. LTX result generation uses its saved
+  configuration/checkpoint without downloading pruned training data.
+- Authenticated file upload streams to a confined stage with exact length and 2 GiB/file,
+  20 GiB/dataset limits. The local pull mode installs the metadata-listed set atomically before
+  training. Tests cover auth-before-body, interrupted uploads, atomic replacement, path/size
+  refusals, no Hub calls and matching Swift/Python Unicode input digests. Local Resume requires
+  the original input digest; edited inputs require a new run. Base-model access is unchanged.
 - **agent + scripts 892 passed** in the overnight combined gate (the venv has the `pod`
   extra, including TensorBoard and datasets); **podctl 125 passed** in the preceding fix round. Fresh venvs per [pod/README.md](../README.md);
   ruff check and format clean on all three. These counts establish source behavior, not CUDA
@@ -196,6 +219,10 @@ dependencies; Ruff check/format clean. These checks use fake agent/model seams, 
 
 ## Open
 
+- **Separate assigned tickets:** clean image rebuild/publication and app image-default update,
+  RunPod Hub-token secret reference, and CI's macOS runner repair. No image or CI work was
+  performed in this source-repair round. Direct uploads, cleanup and the repaired Resume/
+  generation behavior need the rebuilt agent before live acceptance; no new GPU was rented.
 - **Caption quality.** The 3B and 8B captions failed the concept boundary in the cancelled
   five-image experiment; none is training data. The larger comparison is deferred by Hákon.
 - **Caption inference while training runs.** Both services were resident at once, but the
