@@ -1,10 +1,30 @@
 # ConceptCore: Swift design with parity to `concept_captioner` (Python)
 
-Status: architecture, 2026-10-10. The Python package under `src/concept_captioner/` is the
-reference implementation; `docs/v0.2-plan.md` (including "Beyond v0.2") and `README.md` are the
-design it was built to. This document is the Swift port's contract. Every implementer edits only
-the files assigned to them and follows the signatures here; signature changes are proposed in
-this document first.
+Status: architecture, 2026-10-10; contract revised 2026-10-11 (see "Contract revisions"). The
+Python package under `src/concept_captioner/` is the reference implementation;
+`docs/v0.2-plan.md` (including "Beyond v0.2") and `README.md` are the design it was built to.
+This document is the Swift port's contract. Every implementer edits only the files assigned to
+them and follows the signatures here; signature changes are proposed in this document first.
+
+### Contract revisions
+
+Changes to the conventions and public surface after the 2026-10-10 architecture, so a reader
+comparing code with this document sees them as decisions rather than drift.
+
+| Date | Change | Where |
+| --- | --- | --- |
+| 2026-10-10 | Provider set grows to `vercel` and the Pydantic AI Gateway upstreams | Convention 4, Resolve |
+| 2026-10-10 | Anthropic and Gemini thinking follow the model family (pydantic-ai 2.55 tables), not one fixed mapping | Convention 3, AnthropicClient, GeminiClient |
+| 2026-10-10 | `KeyStore.vllmBaseURL`: the vLLM key is bound to the endpoint the user configured | Resolve |
+| 2026-10-10 | `Runner.run` takes an awaited `onOutcome` callback | Runner |
+| 2026-10-11 | Streaming transport (`HTTPStreamingTransport`, `HTTPStreamResponse`, server-sent events) | Transport |
+| 2026-10-11 | `ChatGPTModelClient` and `ChatGPTInferenceError`: plan-backed OpenAI captioning (owner requirement "Log in with ChatGPT") | ChatGPTModelClient |
+| 2026-10-11 | Direct `openai` speaks Responses (parity with Python); Chat Completions stays for `openrouter`, `vercel`, `vllm`, `gateway/openai-chat` | Resolve |
+| 2026-10-11 | Every Responses request sends `store: false` | OpenAIResponsesClient |
+| 2026-10-11 | The vLLM key is bound to the configured origin (scheme, host, port), not the host alone | Resolve, Deviation 9 |
+| 2026-10-11 | `GeminiClient.api` (Developer/Vertex) is separate from `bearerAuth`; `OpenAICompatibleClient.reasoningDialect` is chosen by `resolve` | GeminiClient, OpenAICompatibleClient |
+| 2026-10-11 | `gateway/chat` and `gateway/responses` aliases; credential headers stripped on cross-host redirects | Resolve, Transport |
+| 2026-10-11 | The app's on-disk project folder is part of the shared contract | The language-neutral contract |
 
 ## Package
 
@@ -24,9 +44,11 @@ app/
     Triggers/Triggers.swift          CaptionDeps, Triggers.exactTriggerSpans, triggerProblems, retryMessage
     Images/ProviderImage.swift       Images.providerImage
     ModelClient/ModelClient.swift    ModelClient, UserContent, ChatMessage, OutputRequest, RequestSettings, ModelReply, TokenUsage
-    ModelClient/HTTPTransport.swift  HTTPTransport, URLSessionTransport, HTTPResponse
+    ModelClient/HTTPTransport.swift  HTTPTransport, HTTPStreamingTransport, URLSessionTransport, HTTPResponse, HTTPStreamResponse
+    ModelClient/ServerSentEvents.swift ServerSentEvent, ServerSentEventParser, ServerSentEventStream
     ModelClient/OpenAICompatibleClient.swift
     ModelClient/OpenAIResponsesClient.swift
+    ModelClient/ChatGPTModelClient.swift ChatGPTModelClient, ChatGPTInferenceError
     ModelClient/AnthropicClient.swift
     ModelClient/GeminiClient.swift
     ModelClient/Resolve.swift        Provider, KeyStore, StaticKeyStore, ResolvedEndpoint, Endpoints.resolve / parseSpec
@@ -40,13 +62,14 @@ app/
     Hub/HubFolderSource.swift
     Hub/HubFolderSink.swift
     Resources/Skills/diffusion-training-captioner/   copied verbatim from src/concept_captioner/skills/
-  Sources/ConceptStudio/main.swift   placeholder executable (a later workflow owns the app)
+  Sources/ConceptStudio/             the macOS app (APP-BRIEF.md); consumes ConceptCore, outside this spec
   Tests/ConceptCoreTests/
     Support/FakeModelClient.swift    scripted ModelClient that records requests
     Support/Fixtures.swift           synthetic PNGs (CoreGraphics), the NORA7/IVAN9 job, h3(), goodCaption()
     Support/StubTransport.swift      scripted HTTPTransport that records URLRequests
     ModelsTests.swift SkillsTests.swift PromptTests.swift TriggersTests.swift ImagesTests.swift
     ModelClientTests.swift ResolveBaseURLTests.swift RunnerTests.swift SourcesTests.swift HubTests.swift
+    GatewayTests.swift ProviderThinkingTests.swift ServerSentEventsTests.swift ChatGPTModelClientTests.swift
 ```
 
 Conventions (non-negotiable):
@@ -59,7 +82,9 @@ Conventions (non-negotiable):
   `HTTPTransport`; the runner takes a `FakeModelClient`.
 - Errors: `ConfigurationError` for anything the user got wrong (bad job, bad skill, bad spec);
   `ModelError` for provider/transport problems; `HubError` for Hub HTTP problems. All carry a
-  human-readable `message` and conform to `LocalizedError`.
+  human-readable `message` and conform to `LocalizedError`. The one provider-specific type is
+  `ChatGPTInferenceError`: the plan route's failures carry codes (usage limit, eligibility) that
+  the app must act on, and its text is written for a person, not a log.
 - `swiftformat` and `swiftlint lint --quiet` clean (configs in `app/.swiftformat`,
   `app/.swiftlint.yml`).
 - Fixtures use the placeholder triggers `NORA7` / `IVAN9`. No real concept names anywhere.
@@ -76,6 +101,28 @@ Conventions (non-negotiable):
 | response record | one JSON object per captioned image, keys of `runner.py::_base_record` |
 | sidecars | `<stem>.txt` caption, `<stem>.json` record, `_summary.json` (CLI/app) |
 | Hub dataset | imagefolder convention: images + `metadata.jsonl` with `file_name`, `caption`, `caption_response` |
+| project folder | the layout below; the app writes it, the CLI runs on it unchanged |
+
+#### Project folder
+
+The app's project is a folder the CLI can caption as is:
+
+```
+<project>/
+  job.yaml       the shared job file; never holds a key, token or absolute path
+  images/        the training images, each with its sidecars beside it:
+                 <stem>.txt caption, <stem>.json response record, _summary.json after a run
+  skill/         present only when the user chose a custom skill: a copy of that skill
+                 directory, named in job.yaml as `skill: ./skill`; the bundled default skill
+                 writes no `skill` key
+  references/    app-only: one reference image per trigger, `<hex of the trigger's UTF-8>.png`;
+                 never read by the core or the CLI and never published
+```
+
+Image file stems are unique within `images/` (the source rejects colliding stems), and a file
+name is the sample ID in `job.yaml`, the sidecars, and a published Hub dataset. Run from the
+project folder, the CLI equivalent of the app's captioning is
+`concept-captioner run job.yaml --images images --out images`.
 
 ### Deviations from the Python code, decided here
 
@@ -88,11 +135,15 @@ Conventions (non-negotiable):
 3. **Anthropic structured output uses `output_config.format` (JSON Schema), not a forced
    tool.** Forced `tool_choice` returns HTTP 400 on current Claude models; `output_config.format`
    is GA. Tool mode uses a `strict: true` tool with `tool_choice: {type: "auto"}` plus a system
-   instruction to call it. Thinking maps to the supported budget/adaptive form for the model family.
+   instruction to call it. Thinking takes the form the model family supports, as pydantic-ai 2.55
+   decides it (budget tokens for older families, adaptive for newer ones, `effort` only where
+   supported); the tables are in AnthropicClient below.
 4. **`resolve` has a finite provider set**: `google`, `anthropic`, `openai`, `openrouter`,
    `vercel`, `vllm`, and `gateway/` followed by `google`, `google-cloud`, `anthropic`, `openai`,
-   `openai-responses` or `openai-chat`. Python forwards unknown prefixes to pydantic-ai; Swift
-   raises `ConfigurationError`. `gemini` raises a message that names `kind: google`.
+   `openai-responses`, `openai-chat`, or the aliases `responses` and `chat`. Python forwards
+   unknown prefixes to pydantic-ai, so it also accepts `gateway/bedrock` and `gateway/groq`;
+   Swift has no client for those and raises `ConfigurationError`, as for any unknown kind.
+   `gemini` raises a message that names `kind: google`.
 5. **Keys come from an injected `KeyStore`**, never from the environment inside the library.
    The app's Keychain-backed store and the CLI's environment store both conform to it.
 6. **Parquet-backed Hub datasets are out of scope for the Swift core in v1.** The Hub source
@@ -106,6 +157,10 @@ Conventions (non-negotiable):
 8. `CLAUDE.md` in the repository root predates v0.2 (receipts, `POLICY_VERSION`,
    `require_model_match`); those rules no longer exist in either implementation. The v0.2 plan
    governs.
+9. **The vLLM key is bound to an origin.** Swift attaches the stored vLLM key only when the
+   job's `base_url` has the same scheme, host and port (default ports filled in) as the
+   configured endpoint; another port on the same host is another service. Python still compares
+   the host alone. (Python fix to file.)
 
 ---
 
@@ -704,13 +759,63 @@ public protocol HTTPTransport: Sendable {
     func send(_ request: URLRequest) async throws -> HTTPResponse
 }
 
-/// URLSession-backed. Follows redirects; drops the Authorization header when a redirect leaves
-/// the original host (Hub `resolve` URLs redirect to a CDN that rejects a second auth mechanism).
-public struct URLSessionTransport: HTTPTransport {
+/// A response read as it arrives: status and headers complete, the body as raw byte chunks of
+/// any size. The body is read once, as `events` or with `collect(limit:)`.
+public struct HTTPStreamResponse: Sendable {
+    public let status: Int
+    public let headers: [String: String]      // lowercase keys
+    public let body: AsyncThrowingStream<Data, any Error>
+    public init(status: Int, headers: [String: String] = [:], body: AsyncThrowingStream<Data, any Error>,
+                cancel: @escaping @Sendable () -> Void = {})
+    public var events: ServerSentEventStream { get }           // the body as server-sent events
+    public func collect(limit: Int) async throws -> Data       // at most `limit` bytes, for error reports
+    public func cancel()                                       // stop reading, release the connection; idempotent
+}
+
+public protocol HTTPStreamingTransport: HTTPTransport {
+    func stream(_ request: URLRequest) async throws -> HTTPStreamResponse
+}
+
+/// URLSession-backed, both buffered and streaming. Follows redirects; when a redirect leaves the
+/// original host it drops every credential header: `Authorization`, `x-api-key`,
+/// `x-goog-api-key` (Hub `resolve` URLs redirect to a CDN that rejects a second auth mechanism,
+/// and a key must never reach a third host).
+public struct URLSessionTransport: HTTPStreamingTransport {
     public init(session: URLSession = .shared, timeout: TimeInterval = 600)
     public func send(_ request: URLRequest) async throws -> HTTPResponse
+    public func stream(_ request: URLRequest) async throws -> HTTPStreamResponse
 }
 ```
+
+The streaming body is raw bytes, never URLSession's `bytes.lines`: `AsyncLineSequence` drops
+empty lines, and an empty line is what ends a server-sent event. A chunk is flushed at every
+line ending, so an event reaches the client as soon as its blank line arrives. Cancelling the
+consuming task, or calling `cancel()`, cancels the URLSession task.
+
+### Server-sent events (`ModelClient/ServerSentEvents.swift`)
+
+```swift
+public struct ServerSentEvent: Sendable, Equatable {
+    public let event: String?     // the `event:` field; nil when none was sent
+    public let data: String       // `data:` lines joined with "\n"
+    public let id: String?        // last `id:` seen on the stream
+}
+
+public struct ServerSentEventParser: Sendable {           // incremental, byte-oriented
+    public mutating func feed(_ bytes: some Sequence<UInt8>) -> [ServerSentEvent]
+    public mutating func finish() -> [ServerSentEvent]     // at end of body
+}
+
+public struct ServerSentEventStream: AsyncSequence, Sendable { /* Element == ServerSentEvent */ }
+```
+
+Framing is WHATWG `text/event-stream`: lines end in CRLF, LF or CR (a CRLF split across chunks
+is one line ending); an empty line dispatches the buffered event; `data` lines join with "\n";
+lines starting with `:` are comments; one space after the field's colon is dropped; a leading
+BOM is ignored; `retry` and unknown fields are ignored; an event with no `data` is not
+dispatched. Two lenient rules keep a sloppy server from merging events: an `event:` or `id:`
+line that arrives while data is buffered dispatches the buffered event first, and an event
+still buffered when the body ends is dispatched.
 
 ### Protocol and value types (`ModelClient/ModelClient.swift`)
 
@@ -805,7 +910,7 @@ extension ModelClient {
 }
 ```
 
-Common rules for the three clients:
+Common rules for the API-key clients (ChatGPTModelClient has its own error type, below):
 
 - Non-2xx -> `ModelError.http(status:body:)` with the body text (truncated to 4 KB).
 - Transport errors -> `ModelError.transport`.
@@ -818,19 +923,23 @@ Common rules for the three clients:
 
 ### OpenAICompatibleClient (`ModelClient/OpenAICompatibleClient.swift`)
 
-Covers OpenAI (`https://api.openai.com/v1`), OpenRouter (`https://openrouter.ai/api/v1`),
-Vercel (`https://ai-gateway.vercel.sh/v1`), Pydantic Gateway’s explicit OpenAI Chat route, and
-vLLM (`base_url` from the spec).
+Chat Completions. Covers OpenRouter (`https://openrouter.ai/api/v1`), Vercel
+(`https://ai-gateway.vercel.sh/v1`), Pydantic Gateway's explicit OpenAI Chat route
+(`gateway/openai-chat`, `gateway/chat`) and vLLM (`base_url` from the spec). Direct OpenAI
+uses OpenAIResponsesClient.
 
 ```swift
 public struct OpenAICompatibleClient: ModelClient {
+    public enum ReasoningDialect: Sendable { case reasoningEffort, openRouter }
+    public static let openRouterBaseURL, vercelBaseURL: URL
     public let baseURL: URL
     public let apiKey: String?
     public let requestedModel: String
     public let transport: any HTTPTransport
     public let extraHeaders: [String: String]   // OpenRouter: HTTP-Referer / X-Title may be set by the app
+    public let reasoningDialect: ReasoningDialect
     public init(baseURL: URL, apiKey: String?, model: String, transport: any HTTPTransport = URLSessionTransport(),
-                extraHeaders: [String: String] = [:])
+                extraHeaders: [String: String] = [:], reasoningDialect: ReasoningDialect = .reasoningEffort)
 }
 ```
 
@@ -855,21 +964,103 @@ Reply: `choices[0].message.content` (native/prompted) or
 `choices[0].message.tool_calls[0].function.arguments` (tool); `servedModel = model`;
 usage from `usage.prompt_tokens` / `usage.completion_tokens`.
 
-OpenRouter uses `reasoning: {effort, enabled: true}` instead of `reasoning_effort`;
-minimal maps to low, xhigh to high. A 400 response naming thinking/reasoning_effort preserves
-the provider body and adds the requested model, effort and a concrete setting correction.
+The thinking dialect is the client's `reasoningDialect`, which `resolve` sets from the kind
+(`openrouter` -> `.openRouter`, everything else `.reasoningEffort`); the host never decides it.
+`.openRouter` sends `reasoning: {effort, enabled: true}` instead of `reasoning_effort`, with
+minimal and low -> low, medium -> medium, high and xhigh -> high.
+
+Thinking rejections (this client and OpenAIResponsesClient): a 400 whose body names `reasoning`
+or `thinking`, on a request that asked for thinking, stays `ModelError.http(status: 400, ...)`
+with the body `"model '<m>' rejected thinking '<level>'; choose a supported thinking level or
+none. Provider response: <body>"`.
 
 ### OpenAIResponsesClient (`ModelClient/OpenAIResponsesClient.swift`)
 
-`init(baseURL:apiKey:model:transport:)` implements the Pydantic Gateway default OpenAI route.
-It posts to `{baseURL}/responses` with bearer auth, system/user/assistant input messages and
-image data URLs. Native output uses `text.format` with strict JSON Schema; prompted output
-uses `json_object`; tool output uses a strict function and named `tool_choice`. Thinking uses
-`reasoning.effort`, with minimal mapped to low for gpt-5.6/gpt-6. Supported settings include
-max_output_tokens, temperature, top_p, service_tier and parallel_tool_calls in tool mode;
-extra body and harmless extra headers remain supported. Unsupported Chat-only settings are
-omitted. Replies read message output_text or function_call arguments, model and token usage;
-refusals and missing output are errors. Retry conversations preserve assistant JSON as text.
+The OpenAI Responses API: direct `openai` and `gateway/openai`, `gateway/openai-responses`,
+`gateway/responses`. Its request encoder is shared with ChatGPTModelClient.
+
+```swift
+public struct OpenAIResponsesClient: ModelClient {
+    public static let openAIBaseURL: URL            // https://api.openai.com/v1
+    public let baseURL: URL
+    public let apiKey: String
+    public let requestedModel: String
+    public let transport: any HTTPTransport
+    public init(baseURL: URL, apiKey: String, model: String, transport: any HTTPTransport = URLSessionTransport())
+}
+```
+
+Request: `POST {baseURL}/responses`, `Authorization: Bearer <key>`. Body:
+
+```
+model,
+instructions: instructions                    (native and tool)
+input: [{role: "user", content: [{type: "input_text", text} | {type: "input_image", image_url: "data:..."}]}
+        | {role: "assistant", content: "<text>"}, ...]
+       prompted mode instead omits `instructions` and puts {role: "system", content: instructions}
+       first in `input`: json_object requires "JSON" in an input message and OpenAI does not
+       count `instructions` (pydantic-ai does the same)
+native:   text: {format: {type: "json_schema", name, schema, strict: true}}
+prompted: text: {format: {type: "json_object"}}            (plus the instruction suffix)
+tool:     tools: [{type: "function", name, description, parameters: schema, strict: true}],
+          tool_choice: {type: "function", name}, parallel_tool_calls when set
+thinking: reasoning: {effort: <level>}; "medium" for thinking: true; minimal -> low for gpt-5.6 and gpt-6; omitted for none
+settings: temperature, max_output_tokens (maxTokens), top_p, service_tier; seed, top_k, stop, penalties and
+          logit_bias have no Responses parameter and are dropped; extraHeaders on the request; then extraBody merged
+store:    false, always, after extraBody: captions and images are not retained at OpenAI
+```
+
+Reply: `output[]` items of type `message` -> their `output_text` parts joined (native/prompted),
+or the first `function_call`'s `arguments` (tool); a `refusal` part, or no output, is
+`ModelError.malformedReply`; `servedModel = model`; usage from `usage.input_tokens` /
+`usage.output_tokens`.
+
+### ChatGPTModelClient (`ModelClient/ChatGPTModelClient.swift`)
+
+Plan-backed OpenAI captioning for a user who signed in with ChatGPT (APP-BRIEF "Log in with
+ChatGPT"). It is not an endpoint kind: the job file still says `kind: openai`, and the app
+chooses this client instead of `resolve` when the user picked their ChatGPT plan for it. No API
+key and no billing route other than the signed-in plan is ever used.
+
+```swift
+public struct ChatGPTModelClient: ModelClient {
+    public init(model: String,
+                accessToken: @escaping @Sendable () async throws -> String,   // asked fresh per request
+                onUsageLimit: (@Sendable (ChatGPTInferenceError) async -> Void)? = nil,
+                transport: any HTTPStreamingTransport = URLSessionTransport())
+    /// Throws ConfigurationError for tool mode or any setting the plan route does not take.
+    public static func validate(settings: RequestSettings, outputMode: OutputMode) throws
+}
+
+public struct ChatGPTInferenceError: Error, LocalizedError, Sendable {
+    public let status: Int?, code: String?, parameter: String?, requestID: String?, body: String
+    public var errorDescription: String?    // problem + recovery, in plain words; never codes, ids or JSON
+}
+```
+
+Request: `POST https://api.openai.com/v1/responses` (fixed; nothing configures it),
+`Authorization: Bearer <access token>`, `Accept: text/event-stream`. The body is
+OpenAIResponsesClient's body plus `stream: true`: the plan route takes streamed requests only,
+and each event is consumed as it arrives.
+
+Before any credential is read or any request is sent: an empty model, tool mode, or any of
+temperature, max_tokens, seed, top_p, top_k, stop_sequences, presence/frequency penalty,
+logit_bias, parallel_tool_calls, service_tier, extra_headers, extra_body or an ignored key ->
+`ConfigurationError`. An empty token or one containing whitespace -> `ConfigurationError`.
+
+Reply: the body is read as server-sent events. Lifecycle and delta events (`response.created`,
+`response.in_progress`, `response.output_*`, `[DONE]`) are skipped; the event type is the
+JSON `type`, else the SSE `event:` name. `response.completed` whose `response.status` is
+`completed` is parsed like OpenAIResponsesClient's reply; `response.failed` or `error` ->
+`ChatGPTInferenceError`; `response.incomplete` -> `ModelError.malformedReply` naming the reason;
+an event that is not JSON, or a body that ends without a terminal event ->
+`ModelError.malformedReply`. Partial text never becomes a caption. A non-2xx status ->
+`ChatGPTInferenceError` from at most 4 KB of the body, with `x-request-id`.
+
+Usage limit (`subscription_sharing_usage_limit_exceeded`): the first one is reported once
+through `onUsageLimit`, and every later request through the same client (or a copy) throws it
+again without reading a token or sending anything. Cancellation stops the stream and throws
+`CancellationError`.
 
 ### AnthropicClient (`ModelClient/AnthropicClient.swift`)
 
@@ -924,14 +1115,22 @@ public struct GeminiClient: ModelClient {
     public let apiKey: String
     public let requestedModel: String
     public let transport: any HTTPTransport
-    public let bearerAuth: Bool
+    public enum API: Sendable { case developer, vertex }
+    public let bearerAuth: Bool       // also send the key as bearer Authorization (gateway)
+    public let api: API               // which Gemini API serves the model: capabilities only
     public init(apiKey: String, model: String, baseURL: URL = defaultBaseURL,
-                transport: any HTTPTransport = URLSessionTransport(), bearerAuth: Bool = false)
+                transport: any HTTPTransport = URLSessionTransport(), bearerAuth: Bool = false,
+                api: API = .developer)
 }
 ```
 
+Authentication style and API flavour are independent: `bearerAuth` decides headers, `api`
+decides model capabilities (today: the `gemini-3.1-flash-image` thinking levels, `[minimal,
+high]` on the Developer API, the full scale on Vertex). The gateway's Google routes use both
+`bearerAuth: true` and `.vertex`.
+
 Request: `POST {baseURL}/models/{model}:generateContent`, headers `x-goog-api-key`,
-`Content-Type: application/json`; Gateway Vertex mode also sends bearer Authorization. Body:
+`Content-Type: application/json`, plus bearer Authorization when `bearerAuth`. Body:
 
 ```
 systemInstruction: {parts: [{text: instructions}]}
@@ -944,7 +1143,7 @@ generationConfig:
   thinkingConfig: none and older non-thinking models -> omitted;
                   Gemini 2.5 uses budgets 128, 2048, 8192, 24576 (high and xhigh);
                   current families choose their nearest supported level, lower wins ties;
-                  Developer/Vertex image-family capabilities remain distinct;
+                  the image family's levels depend on `api` (above);
                   includes includeThoughts: true, with boolean true leaving the amount to the provider
   temperature, maxOutputTokens, topP, topK, seed, stopSequences, presencePenalty, frequencyPenalty
   (logit_bias, parallel_tool_calls, service_tier unsupported -> ignored; extraHeaders on the request)
@@ -1009,20 +1208,25 @@ extension Endpoints {
   IP literal that is loopback, private or link-local); anything else ->
   `"base_url '<u>' must be https, or http to a loopback/private address; images and the endpoint key would
   otherwise travel in clear text to a public host"`.
-- `openrouter` -> `OpenAICompatibleClient(baseURL: https://openrouter.ai/api/v1)`; `openai` ->
-  `https://api.openai.com/v1` always; `anthropic` -> `AnthropicClient`; `google` -> `GeminiClient`.
-- `vercel` uses the fixed Vercel Chat Completions host and its own `.vercel` key.
+- `openai` -> `OpenAIResponsesClient(baseURL: https://api.openai.com/v1)` always (Responses, as
+  Python's `OpenAIResponsesModel`); `openrouter` -> `OpenAICompatibleClient(baseURL:
+  https://openrouter.ai/api/v1, reasoningDialect: .openRouter)`; `anthropic` -> `AnthropicClient`;
+  `google` -> `GeminiClient` (`.developer`, key header only).
+- `vercel` uses the fixed Vercel Chat Completions host, `.reasoningEffort`, and its own `.vercel` key.
 - Every `gateway/<provider>` uses `.gateway`, never a direct-provider key. The key’s supported
   `us`/`eu` region selects `https://gateway-{region}.pydantic.dev/proxy`; malformed/unsupported
   regions fail. Google/google-cloud uses native Vertex generateContent under
-  `/google-vertex/v1beta1/publishers/google`; Anthropic uses `/anthropic/v1/messages`;
-  openai/openai-responses uses `/openai/responses`; openai-chat uses `/openai/chat/completions`.
-  No job URL overrides any gateway host.
+  `/google-vertex/v1beta1/publishers/google` (`bearerAuth: true`, `.vertex`); Anthropic uses
+  `/anthropic/v1/messages` with bearer auth; openai/openai-responses/responses uses
+  `/openai/responses`; openai-chat/chat uses `/openai/chat/completions`. `chat` and `responses`
+  are pydantic-ai's aliases. No job URL overrides any gateway host.
 - Key: `keys.apiKey(for:)`; nil for a provider other than vllm -> `ModelError.missingKey(provider)`.
-  For vLLM, attach the key only when the parsed job host equals the parsed host of
-  `keys.vllmBaseURL` (case-insensitive); absent or different configured host means no key.
+  For vLLM, attach the key only when the job's `base_url` and `keys.vllmBaseURL` have the same
+  origin: scheme and host compared case-insensitively, port compared with the scheme's default
+  (80, 443) filled in. An absent configured endpoint, or any difference, means no key.
   Python uses `VLLM_BASE_URL` for that user configuration, including when it supplies the
-  endpoint omitted by the job. Neither implementation reads the configured host from the job.
+  endpoint omitted by the job, and still compares hosts only (Deviation 9). Neither
+  implementation reads the configured endpoint from the job.
 - Reject URL userinfo, escaped hosts, whitespace, control characters, backslashes and invalid
   ports before requests. Check and send the same parsed URL in Swift.
 - Job `extra_headers` cannot set authentication or routing: reject names containing
@@ -1113,7 +1317,7 @@ in tool mode too (pydantic-ai keeps it only for tool-output retries).
    `https://pod-1234.proxy.runpod.net/v1`, `http://localhost:8000/v1` and `http://10.0.0.5:8000/v1`
    resolve; `http://evil.example.com/v1` and `http://8.8.8.8:8000/v1` throw a message containing
    `"must be https"`.
-3. OpenAI client, native mode: the recorded request body has `response_format.type == "json_schema"`,
+3. Chat Completions client (vLLM base URL), native mode: the recorded request body has `response_format.type == "json_schema"`,
    `json_schema.strict == true`, the image part is a `data:image/png;base64,` URL, the system
    message is first, `reasoning_effort == "low"`; the reply parses `choices[0].message.content`
    and `servedModel` from `model`. Tool mode: `tools[0].function.name == "Caption"` and arguments
@@ -1128,7 +1332,8 @@ in tool mode too (pydantic-ai keeps it only for tool-output retries).
    `inlineData.mimeType == "image/png"`, `thinkingConfig.thinkingLevel == "high"` for `.xhigh`;
    `servedModel` from `modelVersion`.
 6. HTTP 429 with a body -> `ModelError.http(status: 429, ...)`; a thrown transport error ->
-   `ModelError.transport`.
+   `ModelError.transport`. A cross-host redirect through `URLSessionTransport` drops
+   `Authorization`, `x-api-key` and `x-goog-api-key`; a same-host redirect keeps them.
 7. (`StructuredStageTests.swift`) `StructuredStage<Caption>` with a `FakeModelClient`: first reply fails the validator, the
    second request's last message is a user turn whose text is exactly
    `"Validation feedback:\n" + <validator message> + "\n\nFix the errors and try again."` in
@@ -1137,6 +1342,17 @@ in tool mode too (pydantic-ai keeps it only for tool-output retries).
    `StageFailure.rejected` with `requests == 2`. An undecodable reply followed by a good one
    succeeds with `requests == 2`; its retry turn is the `json_invalid` record, and a reply
    missing `caption` retries with exactly pydantic-ai's `missing` / "Field required" text.
+8. (`GatewayTests.swift`) every direct and gateway kind, aliases included, reaches its fixed URL
+   with its own key; every Responses body has `store: false`, which `extra_body` cannot undo;
+   prompted Responses requests carry the system prompt as the first input message and no
+   `instructions`. (`ResolveBaseURLTests.swift`) the vLLM key reaches only the configured origin.
+9. (`ServerSentEventsTests.swift`) every line ending, split at every byte; multi-line data,
+   comments and BOM; the `event:`/`id:` boundary; an event is delivered before the body ends.
+10. (`ChatGPTModelClientTests.swift`) a realistic multi-event Responses stream (created,
+    in_progress, output item, text deltas, completed) and one ending in `response.failed`, both
+    through the real `URLSessionTransport` with an offline `URLProtocol` and chunk boundaries
+    inside JSON and between the two newlines of an event boundary; settings and token
+    validation before any request; the usage limit reported once; cancellation.
 
 ---
 
