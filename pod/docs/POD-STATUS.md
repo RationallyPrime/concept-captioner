@@ -18,14 +18,35 @@ builds and live receipts recorded here.
 
 | tree | latest local result | scope |
 | --- | --- | --- |
-| agent | 570 passed, 1 skipped | catalog/API, actual fake subprocess lifecycle, GPU fixtures, topology, auth, TensorBoard proxy and event reader; skipped optional TensorBoard parity in the development venv |
-| scripts | 240 passed | wrapper validation/config/preprocess, mocked trainer launches and Hub transfer; isolated `python -I` entrypoints |
-| podctl | 113 passed | CLI/client, gateway classification, logs/wait semantics |
+| agent | 612 passed | catalog/API, actual fake subprocess lifecycle, GPU fixtures, topology, auth and TensorBoard sessions, TensorBoard proxy, run-file listing/fetch and its escape cases, vLLM flag build check, event reader (TensorBoard parity included: the venv has the `pod` extra) |
+| scripts | 242 passed | wrapper validation/config/preprocess, mocked trainer launches and Hub transfer, pinned LTX revision and exit 69; isolated `python -I` entrypoints |
+| podctl | 125 passed | CLI/client, gateway classification, logs/wait semantics, `files`/`pull`/`tensorboard` |
 
-Ruff and formatting passed for all three trees. The inherited Starlette/httpx warning does
-not change these results. Commands use each package's existing development venv; scripts
-run with `../agent/.venv/bin/python -m pytest tests -q`. These local counts establish source
+Counts from the 2026-10-11 fix round, in fresh venvs (`uv venv && uv pip install -e
+".[dev,pod]"` in `agent/`, `".[dev]"` in `podctl/`; scripts with `../agent/.venv/bin/python
+-m pytest tests -q`). Ruff and formatting passed for all three trees. The inherited
+Starlette/httpx warning does not change these results. These local counts establish source
 behavior, not CUDA execution.
+
+### 2026-10-11 fix round: source changes not yet run on a pod
+
+Every live receipt below predates these; none of them has run on real hardware yet.
+
+- TensorBoard's browser credential is no longer the bearer: `POST /tensorboard-session`
+  issues a derived, 12-hour HMAC session cookie (POD-SPEC §2.1, §2.9); proxied responses set
+  no cookie. The receipt at "cookie-only health answered 401" below is of the old scheme. The
+  app's TensorBoard view must call the handshake before loading the page.
+- The `/tensorboard` proxy targets the catalog's fixed port 6006; the `tensorboard` service no
+  longer takes a `port` param.
+- `trainer-ltx` validates with `LtxRunConfig`; the shared rule file is `ltx_rules.py`.
+- `launch_ltx.py` downloads LTX-2 at revision `dfcc2108383fe1aaa0584bdf55d368a4bdadd90c`
+  (the repo's head since 2026-08-04, so the same files the 2026-10-10 run fetched), before
+  writing run files, and exits 69 on failure.
+- `Dockerfile.ltx` pins TensorBoard 2.21.0; `Dockerfile.base` runs
+  `images/check_vllm_flags.py`, the automated form of the manual source probe below. Neither
+  image has been rebuilt with these steps.
+- `GET /runs/{id}/files` and `GET /runs/{id}/files/{path}` serve the run's output directory;
+  `podctl files`, `pull` and `tensorboard` were run end to end against a local fake agent only.
 
 Four independently accepted runtime changes are published:
 

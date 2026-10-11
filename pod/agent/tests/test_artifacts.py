@@ -1,4 +1,4 @@
-"""Run artifact retrieval (POD-SPEC §2.9, §2.10): list and fetch the run's output directory.
+"""Run artifact retrieval (POD-SPEC §2.10, §2.11): list and fetch the run's output directory.
 
 A user without a Hub account gets the trained LoRA through these two routes, so they are
 checked for what they serve (sizes, digests, bytes) and, mostly, for what they must never
@@ -100,6 +100,13 @@ def test_fetch_streams_the_file(client: TestClient, run_dir: Path) -> None:
     assert spaced.status_code == 200 and spaced.content == SAMPLE
     head = client.head(f"/runs/{RUN}/files/samples/step%202.png")
     assert head.status_code == 200 and head.headers["content-length"] == str(len(SAMPLE))
+    # A broken transfer of a multi-gigabyte file resumes with a byte range.
+    part = client.get(
+        f"/runs/{RUN}/files/checkpoints/lora_weights_step_00002.safetensors",
+        headers={"Range": "bytes=10-19"},
+    )
+    assert part.status_code == 206 and part.content == WEIGHTS[10:20]
+    assert part.headers["content-range"] == f"bytes 10-19/{len(WEIGHTS)}"
 
 
 @pytest.mark.parametrize(

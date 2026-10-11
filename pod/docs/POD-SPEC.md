@@ -33,7 +33,7 @@ checked on a real pod.
 | Convention | Value | Consequence |
 | --- | --- | --- |
 | HTTP ports | declared at pod creation ("Expose HTTP Ports", max 10); cannot be added later without a reset | the app declares `8800/http,8000/http` (agent, vLLM; TensorBoard stays on loopback) when it creates the pod |
-| Proxy URL | `https://<pod-id>-<internal-port>.proxy.runpod.net`, HTTPS only, **public and unauthenticated**, **100 s Cloudflare timeout** (`524`) | every agent endpoint answers in well under 100 s; nothing streams; the agent, vLLM and TensorBoard must carry their own auth or be treated as public |
+| Proxy URL | `https://<pod-id>-<internal-port>.proxy.runpod.net`, HTTPS only, **public and unauthenticated**, **100 s Cloudflare timeout** (`524`) | every agent endpoint starts its answer in well under 100 s; only run-file downloads (2.11) stream a body. The agent, vLLM and TensorBoard must carry their own auth or be treated as public |
 | Bind address | public services bind `0.0.0.0`; TensorBoard binds `127.0.0.1` | TensorBoard is reached only through the authenticated agent route |
 | Volume | network volume (or pod volume disk) mounted at `/workspace`; survives stop/restart; container disk is wiped | all data, logs and caches live under `/workspace`; the image holds only code and wheels |
 | Env vars | `--env` at creation reach **PID 1** (our entrypoint → the agent); not SSH shells | the agent inherits `PODAGENT_TOKEN`, `HF_TOKEN`; every child service inherits the agent's env minus `PODAGENT_TOKEN` / `VLLM_API_KEY` (2.6), plus per-service additions |
@@ -46,9 +46,12 @@ The app creates pods through RunPod REST v2 `POST /v2/pods`: `image` names
 `minCudaVersion: "13.0"` and `minRamPerGpu: 60`; `disk: 50` is the temporary container disk.
 `mounts.network` attaches the selected `volumeId` at `/workspace`, `dataCenterIds` selects
 that volume's location, and `ports` is `["8800/http", "8000/http"]`. The `env` object carries
-a generated `PODAGENT_TOKEN` and the user's `HF_TOKEN`. The app's budget and idle watchdog
-send `POST /v2/pods/<id>/action` with `{"action":"stop"}` and confirm a stopped status;
-they require the app to remain open. Removal is a separate, confirmed DELETE operation.
+a generated `PODAGENT_TOKEN` and the user's `HF_TOKEN`.
+
+Stopping a pod is the app's job; the pod side has no self-stop and no terminate-after guard.
+The app keeps the Mac awake while a pod runs, and on launch reconciles the pods it created.
+Its budget and idle watchdog send `POST /v2/pods/<id>/action` with `{"action":"stop"}` and
+confirm a stopped status. Removal is a separate, confirmed DELETE operation.
 The temporary disk is cleared on stop/restart; the network volume persists and remains billed.
 See [RunPod storage](https://docs.runpod.io/pods/storage/types) and the current
 `https://api.runpod.io/v2/openapi.json` schema.
@@ -73,13 +76,17 @@ payload_too_large`); the largest legitimate body is a trainer start's `RunConfig
 The app-level dependency on every route is the second line of defence.
 
 The same token is, by default, the API key vLLM is started with (`VLLM_API_KEY` env of the
-vLLM child), so the app's `vllm:` endpoint on port 8000 is not an open proxy either. TensorBoard
-binds loopback and is shown at `https://<pod-id>-8800.proxy.runpod.net/tensorboard/`.
-The first browser navigation sends the bearer. Its response sets `podagent_tensorboard`, an
-HttpOnly cookie scoped to `/tensorboard`, SameSite Strict and Secure on real pods. This cookie
-can authenticate only the `/tensorboard` subtree; all control APIs still require the bearer.
-`GET`, `POST` and `HEAD` under this route proxy only the catalog's local TensorBoard port,
-with its `/tensorboard` path prefix. Authorization and cookies are never forwarded upstream.
+vLLM child), so the app's `vllm:` endpoint on port 8000 is not an open proxy either.
+
+One second credential exists, for TensorBoard only (2.9). A browser cannot attach the bearer
+to the scripts and XHRs a TensorBoard page loads, so `POST /tensorboard-session` (bearer only)
+issues a session cookie. Its value is never the token: it is
+`v1.<expires>.<HMAC-SHA256(key, purpose ‖ expires)>`, keyed by 32 random bytes the agent draws
+once per process, so a leaked cookie cannot be turned back into the token and every session
+dies with the agent. It expires 12 hours after issue. It is accepted only on `/tensorboard`
+and below, never on a control route and never on the handshake itself (which is outside that
+subtree, so a session cannot renew itself). A request that carries an `Authorization` header is
+judged by that header alone.
 
 ### 2.2 Errors
 
@@ -93,15 +100,15 @@ All errors, including FastAPI validation errors, use one envelope:
 | --- | --- | --- |
 | 400 | `bad_request` | `/plan` with neither `caption` nor `train`; malformed JSON |
 | 401 | `unauthorized` | missing or wrong bearer |
-| 404 | `not_found` | unknown service name, unknown run id, no log file yet |
+| 404 | `not_found` | unknown service name, unknown run id, no log file yet, no such run output file (2.11) |
 | 409 | `already_running` | start of a service that is running |
 | 409 | `gpu_busy` | requested GPU is held by a running service |
-| 409 | `not_running` | stop of a service that is not running |
+| 409 | `not_running` | stop of a service that is not running; `/tensorboard/…` while nothing listens on TensorBoard's port |
 | 413 | `payload_too_large` | request body above 1 MiB, or sent chunked (2.1); `detail`: `{"content_length": n, "max_bytes": 1048576}` |
 | 422 | `invalid_params` | pydantic rejects `params` (detail: pydantic's `errors()`) |
 | 422 | `gpu_count` | number of GPUs outside the service's range |
 | 422 | `unknown_gpu` | a GPU index not in the inventory |
-| 422 | `validation` | request body/query shape (FastAPI `RequestValidationError`) |
+| 422 | `validation` | request body/query shape (FastAPI `RequestValidationError`); a malformed run id or run file path |
 | 503 | `gpu_inventory_unavailable` | nvidia-smi could not answer (timeout, nonzero exit, unparseable); the GPUs may be present and in use. `detail`: `{"last_known_count": 2, "last_known_at": "…"}` (nulls before the first good read). Retry; never "no GPUs" |
 | 500 | `internal` | anything else; message is generic, traceback goes to the agent log |
 
@@ -320,6 +327,81 @@ does not exist (detail names the path). `tail` 1–5000, default 200.
 {"run_id": "nora7-h3-001", "path": "/workspace/runs/nora7-h3-001/trainer.log", "lines": ["…"], "truncated": true}
 ```
 
+### 2.9 TensorBoard: `POST /tensorboard-session` and `/tensorboard/…`
+
+TensorBoard binds `127.0.0.1` on the catalog's fixed port (6006, 3.2) with `--path_prefix
+/tensorboard`, and is shown at `https://<pod-id>-8800.proxy.runpod.net/tensorboard/`. `GET`,
+`POST` and `HEAD` on `/tensorboard` and below are proxied to that port, path and query
+unchanged. Forwarded request headers: `accept`, `content-type`, `if-none-match`,
+`if-modified-since` (never `Authorization` or cookies); returned: `content-type`,
+`cache-control`, `etag`, `last-modified`, `location`. Responses are buffered (30 s upstream
+timeout). Nothing listening on the port → `409 not_running`; any other upstream failure →
+`500`. The route reads no supervisor state.
+
+`POST /tensorboard-session` (bearer required, no body) → `200`:
+
+```json
+{
+  "cookie": "podagent_tensorboard",
+  "value": "v1.1791760000.3f1c…",
+  "path": "/tensorboard",
+  "max_age_s": 43200,
+  "expires_at": "2026-10-11T12:00:00Z",
+  "secure": true,
+  "http_only": true,
+  "same_site": "strict",
+  "url": "/tensorboard/"
+}
+```
+
+plus `Set-Cookie: podagent_tensorboard=<value>; HttpOnly; Max-Age=43200; Path=/tensorboard;
+SameSite=strict; Secure`. `Secure` is dropped only in fake mode over plain http (RunPod
+terminates TLS before the agent, so a real pod is always https to the browser). Proxied
+responses never set a cookie. A client puts the cookie into its browser's cookie store (or
+lets the `Set-Cookie` do it), then navigates to `url`; on a `401` (expired, or the agent
+restarted) it calls the handshake again.
+
+### 2.10 `GET /runs/{id}/files`
+
+The run's output directory, `/workspace/runs/<id>/output/`: both trainers write checkpoints,
+final weights and samples there (4.1). This is how a user without a Hub account gets the
+trained LoRA. `id` as in 2.7 (`422 validation` otherwise, `404` when the run directory does
+not exist). A run without `output/` yet answers an empty `files` list.
+
+```json
+{
+  "run_id": "nora7-h3-001",
+  "root": "/workspace/runs/nora7-h3-001/output",
+  "files": [
+    {"path": "checkpoints/lora_weights_step_02000.safetensors", "size": 214240000,
+     "sha256": "0c0e9492…", "modified_at": "2026-10-10T19:45:17Z"}
+  ]
+}
+```
+
+`path` is relative to `root`, `/`-separated, sorted. Regular files only: the walk never follows
+a symlink, and a symlinked file, directory or `output` itself is left out. `size` in bytes,
+`sha256` lowercase hex, `modified_at` UTC to the second. Digests are cached per agent process by
+path, size, mtime and inode, so the first listing of a large output hashes every file (seconds
+per gigabyte) and later ones only what changed.
+
+### 2.11 `GET /runs/{id}/files/{path}`
+
+One file from that listing, streamed: `200`, `Content-Type: application/octet-stream`,
+`Content-Length`, `Content-Disposition: attachment; filename="<basename>"`, `ETag` and
+`Last-Modified`; `HEAD` answers the headers alone; byte ranges are honoured. `path` is the
+listing's `path` with each segment percent-encoded. Refused:
+
+- `422 validation` for a `path` with a `.` or `..` segment, an empty segment (so no leading
+  `/` and no `//`), or a NUL;
+- `404 not_found` unless the path resolves to a regular file whose real path is exactly
+  `<real output root>/<path>`: a symlink anywhere on the way, `output` itself included,
+  never matches, wherever it points.
+
+Clients verify `size` and `sha256` from 2.10 after the download (`podctl pull` does). VERIFY on
+a pod: that the RunPod proxy's 100 s limit applies to the start of the response and not to a
+multi-gigabyte body that is still flowing.
+
 ## 3. Service catalog
 
 `podagent.catalog.CATALOG: dict[str, ServiceSpec]`. A `ServiceSpec` has:
@@ -330,7 +412,7 @@ class ServiceSpec:
     name: str
     params_model: type[BaseModel]          # extra="forbid"
     gpus: tuple[int, int]                  # (min, max); max = -1 means "any number >= min"
-    port: int | None                       # exposed port, for the state object and the app
+    port: int | None                       # the service's port (vLLM: default of its param; TensorBoard: fixed)
     def cwd(self, params, paths) -> Path
     def log_path(self, params, paths) -> Path
     def argv(self, params, gpus, paths) -> list[str]
@@ -373,16 +455,18 @@ Env: `VLLM_API_KEY`. Readiness for the client: `GET http://…:8000/v1/models` w
 
 ### 3.2 `tensorboard` — GPUs 0, port 6006
 
-Params: `logdir` (str, default `/workspace/runs`; must resolve under `/workspace`), `port`
-(default 6006, internal only). argv: `[/opt/venvs/agent/bin/tensorboard, --logdir, <logdir>, --host, 127.0.0.1, --port,
-<port>, --reload_multifile, true, --reload_interval, 15, --path_prefix, /tensorboard]`. log `/workspace/logs/tensorboard.log`.
+Params: `logdir` (str, default `/workspace/runs`; must resolve under `/workspace`). No `port`:
+TensorBoard always listens on the catalog's port 6006, which is where the agent's proxy (2.9)
+sends every request; a `port` param is `422 invalid_params`. argv: `[/opt/venvs/agent/bin/tensorboard, --logdir, <logdir>, --host, 127.0.0.1, --port,
+6006, --reload_multifile, true, --reload_interval, 15, --path_prefix, /tensorboard]`. log `/workspace/logs/tensorboard.log`.
 Pointing it at `/workspace/runs` once shows every run as a TensorBoard "run"
 (`<id>/tensorboard`).
 
 ### 3.3 `trainer-aitoolkit` and `trainer-ltx` — GPUs 1..N
 
-Params: the **run config** of section 4 (`RunConfig`), identical for both; `trainer` is implied
-by the service name. `prepare()` creates `/workspace/runs/<run_id>/` and writes `run.json` (the
+Params: the **run config** of section 4 (`RunConfig`), identical for both except that
+`trainer-ltx` validates with `LtxRunConfig`, which also checks `extra.preprocess` (4.3); `trainer`
+is implied by the service name. `prepare()` creates `/workspace/runs/<run_id>/` and writes `run.json` (the
 validated config, secrets stripped). argv:
 `[/opt/venvs/<trainer>/bin/python, /opt/pod/scripts/launch_<trainer>.py, --config, /workspace/runs/<id>/run.json]`.
 cwd `/workspace/runs/<id>`. log `/workspace/runs/<id>/trainer.log`. Env: `HF_TOKEN` (when
@@ -458,7 +542,18 @@ log `/workspace/logs/push-lora.log`. Exit 0 = the model repo has the LoRA.
 | `sample_prompts` | no | `[]` | each should contain a trigger; the wrapper does not enforce it |
 | `hub` | no | null | `repo_id`, `private` (true), `push_on_finish` (false → push is a separate `push-lora` start) |
 | `hf_token` | no | null | secret; env only |
-| `extra` | no | `{}` | deep-merged into the native config last; the escape hatch for trainer options not modelled here. It cannot move the trainer out of the workspace: output/data paths and LTX `model.*_path` / `load_checkpoint` must resolve under `/workspace`; AI Toolkit `name_or_path` accepts a Hub id or a workspace-local path. The agent refuses invalid paths (`422`) and the wrapper re-checks the merged config |
+| `extra` | no | `{}` | deep-merged into the native config last; the escape hatch for trainer options not modelled here. It cannot move the trainer out of the workspace: output/data paths (`training_folder`, `log_dir`, `folder_path`, `output_dir`, `preprocessed_data_root`) must resolve under `/workspace`. Model references follow the rule below. The agent refuses invalid values (`422`) and the wrapper re-checks the merged config |
+
+**Model references in `extra`: a Hub id where the trainer itself downloads, a workspace path
+where it opens files.** AI Toolkit's `name_or_path` (and `model_source`) take a Hub id or an
+absolute path under `/workspace`: ai-toolkit resolves an id through `huggingface_hub` into
+`HF_HOME`, which the agent points at `/workspace/models/hf-cache`, so an id can only ever land
+inside the workspace. LTX's `model.model_path`, `model.text_encoder_path`,
+`model.video_vae_path`, `model.audio_vae_path` and `model.load_checkpoint` must be absolute
+paths under `/workspace`: the LTX-2 trainer opens them as local files and has no Hub
+resolution, so a Hub id there could only fail at load time, after the GPUs were reserved. LTX's
+one Hub source, `base_model: Lightricks/LTX-2`, is downloaded by the wrapper itself at a pinned
+revision into `/workspace/models/ltx-2` (4.3) and reaches the trainer as those local paths.
 
 Output layout, both trainers: `/workspace/runs/<id>/run.json`, `config.yaml` (native config as
 written by the wrapper), `trainer.log`, `tensorboard/` (event files), `output/` (checkpoints and
@@ -518,9 +613,12 @@ before exiting, so the supervisor never frees GPUs a trainer still holds.
 
 Command: `/opt/venvs/aitoolkit/bin/python /opt/ai-toolkit/run.py <run>/config.yaml`.
 
-`extra.preprocess.args` is checked both at the start API and by the standalone wrapper.
-The single stdlib validator is `agent/src/podagent/ltx_preprocess.py`, copied into the image's
-`/opt/pod/agent/src/podagent/` layout for the isolated wrapper. Supported switches are
+`extra.preprocess.args` is checked both at the start API and by the standalone wrapper. At the
+API the check belongs to `trainer-ltx`'s params model, `LtxRunConfig` (`422 invalid_params`,
+`loc` `["extra", "preprocess"]`, type `preprocess_args`, before any run directory exists).
+Both read one stdlib file, `agent/src/podagent/ltx_rules.py`, which the image copies into a
+`/opt/pod/agent/src/podagent/` layout for the isolated wrapper; the wrapper loads it at import,
+so the image build's `--help` check fails if the copy is missing. Supported switches are
 `--vae-tiling`, `--decode`, `--remove-llm-prefixes`, `--skip-audio`,
 `--load-text-encoder-in-8bit`, and `--overwrite`. Supported integer options are
 `--batch-size`, `--reference-downscale-factor`, and `--reference-temporal-scale-factor`,
@@ -529,10 +627,19 @@ are rejected. Model paths, output paths, device and column names remain wrapper-
 
 For LTX's first run, `base_model: Lightricks/LTX-2` prepares the unified
 `ltx-2-19b-dev.safetensors` checkpoint and its mirrored Gemma model/tokenizer assets from that
-Hub repository into `/workspace/models/ltx-2`. The wrapper uses only its declared file patterns
-and the fixed destination, then supplies local checkpoint and text encoder paths to upstream.
-No SSH or separate model path is needed. Existing files are reused; `--dry-run` writes the
-planned config without downloading. Other LTX sources require explicit local component paths.
+Hub repository into `/workspace/models/ltx-2`, at revision
+`dfcc2108383fe1aaa0584bdf55d368a4bdadd90c` (`LTX_HUB_REVISION` in `ltx_rules.py`, also
+`LtxRunConfig.hub_source` in the catalog): the repository's head since 2026-08-04 and what the
+verified 2026-10-10 run downloaded, 22 files. Moving it is a reviewed edit; the download never
+follows the repository's `main`. The wrapper uses only its declared file patterns and the fixed
+destination, then supplies local checkpoint and text encoder paths to upstream. No SSH or
+separate model path is needed. Existing files are reused. The download runs after validation
+and before any run file is written; a failure (unreachable, gated, licence not accepted, disk
+full) exits **69** with the exception, HTTP status and message on one line, and leaves the run
+directory as the agent created it. `--dry-run` writes the planned config without downloading.
+Other LTX sources require explicit local component paths. Wrapper exit codes: `2` invalid
+config, `69` model preparation, otherwise the preprocessor's, trainer's or push's own
+(`scripts/README.md`).
 
 `launch_ltx.py` runs `/opt/venvs/ltx/bin/python` against the entrypoints under
 `/opt/ltx-2/packages/ltx-trainer/scripts/`. `process_dataset.py` consumes dataset JSON with
@@ -590,13 +697,16 @@ images/Dockerfile.base       nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
                              + python3.12, uv
                              + /opt/venvs/agent   : podagent, concept-captioner (from this repo), tensorboard,
                                                     huggingface_hub, datasets, Pillow
-                             + /opt/venvs/vllm    : vllm (pinned), its torch
+                             + /opt/venvs/vllm    : vllm (pinned), its torch; build fails unless every
+                                                    VLLM_EXTRA_FLAGS flag is in its source
+                                                    (images/check_vllm_flags.py)
                              + /opt/pod/scripts/*, /opt/pod/entrypoint.sh
                              EXPOSE 8800 8000; ENTRYPOINT /opt/pod/entrypoint.sh
 images/Dockerfile.aitoolkit  FROM base; git clone ostris/ai-toolkit @ pinned commit → /opt/ai-toolkit;
                              /opt/venvs/aitoolkit with its requirements (own torch)
 images/Dockerfile.ltx        FROM base; git clone Lightricks/LTX-2 @ pinned commit → /opt/ltx-2;
-                             /opt/venvs/ltx with the trainer's requirements + TensorBoard event-write/read check
+                             /opt/venvs/ltx with the trainer's requirements + TensorBoard 2.21.0 (pinned)
+                             and its event-write/read check
 images/Dockerfile.fake       python:3.12-slim + podagent only; for compose (no CUDA, no trainers)
 ```
 
@@ -689,8 +799,8 @@ Section 4.3.
 ## 8. `podctl`
 
 `podctl [--url URL] [--token T] [--json] <command>`; `URL` from `PODCTL_URL`, token from
-`PODAGENT_TOKEN`. Exit 0 on 2xx, 1 on an agent error (the envelope is printed), 2 on usage,
-3 on connection failure. `--json` prints the raw response; the default is a compact table.
+`PODAGENT_TOKEN`. Exit 0 on 2xx, 1 on an agent error (the envelope is printed) or a pulled file that fails
+its checksum, 2 on usage, 3 on connection failure. `--json` prints the raw response; the default is a compact table.
 
 | command | API |
 | --- | --- |
@@ -703,6 +813,9 @@ Section 4.3.
 | `stop NAME [--timeout 30]` | `POST /services/NAME/stop` |
 | `logs NAME [--tail N] [--follow]` | `GET /services/NAME/logs`; `--follow` re-polls every 2 s and prints new lines |
 | `events RUN_ID` | `GET /runs/RUN_ID/events` |
+| `files RUN_ID` | `GET /runs/RUN_ID/files` |
+| `pull RUN_ID [--to DIR] [--latest \| --include GLOB]` | `GET /runs/RUN_ID/files`, then `GET /runs/RUN_ID/files/PATH` per file; keeps a file only when size and SHA-256 match; never writes outside DIR (default `./RUN_ID`). `--latest`: the newest `*.safetensors` |
+| `tensorboard [PATH] [--session]` | `GET /tensorboard/PATH` (default `data/runs`) with the bearer; `--session` does `POST /tensorboard-session` and then sends only the cookie |
 | `train aitoolkit|ltx --config run.json --gpus 1,2` | sugar for `start trainer-<x>` with the file as params |
 | `caption-up MODEL [--gpus 0]` | sugar for `start vllm` |
 

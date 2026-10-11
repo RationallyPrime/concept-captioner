@@ -1,4 +1,4 @@
-"""Run artifacts over the API: list and fetch what a trainer wrote (POD-SPEC §2.9, §2.10).
+"""Run artifacts over the API: list and fetch what a trainer wrote (POD-SPEC §2.10, §2.11).
 
 A user without a Hub account still has to get the trained LoRA off the pod, so the agent
 serves the run's output directory, ``/workspace/runs/<id>/output/`` (both trainers write their

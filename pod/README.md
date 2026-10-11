@@ -8,9 +8,11 @@ is `docs/POD-STATUS.md`. No real concept names anywhere; fixtures use `NORA7` / 
 
 ```
 agent/     podagent: FastAPI control agent on port 8800 (PID 1 in the image). /health, /gpus,
-           /plan (the GPU topology rule), /services/{name}/{start,stop,logs}, /runs/{id}/events.
-           Bearer token from PODAGENT_TOKEN on every call; refuses to start without one.
-podctl/    podctl: one subcommand per endpoint plus `train` and `caption-up`; httpx only.
+           /plan (the GPU topology rule), /services/{name}/{start,stop,logs}, /runs/{id}/events,
+           /runs/{id}/files (the run's outputs), /tensorboard/ (proxied, with a session from
+           /tensorboard-session). Bearer token from PODAGENT_TOKEN on every call; refuses to
+           start without one.
+podctl/    podctl: one subcommand per endpoint plus `train`, `caption-up` and `pull`; httpx only.
 images/    Dockerfile.base (CUDA + vLLM + agent + concept-captioner), Dockerfile.aitoolkit,
            Dockerfile.ltx (trainers layered on base), Dockerfile.fake + compose.fake.yaml (no GPU),
            entrypoint.sh (starts the agent and nothing else).
@@ -42,6 +44,8 @@ cd pod/podctl && export PODCTL_URL=http://127.0.0.1:8800 PODAGENT_TOKEN=local-de
 .venv/bin/podctl caption-up Qwen/Qwen3-VL-32B-Instruct
 .venv/bin/podctl start pull-dataset --params '{"repo_id": "you/nora7-faces"}' --wait
 .venv/bin/podctl logs vllm --follow
+.venv/bin/podctl start tensorboard && .venv/bin/podctl tensorboard --session
+.venv/bin/podctl files nora7-h3-001 && .venv/bin/podctl pull nora7-h3-001 --latest
 .venv/bin/podctl stop vllm
 ```
 
@@ -61,16 +65,21 @@ GPU, Docker or the network. Counts are in `docs/POD-STATUS.md`.
    One pod runs one trainer image; vLLM for captioning is in both.
 2. Create the pod with that image, N GPUs, a network volume mounted at `/workspace`, HTTP ports
    `8800,8000` exposed (agent and vLLM; TensorBoard stays internal), env
-   `PODAGENT_TOKEN` (16+ characters, generated per pod) and `HF_TOKEN`, and a terminate-after
-   cost guard. The trainer images are CUDA 13 stacks: filter the pod to a CUDA 13.0+ host
-   (R580+ driver). A pod created without the token exits immediately, visibly.
+   `PODAGENT_TOKEN` (16+ characters, generated per pod) and `HF_TOKEN`. The trainer images are
+   CUDA 13 stacks: filter the pod to a CUDA 13.0+ host (R580+ driver). A pod created without
+   the token exits immediately, visibly. Stopping the pod is the app's job; the pod has no
+   self-stop. The app keeps the Mac awake while a pod runs and reconciles its pods on launch.
 3. Poll `GET https://<pod-id>-8800.proxy.runpod.net/health` with the bearer until it answers
    (the proxy returns 502 for the first 30–60 s). The proxy is public and has a 100 s request
    timeout; the agent and vLLM carry the token. TensorBoard uses the authenticated agent
-   route `/tensorboard/`, with a bearer on first navigation and a scoped browser cookie.
+   route `/tensorboard/`: `POST /tensorboard-session` with the bearer returns a derived,
+   12-hour cookie scoped to `/tensorboard`, which the browser then sends.
 4. `POST /plan {"caption": true, "train": true}` → start `pull-dataset`, `vllm` on its GPUs,
    caption through `vllm:<model>` on port 8000 (same bearer as the agent), then
    `trainer-aitoolkit` or `trainer-ltx` with a `run.json` (POD-SPEC §4.1) on the plan's GPUs,
-   `tensorboard` on 6006, and watch `/services/{name}/logs` and `/runs/{id}/events`.
-5. `push-lora` to a model repo, then stop or terminate the pod. Everything of value is on the
+   `tensorboard` (always loopback port 6006), and watch `/services/{name}/logs` and
+   `/runs/{id}/events`.
+5. Take the LoRA: `push-lora` to a model repo, or, without a Hub account, download it with
+   `GET /runs/{id}/files` and `GET /runs/{id}/files/{path}` (size and SHA-256 listed;
+   `podctl pull`). Then stop or terminate the pod. Everything of value is on the
    volume; the agent's state is in memory and a container restart is a clean slate.

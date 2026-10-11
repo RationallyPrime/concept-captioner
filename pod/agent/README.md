@@ -3,7 +3,10 @@
 The control agent that runs as PID 1 on a concept-captioner GPU pod. The macOS app (and
 `podctl`) talk to it over HTTP on port 8800; it starts and stops vLLM, TensorBoard, the trainers
 and the dataset/LoRA transfer scripts, assigns GPUs with `CUDA_VISIBLE_DEVICES`, and summarises
-TensorBoard event files. The API is specified in `../docs/POD-SPEC.md`.
+TensorBoard event files. It also proxies the loopback TensorBoard at `/tensorboard/` (a browser
+gets a derived, expiring session cookie from `POST /tensorboard-session`) and serves each run's
+output directory at `/runs/{id}/files`, so a trained LoRA can be downloaded without a Hub account.
+The API is specified in `../docs/POD-SPEC.md`.
 
 ```bash
 uv venv && uv pip install -e ".[dev]"
