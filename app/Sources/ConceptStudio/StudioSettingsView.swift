@@ -88,6 +88,12 @@ struct StudioSettingsView: View {
             await session.chatGPT.load()
             if !session.demoMode, !Task.isCancelled { await session.openRouter.load() }
         }
+        .alert("You’re using your ChatGPT plan", isPresented: $session.showChatGPTPlanNotice) {
+            Button("Got it") { session.acknowledgeChatGPTPlan() }
+        } message: {
+            Text("Eligible OpenAI requests in ConceptStudio count toward your ChatGPT plan or credits balance. "
+                + "Use Manage usage to review your allowance and set an app limit in ChatGPT settings.")
+        }
         .alert(
             "Something needs your attention",
             isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })
