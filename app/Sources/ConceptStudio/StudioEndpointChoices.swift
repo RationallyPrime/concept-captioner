@@ -73,7 +73,8 @@ extension StudioSession {
     }
 
     /// Call when the captioning provider changes from `old` to `new` (views: `.onChange(of:)`).
-    /// A model the user typed is kept. With ChatGPT sign-in, OpenAI models come from the account.
+    /// Switching resets the model to the new provider's default; with ChatGPT sign-in, OpenAI starts
+    /// on the account's first model.
     func providerChanged(from old: String, to new: String) {
         guard old != new else { return }
         if new == "openai", openAIUsesChatGPT {
