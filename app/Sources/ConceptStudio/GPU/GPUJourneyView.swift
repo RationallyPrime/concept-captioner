@@ -21,6 +21,7 @@ struct GPUJourneyView: View {
     /// The journey footer already shows spend and Stop everything; the Welcome sheet does not.
     var showsSpendControls = true
     @State private var confirmTermination = false
+    @State private var confirmDiscardingTermination = false
     @State private var newBudget: Double?
 
     init(session: StudioSession, step: StudioStep, showsSpendControls: Bool = true) {
@@ -59,6 +60,17 @@ struct GPUJourneyView: View {
                 "Removing deletes this computer and its pod disk. Separate network storage remains. "
                     + workspace.outputCustodyExplanation
             )
+        }
+        .confirmationDialog(
+            "Remove this computer and delete its unsaved outputs?",
+            isPresented: $confirmDiscardingTermination
+        ) {
+            Button("Remove and delete outputs", role: .destructive) {
+                Task { await workspace.terminate(discardingUndeliveredOutputs: true) }
+            }
+        } message: {
+            Text("These are only on this computer's pod disk and cannot be recovered after removal: "
+                + workspace.undeliveredPodOutputs.joined(separator: ", ") + ".")
         }
     }
 
@@ -201,9 +213,20 @@ struct GPUJourneyView: View {
                     Text(workspace.outputCustodyExplanation)
                         .font(.callout).foregroundStyle(StudioStyle.supportingText)
                 }
-                Button("Remove computer…", role: .destructive) { confirmTermination = true }
-                    .disabled(workspace.hasUndeliveredPodOutputs)
-                    .help("Push or save outputs from a pod disk before removing its computer.")
+                if workspace.hasUndeliveredPodOutputs, !workspace.hasRunningPod {
+                    Text("Unsaved outputs keep this computer from being removed. "
+                        + workspace.stoppedPodDiskCostExplanation)
+                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                    Button("Remove anyway and delete these outputs…", role: .destructive) {
+                        confirmDiscardingTermination = true
+                    }
+                    .disabled(workspace.isBusy)
+                    .help("Deletes the pod disk with the outputs that were never pushed or saved.")
+                } else {
+                    Button("Remove computer…", role: .destructive) { confirmTermination = true }
+                        .disabled(workspace.hasUndeliveredPodOutputs)
+                        .help("Push or save outputs from a pod disk before removing its computer.")
+                }
             }
         }
     }

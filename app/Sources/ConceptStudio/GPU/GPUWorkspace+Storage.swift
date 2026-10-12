@@ -29,14 +29,36 @@ extension GPUWorkspace {
 extension GPUWorkspace {
     /// A stopped pod disk still holds its outputs, but deletion would destroy them.
     var hasUndeliveredPodOutputs: Bool {
-        guard currentVolumeID.hasPrefix("pod:") else { return false }
+        !undeliveredPodOutputs.isEmpty
+    }
+
+    /// The training runs and comparisons on this computer's pod disk that are neither pushed nor saved.
+    var undeliveredPodOutputs: [String] {
+        guard currentVolumeID.hasPrefix("pod:") else { return [] }
         let pending: (TrainingResult) -> Bool = {
             $0.volumeID == self.currentVolumeID && [.training, .pending].contains($0.state)
         }
-        return result.map(pending) == true || runHistory
-            .contains { $0.localSavedFolder == nil && $0.result.map(pending) == true }
-            || generation.map { $0.volumeID == currentVolumeID && [.generating, .pending].contains($0.state) } == true
-            || generations.contains { $0.volumeID == currentVolumeID && [.generating, .pending].contains($0.state) }
+        let pendingComparison: (GeneratedComparison) -> Bool = {
+            $0.volumeID == self.currentVolumeID && [.generating, .pending].contains($0.state)
+        }
+        let runs = ([result].compactMap(\.self).filter(pending).map(\.runID)
+            + runHistory.filter { $0.localSavedFolder == nil && $0.result.map(pending) == true }.map(\.runID))
+            .map { "training run \($0)" }
+        let comparisons = ([generation].compactMap(\.self) + generations).filter(pendingComparison)
+            .map { "comparison \($0.runID)" }
+        var seen: Set<String> = []
+        return (runs + comparisons).filter { seen.insert($0).inserted }
+    }
+
+    /// RunPod keeps billing a stopped pod's disk. Its API reports no storage price, so this is an
+    /// estimate at RunPod's published stopped-pod volume rate of $0.20 per GB per month.
+    nonisolated static let stoppedPodDiskUSDPerGBMonth = 0.20
+
+    /// What keeping this stopped computer's pod disk costs, stated as an estimate.
+    var stoppedPodDiskCostExplanation: String {
+        let monthly = Double(RunPodProvider.podDiskGB) * Self.stoppedPodDiskUSDPerGBMonth
+        return "While stopped, its \(RunPodProvider.podDiskGB) GB pod disk costs about "
+            + "\(StudioMoney.format(monthly)) a month (estimated)."
     }
 
     var outputCustodyExplanation: String {

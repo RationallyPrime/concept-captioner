@@ -200,6 +200,9 @@ private struct PodPage<Entry: Decodable>: Decodable {
 /// Uses RunPod's REST v2 schema, fetched from api.runpod.io/v2/openapi.json on 2026-10-10 and
 /// re-read 2026-10-11 for `GET /v2/pods` (cursor-paginated, newest first, with `name` and `mounts`).
 struct RunPodProvider: GPUProvider {
+    /// The persistent pod disk a computer gets when it is rented without saved storage.
+    static let podDiskGB = 300
+
     let key: String
     let transport: any HTTPTransport
     private let origin = URL(string: "https://api.runpod.io/v2")!
@@ -248,7 +251,7 @@ struct RunPodProvider: GPUProvider {
             // A pod volume survives stop/restart; a container disk does not. It cannot
             // follow a replacement pod, and is deleted only when this pod is removed.
             payload["mounts"] = .object(["persistent": .object([
-                "size": .int(300), "path": .string("/workspace"),
+                "size": .int(Self.podDiskGB), "path": .string("/workspace"),
             ])])
         }
         return try await JSONDecoder().decode(RentedPod.self, from: call("pods", method: "POST", body: payload))

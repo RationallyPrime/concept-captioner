@@ -125,6 +125,29 @@ struct GPUWalkthroughTests {
         #expect(workspace.pod == nil)
     }
 
+    @MainActor @Test func confirmedRemovalDeletesUndeliveredPodDiskOutputs() async {
+        let workspace = GPUWorkspace(demoMode: true)
+        await workspace.refreshOffers()
+        workspace.selectedVolume = ""
+        await workspace.rent()
+        workspace.monitorTask?.cancel()
+        workspace.result = .init(
+            runID: "concept-pending", outputRepo: "", destination: .download,
+            volumeID: workspace.currentVolumeID, state: .pending
+        )
+        await workspace.stopEverything(discardingPendingResult: true)
+        #expect(!workspace.hasRunningPod)
+        #expect(workspace.undeliveredPodOutputs == ["training run concept-pending"])
+        await workspace.terminate()
+        #expect(workspace.pod != nil)
+        #expect(workspace.message.contains(
+            "300 GB pod disk costs about \(StudioMoney.format(60)) a month (estimated)"
+        ))
+        await workspace.terminate(discardingUndeliveredOutputs: true)
+        #expect(workspace.pod == nil)
+        #expect(workspace.message.contains("deleted with training run concept-pending"))
+    }
+
     @MainActor @Test func h3DefaultsAndRepeatPreserveTheEffectiveRecipe() throws {
         let workspace = GPUWorkspace(demoMode: true)
         workspace.chooseTrainingModel(GPUWorkspace.h3BaseModel)

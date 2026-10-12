@@ -89,14 +89,17 @@ extension GPUWorkspace {
         }
     }
 
-    func terminate() async {
-        guard !hasUndeliveredPodOutputs else {
+    /// Removes the computer. Outputs only on its pod disk block removal unless the user has confirmed
+    /// `discardingUndeliveredOutputs`, which deletes them with the disk.
+    func terminate(discardingUndeliveredOutputs: Bool = false) async {
+        let lost = undeliveredPodOutputs
+        guard lost.isEmpty || discardingUndeliveredOutputs else {
             message = "This computer holds outputs that have not been pushed or saved. "
-                + "Start this same computer and retrieve them before removing it."
+                + "Start this same computer and retrieve them before removing it. " + stoppedPodDiskCostExplanation
             failure = message
             return
         }
-        await stopEverything()
+        await stopEverything(discardingPendingResult: discardingUndeliveredOutputs)
         guard !hasRunningPod, let provider, let pod else { return }
         await perform {
             try await provider.terminate(id: pod.id)
@@ -110,7 +113,10 @@ extension GPUWorkspace {
             }
             // A secret left behind is harmless once the pod is gone; launch pruning removes it.
             if !agentSecret.isEmpty { try? await provider.deleteSecret(name: agentSecret) }
-            self.message = "Computer removed. Its pod disk was deleted; separate network storage remains in RunPod."
+            self.message = lost.isEmpty
+                ? "Computer removed. Its pod disk was deleted; separate network storage remains in RunPod."
+                : "Computer removed. Its pod disk was deleted with "
+                + lost.joined(separator: ", ") + "; separate network storage remains in RunPod."
         }
     }
 }
