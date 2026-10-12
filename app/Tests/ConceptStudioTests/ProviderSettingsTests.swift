@@ -64,6 +64,18 @@ struct ProviderSettingsTests {
         ])
     }
 
+    @Test func openAIListDropsModelsThatCannotTakeImages() async throws {
+        let ids = [
+            "gpt-5.2", "gpt-4o", "o4-mini", "text-embedding-3-small", "tts-1-hd", "gpt-4o-mini-tts", "whisper-1",
+            "gpt-4o-transcribe", "dall-e-3", "gpt-image-1", "omni-moderation-latest", "gpt-realtime",
+            "gpt-4o-audio-preview", "gpt-4o-search-preview", "sora-2", "babbage-002", "davinci-002",
+        ]
+        let body = #"{"data":["# + ids.map { #"{"id":"\#($0)"}"# }.joined(separator: ",") + "]}"
+        let wire = ProviderSettingsWire(HTTPResponse(status: 200, body: Data(body.utf8)))
+        let models = try await ProviderModelCatalog.list(for: "openai", apiKey: "fixture-key", transport: wire)
+        #expect(models.map(\.id) == ["gpt-5.2", "gpt-4o", "o4-mini"])
+    }
+
     @Test func directOpenAIModelListUsesTheSavedAccountKeyWithoutGenerating() async throws {
         let wire = ProviderSettingsWire(HTTPResponse(status: 200, body: Data(#"{"data":[{"id":"gpt-fixture"}]}"#.utf8)))
         let models = try await ProviderModelCatalog.list(for: "openai", apiKey: "fixture-key", transport: wire)

@@ -55,6 +55,21 @@ enum ProviderModelCatalogError: Error, LocalizedError {
 enum ProviderModelCatalog {
     private static let nonLanguageModelTypes: Set<String> = ["audio", "embedding", "image", "video"]
 
+    /// Name parts of OpenAI models that cannot caption an image: embeddings, speech, transcription,
+    /// image or video generation, moderation, realtime/audio-only, search previews and legacy completions.
+    /// OpenAI's list reports no input types, so this filter is name-based and deliberately conservative;
+    /// "Other model…" still accepts any identifier.
+    private static let openAINonVisionParts: Set<String> = [
+        "embedding", "tts", "whisper", "transcribe", "moderation", "realtime", "audio", "search",
+        "dall", "sora", "babbage", "davinci",
+    ]
+
+    static func mayAcceptImages(openAIModel id: String) -> Bool {
+        let name = id.lowercased()
+        let parts = Set(name.split { !$0.isLetter && !$0.isNumber }.map(String.init))
+        return parts.isDisjoint(with: openAINonVisionParts) && !name.contains("gpt-image")
+    }
+
     static func forCaptioning(_ models: [ProviderModelChoice], includesVideo: Bool) -> [ProviderModelChoice] {
         models.filter { model in
             if let type = model.modelType?.lowercased(), nonLanguageModelTypes.contains(type) {
@@ -84,7 +99,7 @@ enum ProviderModelCatalog {
                 key: key,
                 provider: providerName,
                 transport: transport
-            )
+            ).filter { mayAcceptImages(openAIModel: $0.id) }
         case "anthropic":
             return try await anthropicModels(
                 at: URL(string: "https://api.anthropic.com/v1/models")!,
