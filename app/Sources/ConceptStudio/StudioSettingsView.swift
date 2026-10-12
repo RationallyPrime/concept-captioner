@@ -256,6 +256,8 @@ struct StudioSettingsView: View {
             HStack(spacing: 12) {
                 Button("Save preferences") {
                     session.rememberChoices()
+                    // A volume ID saved here is an explicit storage choice over an earlier "No saved storage".
+                    if !session.volumeID.isEmpty { session.gpu.chooseStorage(session.volumeID) }
                     session.configureGPU()
                     session.gpuKeysLoadedFor = session.gpu
                     preferencesNote = "Preferences saved."

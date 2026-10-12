@@ -112,7 +112,10 @@ struct GPUJourneyView: View {
                     + "Storage is billed separately, including while stopped."
             ) {
                 Form {
-                    Picker("Saved storage", selection: $workspace.selectedVolume) {
+                    Picker("Saved storage", selection: Binding(
+                        get: { workspace.selectedVolume },
+                        set: { workspace.chooseStorage($0) }
+                    )) {
                         Text("No saved storage · use this computer’s disk").tag("")
                         ForEach(workspace.volumes) { volume in
                             Text("\(volume.name) · \(volume.size) GB · \(volume.dataCenter)").tag(volume.id)

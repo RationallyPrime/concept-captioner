@@ -125,6 +125,29 @@ struct GPUWalkthroughTests {
         #expect(workspace.pod == nil)
     }
 
+    @MainActor @Test func choosingNoSavedStorageSurvivesTheNextLaunch() async throws {
+        let (preferences, suite) = try temporaryPreferences()
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let first = makeWorkspace(GPUTransport(), preferences)
+        first.provider = DemoGPUProvider()
+        await first.refreshOffers()
+        #expect(!first.selectedVolume.isEmpty)
+        first.chooseStorage("")
+
+        let relaunched = makeWorkspace(GPUTransport(), preferences)
+        try relaunched.configure(runpodKey: "", hubToken: "", imageName: "", networkVolumeID: "settings-volume")
+        relaunched.provider = DemoGPUProvider()
+        await relaunched.refreshOffers()
+        #expect(relaunched.selectedVolume.isEmpty)
+
+        let volume = try #require(relaunched.volumes.first?.id)
+        relaunched.chooseStorage(volume)
+        let again = makeWorkspace(GPUTransport(), preferences)
+        again.provider = DemoGPUProvider()
+        await again.refreshOffers()
+        #expect(again.selectedVolume == volume)
+    }
+
     @MainActor @Test func confirmedRemovalDeletesUndeliveredPodDiskOutputs() async {
         let workspace = GPUWorkspace(demoMode: true)
         await workspace.refreshOffers()

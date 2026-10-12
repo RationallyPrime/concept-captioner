@@ -131,6 +131,8 @@ final class GPUWorkspace {
 
     static let activePodKey = "ConceptStudio.activePod"
     static let pendingResultKey = "ConceptStudio.pendingResult"
+    /// Set when the person chose "No saved storage", so later launches do not select a network volume.
+    static let noSavedStorageKey = "ConceptStudio.noSavedStorage"
 
     init(
         demoMode: Bool,
@@ -167,7 +169,7 @@ final class GPUWorkspace {
         provider = runpodKey.isEmpty ? nil : RunPodProvider(key: runpodKey, transport: transport)
         self.hubToken = hubToken
         self.imageName = imageName
-        if let networkVolumeID { selectedVolume = networkVolumeID }
+        if let networkVolumeID, !prefersNoSavedStorage { selectedVolume = networkVolumeID }
         if result == nil, let data = preferences.data(forKey: Self.pendingResultKey) {
             result = try? JSONDecoder().decode(TrainingResult.self, from: data)
             if let result, !RunArtifacts.validRunID(result.runID) { self.result = nil }
@@ -213,7 +215,7 @@ final class GPUWorkspace {
             async let volumes = provider.volumes()
             self.offers = try await offers
             self.volumes = try await volumes
-            if (!self.hasLoadedVolumes && self.selectedVolume.isEmpty)
+            if (!self.hasLoadedVolumes && self.selectedVolume.isEmpty && !self.prefersNoSavedStorage)
                 || (!self.selectedVolume.isEmpty && !self.volumes.contains(where: { $0.id == self.selectedVolume })) {
                 self.selectedVolume = self.volumes.first?.id ?? ""
             }
@@ -446,6 +448,17 @@ extension GPUWorkspace {
                 && offer.price.secure > 0 && (volume.map { offer.isAvailable(in: $0.dataCenter) }
                     ?? offer.hasAvailableLocation)
         }
+    }
+
+    var prefersNoSavedStorage: Bool {
+        !demoMode && preferences.bool(forKey: Self.noSavedStorageKey)
+    }
+
+    /// The person's storage choice, remembered across launches like the Settings volume ID.
+    func chooseStorage(_ volumeID: String) {
+        selectedVolume = volumeID
+        if !demoMode { preferences.set(volumeID.isEmpty, forKey: Self.noSavedStorageKey) }
+        selectAvailableOffer()
     }
 
     func selectAvailableOffer() {
