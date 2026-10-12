@@ -33,10 +33,14 @@ struct StudioRootView: View {
                 }.padding(20)
                 List(selection: $session.step) {
                     Section("Prepare training data") { steps(session.journeySteps.filter { $0.rawValue < 3 }) }
-                    Section("Write captions") { steps(StudioStep.allCases.dropFirst(3).prefix(3)) }
-                    Section("Train your model") { steps(StudioStep.allCases.suffix(3)) }
+                    if session.project?.job.concepts.isEmpty != true {
+                        Section("Write captions") { steps(StudioStep.allCases.dropFirst(3).prefix(3)) }
+                        Section("Train your model") { steps(StudioStep.allCases.suffix(3)) }
+                    }
                 }
                 .listStyle(.sidebar)
+                // Native sidebar sections must retain separate selectable journey rows.
+                .disclosureGroupStyle(.automatic)
                 Divider()
                 Button("Close project", systemImage: "rectangle.portrait.and.arrow.right") {
                     session.requestClose()
@@ -155,6 +159,11 @@ extension StudioSession {
     /// Reads the RunPod and Hub keys from the Keychain once per GPU workspace (Settings re-reads after a key
     /// changes); later visits only refresh the project-derived training defaults.
     func prepareGPUStep() {
+        guard project?.job.concepts.isEmpty != true else {
+            step = .concepts
+            errorMessage = "Add a concept before opening GPU training controls."
+            return
+        }
         guard gpuKeysLoadedFor !== gpu else {
             updateTrainingProjectDefaults()
             return

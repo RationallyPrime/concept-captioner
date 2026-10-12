@@ -8,14 +8,9 @@ struct OpenRouterSettingsSection: View {
     }
 
     var body: some View {
-        StudioSection(
-            title: "OpenRouter browser authorization",
-            subtitle: "OpenRouter is a gateway: one account pays for models from several providers. "
-                + "Browser approval creates an API key saved in your Mac’s Keychain. "
-                + "Captioning uses OpenRouter credits."
-        ) {
+        VStack(alignment: .leading, spacing: 12) {
             if session.demoMode {
-                StudioNotice("The offline demo does not open a browser, read saved keys or contact OpenRouter.")
+                StudioNotice("Demo stays offline and does not connect to OpenRouter.")
             } else {
                 Form {
                     LabeledContent("Connection", value: status)
@@ -39,63 +34,48 @@ struct OpenRouterSettingsSection: View {
                         }
                     }
                 }.formStyle(.columns)
+
                 HStack(spacing: 12) {
                     Button(connection.isConnected ? "Reconnect OpenRouter" : "Connect OpenRouter") {
                         Task { await session.connectOpenRouter() }
                     }
                     .buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
                     .disabled(session.busy || connection.isBusy)
-                    .help(
-                        "Opens your browser for approval. Replaces the saved OpenRouter key only after success."
-                    )
+                    .help("Approves access in your browser; the resulting key stays in this Mac’s Keychain.")
                     if connection.isBusy {
                         ProgressView().controlSize(.small)
                         Button("Cancel authorization or refresh") { connection.cancel() }
-                            .help(
-                                "Cancels authorization or usage refresh and closes the callback listener."
-                            )
+                            .help("Cancels the current account request and closes any callback listener.")
                     } else if connection.isConnected {
                         Button("Refresh key usage") {
                             Task { await connection.refresh() }
                         }
                         .disabled(session.busy)
-                        .help("Reads usage and limits for the saved key. It does not run a model or buy credits.")
+                        .help("Reads usage and limits for the saved key; it does not run a model or buy credits.")
                         Button("Disconnect on this Mac") {
                             Task { await connection.disconnect() }
                         }
                         .disabled(session.busy)
-                        .help("Removes the key from this Mac. Use Key settings to revoke it on OpenRouter too.")
+                        .help("Removes the key from this Mac; revoke it in OpenRouter to disable it there.")
                     }
                 }
-                if !connection.message.isEmpty {
+                if let error = connection.errorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if !connection.message.isEmpty {
                     Text(connection.message).font(.callout).foregroundStyle(StudioStyle.supportingText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack(spacing: 16) {
                     Link("OpenRouter credits", destination: URL(string: "https://openrouter.ai/settings/credits")!)
-                        .help("Opens OpenRouter’s account page to view or purchase credits. This app buys nothing.")
+                        .help("Opens the OpenRouter credits page; this app buys nothing.")
                     Link("Key settings", destination: connection.keySettingsURL)
-                        .help("Opens the key’s OpenRouter settings to change its limit or revoke it.")
+                        .help("Opens this key’s settings to change its limit or revoke it.")
                     if connection.keyHash != nil {
                         Link("Key request activity", destination: connection.activityURL)
-                            .help(
-                                "Opens this key’s request log on OpenRouter. Only its signed-in owner can view it."
-                            )
+                            .help("Opens the request log for this key in OpenRouter.")
                     }
                 }
-                Text("Usage above is for this API key, not your total wallet balance. "
-                    +
-                    "Reconnect replaces the saved key; it does not revoke older keys. You can also paste a key below.")
-                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            DisclosureGroup("How browser authorization works") {
-                Text("PKCE (Proof Key for Code Exchange) binds browser approval to this app’s temporary request. "
-                    + "A local callback receives the authorization code. "
-                    + "It closes on completion, cancellation or timeout. "
-                    + "The browser may label the app with 127.0.0.1 and a port number: this is a loopback address, "
-                    + "which points back to this Mac. The resulting API key stays in Keychain, outside the project.")
-                    .font(.callout).foregroundStyle(StudioStyle.supportingText).padding(.top, 8)
             }
         }
     }

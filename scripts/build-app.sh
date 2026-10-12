@@ -3,6 +3,17 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 configuration="${1:-debug}"
 case "$configuration" in debug|release) ;; *) echo "Use debug or release." >&2; exit 2 ;; esac
+signing_identity="${CONCEPTSTUDIO_SIGNING_IDENTITY:-}"
+if [ "$configuration" = release ]; then
+    case "$signing_identity" in
+        "Developer ID Application: "*) ;;
+        *) echo 'Release builds require CONCEPTSTUDIO_SIGNING_IDENTITY="Developer ID Application: Name (TEAMID)".' >&2; exit 2 ;;
+    esac
+    if ! security find-identity -v -p codesigning | grep -Fq "\"$signing_identity\""; then
+        echo "The selected Developer ID Application identity is not available in this Mac's Keychain." >&2
+        exit 2
+    fi
+fi
 cd "$repo_dir/app"
 swift build -c "$configuration" --product ConceptStudio
 bin_dir="$(swift build -c "$configuration" --show-bin-path)"
@@ -29,4 +40,9 @@ cat > "$bundle/Contents/Info.plist" <<'PLIST'
 <key>NSPhotoLibraryUsageDescription</key><string>Choose images and video clips for your training project.</string>
 </dict></plist>
 PLIST
+if [ -n "$signing_identity" ]; then
+    codesign --force --sign "$signing_identity" --options runtime --timestamp \
+        --entitlements "$repo_dir/app/ConceptStudio.entitlements" "$bundle"
+    codesign --verify --strict --verbose=2 "$bundle"
+fi
 echo "$bundle"

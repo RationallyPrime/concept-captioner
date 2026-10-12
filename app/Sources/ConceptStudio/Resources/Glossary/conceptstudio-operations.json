@@ -1,0 +1,276 @@
+[
+  {
+    "id": "locator",
+    "term": "Locator",
+    "section_id": "using-conceptstudio",
+    "aliases": [],
+    "plain_language": "A short description telling the captioner which subject you mean, such as “the person on the left”.",
+    "good_stuff": "A short description that identifies the intended subject, such as ‘the person on the left’. It tells the caption model which subject a trigger refers to; it does not replace your concept boundary.",
+    "related_terms": [
+      "subject-mapping",
+      "class-word"
+    ],
+    "source_ids": [],
+    "definition_scope": "concept_studio",
+    "display_order": 178
+  },
+  {
+    "id": "caption-format",
+    "term": "Caption format",
+    "section_id": "using-conceptstudio",
+    "aliases": [],
+    "plain_language": "The instructions for how captions should be written for the model you will train.",
+    "good_stuff": "The profile of instructions that shapes caption text for the diffusion model you will train. For example, FLUX uses prose while H3 uses three named fields. Choosing a format does not make an incompatible clip or base model compatible.",
+    "related_terms": [
+      "caption",
+      "concept-captioning"
+    ],
+    "source_ids": [],
+    "definition_scope": "concept_studio",
+    "display_order": 179
+  },
+  {
+    "id": "provider",
+    "term": "Provider",
+    "section_id": "using-conceptstudio",
+    "aliases": [],
+    "plain_language": "The service that runs your captioning model and manages your account access and usage.",
+    "good_stuff": "The service that runs your captioning or review model. Its account grants access and determines billing. OpenAI API credits and an authorized ChatGPT plan are separate choices in this app.",
+    "related_terms": [
+      "api-key",
+      "gateway"
+    ],
+    "source_ids": [],
+    "definition_scope": "concept_studio",
+    "display_order": 180
+  },
+  {
+    "id": "api-key",
+    "term": "API key",
+    "section_id": "using-conceptstudio",
+    "aliases": [],
+    "plain_language": "A private credential that lets ConceptStudio use your account at a service.",
+    "good_stuff": "A credential that lets the app send requests under a provider account through its API (application programming interface). Usage is charged or limited by that provider. Enter the key in Settings; it is not a caption or a project instruction.",
+    "related_terms": [
+      "provider",
+      "keychain"
+    ],
+    "source_ids": [],
+    "definition_scope": "concept_studio",
+    "display_order": 181
+  },
+  {
+    "id": "keychain",
+    "term": "Keychain",
+    "section_id": "using-conceptstudio",
+    "aliases": [],
+    "plain_language": "The Mac’s protected storage for account keys and sign-in credentials.",
+    "good_stuff": "macOS's protected credential storage. ConceptStudio stores provider keys and sign-in tokens there, separately from the project job, captions and exported training files.",
+    "related_terms": [
+      "api-key"
+    ],
+    "source_ids": [],
+    "definition_scope": "concept_studio",
+    "display_order": 182
+  },
+  {
+    "id": "gateway",
+    "term": "Gateway",
+    "section_id": "using-conceptstudio",
+    "aliases": [],
+    "plain_language": "One service through which you can use models from several providers.",
+    "good_stuff": "A service that provides one connection to models run by several providers. Select a model through the gateway and use its credential; its available models, prices and limits belong to that account.",
+    "related_terms": [
+      "provider"
+    ],
+    "source_ids": [],
+    "definition_scope": "concept_studio",
+    "display_order": 183
+  },
+  {
+    "id": "reviewer",
+    "term": "Reviewer",
+    "section_id": "using-conceptstudio",
+    "aliases": [],
+    "plain_language": "An optional second model that checks a proposed caption before it is saved.",
+    "good_stuff": "An optional second model that checks a proposed caption against the job instructions and supplied media. It can approve or reject the caption with notes. It makes additional model requests and does not replace your review of the saved text.",
+    "related_terms": [
+      "caption",
+      "validation"
+    ],
+    "source_ids": [],
+    "definition_scope": "concept_studio",
+    "display_order": 184
+  },
+  {
+    "id": "thinking",
+    "term": "Thinking",
+    "section_id": "using-conceptstudio",
+    "aliases": [],
+    "plain_language": "A setting controlling how much reasoning a supported model uses before answering.",
+    "good_stuff": "A model's reasoning setting, when its provider supports one. More reasoning can take longer and consume more allowance. A model may keep that reasoning private; the saved result is the caption.",
+    "related_terms": [
+      "token"
+    ],
+    "source_ids": [],
+    "definition_scope": "concept_studio",
+    "display_order": 185
+  },
+  {
+    "id": "structured-output",
+    "term": "Structured output",
+    "section_id": "using-conceptstudio",
+    "aliases": [],
+    "plain_language": "A model reply organized into named fields that the app can read reliably.",
+    "good_stuff": "A request for the model to return fields in a defined schema, such as usable, caption and note. The app decodes those fields before saving a caption. This controls the reply's structure, not whether its observations are correct.",
+    "related_terms": [
+      "schema",
+      "caption"
+    ],
+    "source_ids": [],
+    "definition_scope": "concept_studio",
+    "display_order": 186
+  },
+  {
+    "id": "dataset-revision",
+    "term": "Dataset revision",
+    "section_id": "using-conceptstudio",
+    "aliases": [],
+    "plain_language": "A saved version of your dataset, used to identify exactly which data a training run learned from.",
+    "good_stuff": "The specific saved version of a dataset on Hugging Face, identified by a commit. A recorded revision lets a run reuse that version instead of later remote edits. Direct uploads use a digest of the local inputs instead; Resume requires those original inputs.",
+    "related_terms": [
+      "dataset",
+      "reproducibility"
+    ],
+    "source_ids": [],
+    "definition_scope": "concept_studio",
+    "display_order": 187
+  },
+  {
+    "id": "gpu",
+    "term": "GPU",
+    "section_id": "using-conceptstudio",
+    "aliases": [],
+    "plain_language": "The processor in the rented computer that runs your training model.",
+    "good_stuff": "A graphics processing unit: the processor that runs the large caption and training models. ConceptStudio rents it in a remote computer. One GPU captions then trains; with several, GPU 0 can caption while the remaining GPUs train.",
+    "related_terms": [
+      "gpu-memory",
+      "out-of-memory"
+    ],
+    "source_ids": [],
+    "definition_scope": "concept_studio",
+    "display_order": 188
+  },
+  {
+    "id": "pod",
+    "term": "Pod",
+    "section_id": "using-conceptstudio",
+    "aliases": [],
+    "plain_language": "A rented RunPod computer. It costs money while it is running.",
+    "good_stuff": "A rented RunPod computer running the selected container image. GPU charges continue while it runs. Stopping preserves network storage and persistent pod disk; removing the computer deletes its pod disk. Network storage remains separately billed after removal.",
+    "related_terms": [
+      "gpu",
+      "network-storage",
+      "budget"
+    ],
+    "source_ids": [],
+    "definition_scope": "concept_studio",
+    "display_order": 189
+  },
+  {
+    "id": "network-storage",
+    "term": "Network storage",
+    "section_id": "using-conceptstudio",
+    "aliases": [],
+    "plain_language": "Saved storage you can attach to compatible rented computers in the same data center.",
+    "good_stuff": "A separately billed drive attached to a rented computer in the same data center. It preserves datasets, checkpoints and results across stops and replacement computers. Without a network volume, ConceptStudio uses a persistent pod disk that survives stopping but is deleted when that computer is removed.",
+    "related_terms": [
+      "checkpoint",
+      "resume-training"
+    ],
+    "source_ids": [],
+    "definition_scope": "concept_studio",
+    "display_order": 190
+  },
+  {
+    "id": "container-image",
+    "term": "Container image",
+    "section_id": "using-conceptstudio",
+    "aliases": [],
+    "plain_language": "The package of software used to start the rented computer, including its trainer.",
+    "good_stuff": "The packaged software environment used to start the rented computer. It includes the control agent, trainer and required libraries. The chosen training model must have a compatible image; it is separate from your dataset and LoRA weights.",
+    "related_terms": [
+      "training-recipe",
+      "compatibility"
+    ],
+    "source_ids": [],
+    "definition_scope": "concept_studio",
+    "display_order": 191
+  },
+  {
+    "id": "budget",
+    "term": "Budget",
+    "section_id": "using-conceptstudio",
+    "aliases": [],
+    "plain_language": "The spending limit you set for a rented computer or an individual training run.",
+    "good_stuff": "A GPU spending cap. The whole-computer cap covers the rental; the training-run cap covers preparation, transfer and that run's continuations. Reaching either stops the computer. Estimates exclude separately billed storage, and checks require this Mac awake with the app open.",
+    "related_terms": [
+      "pod",
+      "training-run"
+    ],
+    "source_ids": [],
+    "definition_scope": "concept_studio",
+    "display_order": 192
+  },
+  {
+    "id": "warm-start",
+    "term": "Warm-start",
+    "section_id": "using-conceptstudio",
+    "aliases": [],
+    "plain_language": "Start a new training run using the weights learned by an earlier LoRA.",
+    "good_stuff": "Start a new training run using existing LoRA weights rather than the base model alone. The new run starts its step count at zero and uses the selected dataset. Import the matching H3 recipe and weights; this does not restore the old run's optimizer or progress.",
+    "related_terms": [
+      "resume-training",
+      "checkpoint",
+      "fine-tuning"
+    ],
+    "source_ids": [],
+    "definition_scope": "concept_studio",
+    "display_order": 193
+  },
+  {
+    "id": "training-recipe",
+    "term": "Training recipe",
+    "section_id": "using-conceptstudio",
+    "aliases": [],
+    "plain_language": "The model components and training settings used for a run.",
+    "good_stuff": "The trainer settings used for a run, including model components, precision, optimizer and LoRA layers. Importing a supported H3 recipe preserves those choices while this project's dataset and the new run's length are selected separately.",
+    "related_terms": [
+      "hyperparameter",
+      "optimizer",
+      "precision"
+    ],
+    "source_ids": [],
+    "definition_scope": "concept_studio",
+    "display_order": 194
+  },
+  {
+    "id": "guidance-preservation",
+    "term": "Guidance preservation loss",
+    "section_id": "using-conceptstudio",
+    "aliases": [
+      "Guidance loss",
+      "guidance_loss_target",
+      "do_guidance_loss"
+    ],
+    "plain_language": "An optional training objective that uses an extra prediction without the caption to adjust what the model learns. It adds GPU work; the target controls the strength of that training adjustment.",
+    "good_stuff": "AI Toolkit’s do_guidance_loss computes an unconditional prediction u without gradients and replaces training target t with u + g × (t − u), where g is guidance_loss_target. A two-value target samples g uniformly per example. This is a training objective; the generation guidance_scale setting is independent. The Circlestone training adapter used by ConceptStudio must not be combined with this objective.",
+    "related_terms": [
+      "loss",
+      "training-step"
+    ],
+    "source_ids": [],
+    "definition_scope": "concept_studio",
+    "display_order": 195
+  }
+]

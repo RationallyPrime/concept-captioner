@@ -1,0 +1,35 @@
+{
+  "date": "2026-10-12",
+  "published_image_tag": "v0.2.3-clean-20261011",
+  "image_source_commit": "b79086183bba40e8120f0cba1ee59173f10108a5",
+  "evidence_kind": "offline execution of exact image-build source; no image or GPU execution",
+  "source_sha256": {
+    "h3_recipe.py": "67a5de9709c3e760ff2dcdafdcb46967eaaf9b21e5071da0451f5b0c614c5659",
+    "h3_dataset.py": "4f894ccac4f2b2b4f603ca7ff25181b40d851c67a034b6f682f68a2c775195cf",
+    "launch_aitoolkit.py": "db0906f18381c82469cc5b1daf9300e8a2afd696bfe6da9fda30d0ac27bd9a8f",
+    "h3-recipe-fields.json": "0960fd4387237b8cf5ec0e070485b76d5e527482d58832c442b67caeb198e4bd"
+  },
+  "canonical_initializer_sections": [
+    "dataset",
+    "model",
+    "network",
+    "train"
+  ],
+  "canonical_initializer_guidance_loss": false,
+  "explicit_new_app_values": {
+    "save": {
+      "save_every": 375,
+      "max_step_saves_to_keep": 17,
+      "dtype": "float32",
+      "push_to_hub": false
+    },
+    "do_guidance_loss": false,
+    "guidance_loss_target": 4.5,
+    "image_buckets": [
+      768,
+      1024
+    ]
+  },
+  "verified": "old initializer validator accepts existing four-section guidance-off Circlestone shape; old wrapper applies run.extra after initializer and preserves every edited setting; warm start remains step zero",
+  "new_image_requirement": "Added effective save fields in comparison receipts, implicit script H3 defaults and server-side Circlestone/guidance rejection require an image rebuild. The app enforces this prohibition before submission and sends valid explicit existing-wire settings accepted by published image source."
+}

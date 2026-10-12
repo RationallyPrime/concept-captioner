@@ -61,6 +61,33 @@ struct StudioSessionTests {
         await session.gpu.stopEverything()
     }
 
+    @Test(arguments: [
+        ("ghcr.io/rationallyprime/concept-captioner-pod-{trainer}:v0.1.0-verify20261010", ""),
+        ("ghcr.io/rationallyprime/concept-captioner-pod-{trainer}:v0.2.3-clean-20261011", ""),
+        (
+            "ghcr.io/rationallyprime/concept-captioner-pod-aitoolkit:v0.2.3-clean-20261011",
+            "ghcr.io/rationallyprime/concept-captioner-pod-aitoolkit:v0.2.3-clean-20261011"
+        ),
+        (
+            "ghcr.io/rationallyprime/concept-captioner-pod-{trainer}:v0.2.3 extra",
+            "ghcr.io/rationallyprime/concept-captioner-pod-{trainer}:v0.2.3 extra"
+        ),
+        ("ghcr.io/example/custom-{trainer}:chosen", "ghcr.io/example/custom-{trainer}:chosen"),
+    ])
+    func previouslySavedDefaultImageBecomesAutomaticOnce(saved: String, loaded: String) throws {
+        let suite = "StudioSessionTests." + UUID().uuidString
+        let preferences = try #require(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        preferences.set(saved, forKey: "podImage")
+        let session = StudioSession(preferences: preferences)
+        #expect(session.podImageName == loaded)
+        #expect(preferences.string(forKey: "podImage") == loaded)
+        // After the one-time migration a deliberately entered default is kept.
+        session.podImageName = StudioSession.defaultPodImageName
+        session.rememberChoices()
+        #expect(StudioSession(preferences: preferences).podImageName == StudioSession.defaultPodImageName)
+    }
+
     @Test(arguments: ["", " \n\t", "ghcr.io/example/custom:chosen"])
     func changedTrainingImageIsRememberedImmediately(_ changed: String) throws {
         let suite = "StudioSessionTests." + UUID().uuidString
@@ -73,8 +100,9 @@ struct StudioSessionTests {
         let loaded = StudioSession(preferences: preferences)
         #expect(session.podImageName == loaded.podImageName)
         #expect(preferences.string(forKey: "podImage") == session.podImageName)
-        if changed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            #expect(session.podImageName.contains("concept-captioner-pod-{trainer}:v0.2.3-clean-20261011"))
+        if changed.isEmpty {
+            #expect(session.podImageName.isEmpty)
+            #expect(preferences.string(forKey: "podImage") == "")
         } else {
             #expect(session.podImageName == changed)
         }
@@ -169,6 +197,72 @@ struct StudioSessionTests {
         #expect(!session.busy)
         #expect(session.task == nil)
         #expect(session.project == nil)
+    }
+
+    @Test func closingDemoCannotStopOrDetachARealWorkspace() async throws {
+        let suite = "StudioSessionTests." + UUID().uuidString
+        let preferences = try #require(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let demoDirectory = temporaryTestDirectory("crossed-demo-workspace")
+        defer { try? FileManager.default.removeItem(at: demoDirectory) }
+        let session = StudioSession(
+            preferences: preferences, secrets: MemorySecretStore(), demoDirectory: demoDirectory
+        )
+        let transport = ImageChoiceTransport()
+        let realWorkspace = GPUWorkspace(
+            demoMode: false, transport: transport, preferences: preferences, saveAgentToken: { _, _ in }
+        )
+        defer { Task { await realWorkspace.stopEverything() } }
+        session.gpu = realWorkspace
+        try realWorkspace.configure(runpodKey: "fake", hubToken: "fake", imageName: "test")
+        await realWorkspace.refreshOffers()
+        await realWorkspace.rent()
+        #expect(realWorkspace.hasRunningPod)
+
+        session.project = try await DemoProject.create(at: demoDirectory)
+        session.gpu.projectFolder = demoDirectory
+        session.demoMode = true
+        await session.closeProject()
+
+        #expect(!session.demoMode)
+        #expect(session.project == nil)
+        #expect(session.gpu === realWorkspace)
+        #expect(realWorkspace.hasRunningPod)
+        #expect(realWorkspace.projectFolder == nil)
+        await realWorkspace.stopEverything()
+    }
+
+    @Test func publishingAnEmptyProjectReportsWhyInsteadOfCancelling() async throws {
+        let session = makeTestSession()
+        var project = try await makeDemoProject()
+        defer { try? FileManager.default.removeItem(at: project.directory) }
+        project.images = []
+        session.project = project
+        session.publish()
+        await session.task?.value
+        #expect(session.errorMessage?.contains("Import images or clips before publishing") == true)
+        #expect(session.message.contains("Dataset publication failed"))
+    }
+
+    @Test func latePublishProgressCannotReplaceOutcomeOrCrossProjects() async throws {
+        let session = makeTestSession()
+        let first = try await makeDemoProject()
+        defer { try? FileManager.default.removeItem(at: first.directory) }
+        let second = try await makeDemoProject()
+        defer { try? FileManager.default.removeItem(at: second.directory) }
+        let publication = UUID()
+        session.project = first
+        session.activePublishID = publication
+        session.message = "Dataset published. https://example.test/commit"
+        session.activePublishID = nil
+        session.receivePublishProgress("committing: late.json", id: publication, projectDirectory: first.directory)
+        #expect(session.message == "Dataset published. https://example.test/commit")
+
+        session.activePublishID = publication
+        session.project = second
+        session.message = "Second project is ready."
+        session.receivePublishProgress("committing: stale.json", id: publication, projectDirectory: first.directory)
+        #expect(session.message == "Second project is ready.")
     }
 
     @Test func ownedPodCaptionKeyIsTrustedWithoutEnteringTheJob() async throws {

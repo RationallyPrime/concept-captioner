@@ -48,8 +48,10 @@ checked on a real pod.
 The app creates pods through RunPod REST v2 `POST /v2/pods`: `image` names
 `ghcr.io/<owner>/concept-captioner-pod-<trainer>:<tag>`, `gpu` carries `id`, `count`,
 `minCudaVersion: "13.0"` and `minRamPerGpu: 60`; `disk: 50` is the temporary container disk.
-`mounts.network` attaches the selected `volumeId` at `/workspace`, `dataCenterIds` selects
-that volume's location, and `ports` is `["8800/http", "8000/http"]`. The `env` object carries
+With saved storage, `mounts.network` attaches the selected `volumeId` at `/workspace` and
+`dataCenterIds` selects that volume's location. Without saved storage, `mounts.persistent`
+creates a 300 GB pod disk at `/workspace`; placement is not tied to a network-volume data
+center. `ports` is `["8800/http", "8000/http"]`. The `env` object carries
 `PODAGENT_TOKEN` and, when the user has a Hub token, `HF_TOKEN`, both as RunPod secret
 references rather than values: the app writes the Hub token to the account secret
 `conceptstudio_hf_token` before every creation (so a rotated token takes effect) and the pod's
@@ -64,7 +66,24 @@ The app keeps the Mac awake while a pod runs; its launch-discovery limits are re
 APP-STATUS and ADR-0003.
 Its budget and idle watchdog send `POST /v2/pods/<id>/action` with `{"action":"stop"}` and
 confirm a stopped status. Removal is a separate, confirmed DELETE operation.
-The temporary disk is cleared on stop/restart; the network volume persists and remains billed.
+The temporary container disk is cleared on stop/restart. Both network storage and the pod
+disk retain `/workspace` files and remain billed while stopped; only the pod disk is deleted
+with the pod. Pending results, run history and comparisons use the network volume ID or
+`pod:<id>` as their storage identity. A replacement pod cannot recover a different pod's disk.
+The app blocks removal while a pod disk holds undelivered training/generated outputs, offers
+starting the original stopped computer for retrieval, and retains result metadata across budget
+stops. A lost start acknowledgement retains the local training/generation record until
+service and file inspection settles its outcome. Failed comparisons with downloaded partial
+files release custody only after all available files pass their checksum checks; pending
+JPG/WebP outputs are preserved along with PNG/video. Restart preserves accrued GPU spend,
+updates its rate from the provider's positive returned cost, excludes stopped time, and applies the selected
+whole-computer cap. A paused trainer's run cap becomes active again when training continues.
+The catalog request uses `include=AVAILABILITY&product=POD&cloud=SECURE`, requested GPU count
+and minimum CUDA; its per-data-center `dataCenters` entries are the stock source. Offers
+attached to saved storage must have `LOW`, `MEDIUM` or `HIGH` stock in that storage's data center.
+Missing/unknown/NONE stock is not offered. The current v2 schema has no data-center query
+parameter on `catalog/gpus`; the screen and creation request apply the exact location.
+RunPod `application/problem+json` detail and validation errors are shown with the status.
 See [RunPod storage](https://docs.runpod.io/pods/storage/types) and the current
 `https://api.runpod.io/v2/openapi.json` schema.
 
@@ -863,14 +882,48 @@ lowercase SHA-256. Agent admission requires a NEW run directory and a matching a
 Comfy/native PEFT A/B safetensors header/rank. Preparation claims the stage, captures both
 artifacts privately outside `output/`, verifies the copies and releases the stage. Normal
 local dataset installation refuses initializer slots; they never enter the media manifest.
-The imported quality settings are preserved in `run.json.extra`; final requested rank,
-alpha, LR, steps, batch and accumulation are authoritative. Rank must match starting weights;
+The native import retains supported `save.save_every`, `save.max_step_saves_to_keep`, saved
+`dtype`, `train.do_guidance_loss`, `train.guidance_loss_target`, and all image-resolution
+buckets. Advanced controls edit these values and positive training step/rank/batch values
+directly. H3 app defaults are 300-step saves, 40 retained checkpoints, float32 saved weights,
+768 and 1024 image buckets and guidance off. The current Circlestone training adapter
+requires guidance preservation loss to remain off; Advanced shows this requirement. Only
+an imported native recipe with explicit `model.use_training_adapter: false` exposes the
+guidance toggle and target (default 3.5). App import, training and resume reject adapter-on
+(or omitted/default-on) plus guidance-on before transferring inputs. A native recipe that
+omits `use_training_adapter` used the adapter only if it names `assistant_lora_path`; the
+import writes that actual choice explicitly into the canonical settings. The pod wrapper
+checks the effective merged recipe before downloading model assets. Zero retention keeps all
+checkpoints. FLUX/LTX defaults stay unchanged. Saved precision affects exported weights,
+independently of BF16 training precision. The previous v1 recipe/runtime enabled guidance
+with target 3.5; the exact v2 recipe, verification wrapper and runtime receipt disabled it,
+as did the successful v3 app run. The historical v1 combination is not supported by the
+current Circlestone adapter contract. Imports keep their actual supported settings; the
+unsupported adapter/guidance combination is refused with an explanation.
+
+Editable save settings and guidance target travel in the existing `run.json.extra` shape;
+`save_every` is also supplied at the existing top level. The fixed canonical initializer
+retains its four original sections and excludes `save` and `train.guidance_loss_target`;
+run.extra supplies those editable values after initializer loading. This keeps the published
+`v0.2.3-clean-20261011` validator contract. The imported quality settings are preserved in
+`run.json.extra`; final requested rank, alpha, LR, steps, batch and accumulation are authoritative. Rank must match starting weights;
 selector settings must not exclude loaded LoRA modules. The wrapper forces current run,
 approved dataset views/output and a fresh start at 0, setting the pinned upstream
 `network.pretrained_lora_path` to its captured private file. It is not a frozen assistant
 and not same-state Resume; no old optimizer/counter state is loaded. Existing same-run
 Resume retains the immutable initializer binding but does not need or re-upload its stage;
 it uses the captured pair and removes fresh `start_step: 0` so the real saved step restores.
+
+The new app controls send explicit values through the published image's existing merge
+contract. [The exact-image-source witness](../../docs/process/walkthrough-gpu-source-witness-2026-10-12.json)
+executes old `b7908618` validators/native config generation offline with the new params and
+canonical initializer. It proves source acceptance and effective config values, including
+fresh start at zero; it does not claim image execution or GPU/training quality. The source's
+additional effective-save fields in comparison receipts, implicit script H3 defaults and
+server-side adapter/guidance guard need an image rebuild. Valid guidance-off requests use
+the existing image contract; the app enforces the guard before submission. The app works without that optional receipt addition; existing captured
+`run.json.extra` and native configuration retain the submitted settings. Image publication
+remains separately owned and has not been performed by this walkthrough implementation.
 
 H3 generation privately captures the effective native model/network recipe and selected
 checkpoint. It creates the pinned registered model and an actual `LoRASpecialNetwork` with

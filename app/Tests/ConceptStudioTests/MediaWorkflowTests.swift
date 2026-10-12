@@ -197,9 +197,10 @@ struct MediaWorkflowTests {
         let directory = temporaryTestDirectory("video-import")
         defer { try? FileManager.default.removeItem(at: directory) }
         var project = try StudioProject.create(at: directory)
+        project.job = try Job(profile: "ltx-video", concepts: [Concept(trigger: "NORA7", targetConcept: .motion)])
         let original = directory.appendingPathComponent("original.mp4")
         try await MediaFixtures.video(at: original)
-        try project.importFiles([original])
+        try await project.importFiles([original])
         let id = try #require(project.images.first?.id)
         let output = directory.appendingPathComponent("trimmed.mp4")
         let selected = try await MediaEditor.trim(

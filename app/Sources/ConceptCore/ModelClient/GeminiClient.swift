@@ -21,6 +21,11 @@ public struct GeminiClient: ModelClient {
     public let bearerAuth: Bool
     public let api: API
 
+    /// Google model resources use `models/<id>`; this client adds the resource prefix itself.
+    public static func normalizedModel(_ model: String) -> String {
+        model.hasPrefix("models/") ? String(model.dropFirst("models/".count)) : model
+    }
+
     public init(
         apiKey: String,
         model: String,
@@ -30,7 +35,7 @@ public struct GeminiClient: ModelClient {
         api: API = .developer
     ) {
         self.apiKey = apiKey
-        requestedModel = model
+        requestedModel = Self.normalizedModel(model)
         self.baseURL = baseURL
         self.transport = transport
         self.bearerAuth = bearerAuth

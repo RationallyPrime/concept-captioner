@@ -1,12 +1,41 @@
 # ConceptStudio app status
 
-Updated 2026-10-11 after the review repairs, based on all seven hardening lanes and
+Updated 2026-10-12 for the walkthrough/glossary integration. The baseline includes all seven hardening lanes and
 follow-up `cd5f746`, with the review corrections and owner acceptance below. Source checks,
 native offline demo checks and bounded FLUX/LTX generation, resume and video training checks
 have completed. The GPU proofs predate the review repairs: FLUX used r1; LTX used r2.
 The current `v0.2.3-clean-20261011` images contain the review repairs, direct upload and the H3
-additions; their checks are anonymous tag-to-digest checks and a CPU control smoke, not a GPU run. See [RUNNING.md](RUNNING.md),
+additions. The owner and Claude subsequently completed a real H3 still-image run on that tag,
+recorded in [the walkthrough](../../docs/process/walkthrough-2026-10-11.md). Earlier
+FLUX/LTX runtime checks retain their original image scope. See [RUNNING.md](RUNNING.md),
 [CORE-STATUS.md](CORE-STATUS.md) and [POD-STATUS.md](../../pod/docs/POD-STATUS.md).
+
+## Walkthrough integration, 2026-10-12
+
+The [repair record](../../docs/process/walkthrough-repairs-2026-10-12.md) maps every finding
+to current behavior. Settings groups captioning connections separately from publishing/training
+accounts, checks saved keys without generation, and moves selected-model testing to Captioning.
+Provider model catalogs respect reported capabilities and actual server/credential context.
+New projects have no demo concept; image imports preserve caption/response companions, and
+Captioning distinguishes existing, imported and final captions. Mapping proposals can be accepted
+in bulk with Undo. Disclosures open across their entire row and Welcome presents the workflow.
+
+The supplied 177-entry glossary, its two readings and all 81 sources are bundled unchanged;
+eighteen separate operational entries explain the app. Help supports section filtering, aliases,
+related-term navigation and the complete original introduction.
+
+GPU offers respect network-volume location; optional persistent pod disks survive Stop but not
+Remove. Unsettled results prevent removal, including lost start acknowledgements. A stale refresh
+cannot declare a newly started training/generation action failed. H3 exposes checkpoint cadence,
+retention, saved precision and multiple buckets; Circlestone guidance loss stays off and invalid
+imports/runs are refused. New valid requests use the published image’s existing parameter contract.
+
+Current offline gates: **540 Swift tests** (279 app in 42 suites, 261 Core in 38), **118 Python
+reference tests** and **315 pod-script tests** passed. Strict SwiftLint reports zero violations
+across 179 source/test files; SwiftFormat and Python Ruff/format are clean. Independent source
+review accepted project/provider/UI changes; the integration review closed startup settlement
+and output-custody defects. Visual/native checks and delivery receipts are recorded in the repair
+record. Developer ID signing remains unavailable on this Mac.
 
 ## Implemented
 
@@ -223,9 +252,9 @@ small recipes do not establish a memory guarantee for other datasets or settings
 
 Current trainer images are published under `v0.2.3-clean-20261011`, a clean build from `main`
 at `b7908618` (digests in `pod/images/README.md`), and verified by anonymous tag-to-digest checks. The
-app default uses this tag. Real-pod runs so far used the earlier `v0.2.0-overnight20261011-r2`
-tag, which stays published. Bounded GPU
-checks and their limits are recorded in POD-STATUS.
+app default uses this tag. The owner/Claude H3 still-image training run used this clean tag;
+the earlier bounded FLUX/LTX proofs used the r1/r2 tags, which stay published. Their
+separate scopes and limits are recorded in POD-STATUS.
 
 On 2026-10-11 the owner confirmed signing in and captioning live through both ChatGPT and
 OpenRouter. These are owner-reported native acceptance checks for account access and captioning;
@@ -238,10 +267,12 @@ Owner acceptance and distribution still pending:
 - Live checks of direct upload, storage cleanup and repaired generation/Resume on the
   published clean image. Its rebuild/default update and Hub-token secret integration have
   landed separately; they are not work performed by this walkthrough repair round.
-  The new H3 source requires a later image build before its own GPU acceptance.
+  H3 still-image training on v0.2.3 has owner/Claude acceptance; H3 clips, external
+  warm-start, same-run Resume and matched generation still need live acceptance.
 - Native TensorBoard rendering during an actual run. Offline state and the live backend
   handshake are verified separately; no GPU was restarted solely for this UI check.
-- The owner's full morning walkthrough and first real dataset training run.
+- A follow-up walkthrough of these repairs. The owner/Claude walkthrough and first real
+  H3 still-image training run have completed; this new UI has separate acceptance below.
 - VoiceOver acceptance, Photos permission/bookmark persistence in a signed sandboxed build,
   Developer ID signing and notarization. The preview remains unsigned.
 
@@ -293,8 +324,20 @@ the 18 prepared project clips accepted their exact decoded frame counts, 24 fps 
 32-aligned dimensions under a 1024 resolution cap; no pixels or audio were inspected by
 that check. The new export, initializer, generation and budget source checks passed the
 offline integration gate; the earlier FLUX/LTX GPU proofs do not validate this H3 implementation. An
-updated AI Toolkit image and actual training/generation acceptance remain required.
-No family training was started.
+AI Toolkit image containing these changes was subsequently published as v0.2.3 and
+the owner/Claude completed the 3,000-step still-image run described below. H3 clip training,
+warm-start, Resume and matched generation remain separate runtime checks. This repair
+session did not start a family training run.
+
+## Owner/Claude H3 run, recorded 2026-10-12
+
+The [walkthrough record](../../docs/process/walkthrough-2026-10-11.md) reports a completed
+3,000-step H3 identity LoRA run using 69 still images, Gemini captions and the clean
+v0.2.3 AI Toolkit image on a 96 GB RTX PRO 6000. The 179 MB result was pushed privately,
+and the computer was stopped after approximately 72 minutes. The record estimates about
+$3 GPU cost; this is not a newly queried settled invoice. These are owner/Claude runtime
+receipts, not a GPU run performed by this walkthrough-fix session. They establish the
+still-image train/publish/stop path, not H3 clips, warm-start, Resume or generation.
 
 ## ChatGPT connection follow-up, 2026-10-11
 

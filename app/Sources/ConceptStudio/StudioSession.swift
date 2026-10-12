@@ -1,10 +1,19 @@
-import AppKit
 import ConceptCore
+import Foundation
 import Observation
 
 struct CaptionDraft: Equatable {
     var text: String
     var isFinal: Bool
+}
+
+struct MappingSnapshot: Equatable {
+    let sampleID: String
+    let mapping: Job.Mapping?
+}
+
+struct MappingUndo: Equatable {
+    let snapshots: [MappingSnapshot]
 }
 
 /// A question the session needs the user to answer before it continues. The session never
@@ -69,6 +78,7 @@ final class StudioSession {
     var project: StudioProject? {
         didSet {
             if step == .mapping, project?.job.requiresLocatorMapping == false { step = .captioning }
+            if project?.job.concepts.isEmpty == true, step != .images, step != .concepts { step = .concepts }
         }
     }
 
@@ -99,10 +109,12 @@ final class StudioSession {
     var analyzing = false
     @ObservationIgnored var analysisTask: Task<Void, Never>?
     @ObservationIgnored var analysisGeneration = 0
+    @ObservationIgnored var activePublishID: UUID?
     var datasetAdvice = ""
     var mappingProposals: [String: Job.Mapping] = [:]
+    var mappingUndo: [MappingUndo] = []
     var comparison = ""
-    private(set) var captionDrafts: [String: CaptionDraft] = [:]
+    var captionDrafts: [String: CaptionDraft] = [:]
     var usingPodCaptioner = false
     var startupRestored = false
     var recentPaths: [String] = []
@@ -121,6 +133,8 @@ final class StudioSession {
     var criticThinking = ThinkingLevel.none
     var concurrency = 4
     var outputMode = OutputMode.native
+    var providerModelChoices: [ProviderModelCacheKey: [ProviderModelChoice]] = [:]
+    var providerCredentialRevision = 0
     var customBaseURL = ""
     var requestBaseURL = ""
     var criticRequestBaseURL = ""
@@ -173,43 +187,6 @@ final class StudioSession {
         project?.images.first { $0.id == selectedImageID }
     }
 
-    // MARK: Project-only settings
-
-    /// The dataset repository Publish writes to; remembered per project, blank for a new project.
-    var repoID: String {
-        get { projectState.dataset.repo }
-        set { updateProjectState {
-            if $0.dataset.repo != newValue { $0.datasetRevision = "" }
-            $0.dataset.repo = newValue
-        } }
-    }
-
-    var privateDataset: Bool {
-        get { projectState.dataset.isPrivate }
-        set { updateProjectState { $0.dataset.isPrivate = newValue } }
-    }
-
-    /// Where training uploads the LoRA; remembered per project like the dataset destination.
-    var trainingOutputRepo: String {
-        get { projectState.trainingOutput.repo }
-        set { updateProjectState { $0.trainingOutput.repo = newValue } }
-    }
-
-    var trainingOutputPrivate: Bool {
-        get { projectState.trainingOutput.isPrivate }
-        set { updateProjectState { $0.trainingOutput.isPrivate = newValue } }
-    }
-
-    /// Change the project's app-only settings and save them with the project (not in demo mode).
-    func updateProjectState(_ change: (inout ProjectAppState) -> Void) {
-        var state = projectState
-        change(&state)
-        guard state != projectState else { return }
-        projectState = state
-        guard let project, !demoMode else { return }
-        do { try state.save(to: project.directory) } catch { errorMessage = Self.describe(error) }
-    }
-
     // MARK: Caption drafts
 
     func captionDraft(for image: ProjectImage) -> CaptionDraft {
@@ -229,7 +206,12 @@ final class StudioSession {
     func invalidateMediaDraft(id: String) {
         captionDrafts[id] = nil
         mappingProposals[id] = nil
+        invalidateMappingUndo()
         comparison = ""
+    }
+
+    func invalidateMappingUndo() {
+        mappingUndo = []
     }
 
     func hasUnsavedCaption(for image: ProjectImage) -> Bool {
@@ -253,14 +235,6 @@ final class StudioSession {
     func clearSavedCaptionDraft(_ draft: CaptionDraft, for id: String) {
         // A later edit must survive completion of an earlier save.
         if captionDrafts[id] == draft { captionDrafts[id] = nil }
-    }
-
-    var unmappedCount: Int {
-        project?.job.unmapped(project?.images.map(\.id) ?? []).count ?? 0
-    }
-
-    var keyStore: SessionKeyStore {
-        SessionKeyStore(secrets: secrets, vllmBaseURL: customBaseURL.isEmpty ? nil : customBaseURL)
     }
 
     // MARK: Work gates
@@ -327,206 +301,8 @@ final class StudioSession {
     }
 
     func cancel() {
+        activePublishID = nil
         task?.cancel()
-    }
-
-    // MARK: Confirmations
-
-    /// Ask the user and wait for the answer, through the window's one prompt (`ask(_:)`). A newer
-    /// question replaces (and declines) an older one.
-    func confirm(_ confirmation: StudioConfirmation) async -> Bool {
-        switch confirmation {
-        case .discardCaptionDrafts:
-            await ask(.discardCaptionDrafts(warning: confirmation.message)) == .confirm
-        case .stopAndClose:
-            await ask(.stopWork(runningWork(for: .closeProject))) == .confirm
-        }
-    }
-
-    /// Run `action` now when nothing needs confirming, otherwise after the user confirms.
-    func whenConfirmed(_ confirmation: StudioConfirmation?, _ action: @escaping @MainActor () -> Void) {
-        guard let confirmation else { return action() }
-        Task { if await confirm(confirmation) { action() } }
-    }
-
-    var discardDraftsConfirmation: StudioConfirmation? {
-        unsavedCaptionCount > 0 ? .discardCaptionDrafts(count: unsavedCaptionCount) : nil
-    }
-
-    // MARK: Startup and projects
-
-    static func startupNeedsPodRecovery(_ data: Data?) -> Bool {
-        guard let data, let saved = try? JSONDecoder().decode(SavedPod.self, from: data) else { return false }
-        return saved.pod.isRunning
-    }
-
-    func restoreStartupComputer() {
-        guard !startupRestored else { return }
-        startupRestored = true
-        guard !demoMode, Self.startupNeedsPodRecovery(preferences.data(forKey: "ConceptStudio.activePod"))
-        else { return }
-        do {
-            // Restore the known running state before credentials can fail or Welcome actions can replace it.
-            try gpu.configure(runpodKey: "", hubToken: "", imageName: podImageName)
-        } catch {
-            errorMessage = Self.describe(error)
-            gpu.message = "A retained computer may still be billing. Add your RunPod key in Settings and stop it."
-        }
-        configureGPU()
-    }
-
-    private func refuseWhileComputerBusy(_ reason: String) -> Bool {
-        guard gpu.hasRunningPod || gpu.isBusy else { return false }
-        errorMessage = reason
-        return true
-    }
-
-    func useDemo() {
-        guard !refuseWhileComputerBusy("Stop the rented computer before switching to the demo.") else { return }
-        whenConfirmed(discardDraftsConfirmation) {
-            self.perform("Opening the offline demo…") {
-                await self.releaseProject()
-                self.demoMode = true
-                self.showChatGPTPlanNotice = false
-                self.gpu = self.makeGPUWorkspace(demoMode: true)
-                self.project = try await DemoProject.create(at: self.demoDirectory)
-                self.gpu.projectFolder = self.project?.directory
-                self.projectState = ProjectAppState(dataset: HubDestination(repo: "demo/concept-studio"))
-                self.selectedImageID = self.project?.images.first?.id
-                self.step = .images
-                self.message = "Offline demo: synthetic photos, prepared captions and simulated services."
-                self.startImageAnalysis()
-            }
-        }
-    }
-
-    func createProject(at url: URL) {
-        guard !refuseWhileComputerBusy(
-            "Finish the current computer action or Stop everything before changing projects."
-        ) else { return }
-        whenConfirmed(discardDraftsConfirmation) {
-            self.perform("Creating your project…") {
-                await self.releaseProject()
-                self.demoMode = false
-                self.loadSavedChoices()
-                self.gpu = self.makeGPUWorkspace(demoMode: false)
-                self.projectAccess = url
-                _ = url.startAccessingSecurityScopedResource()
-                self.project = try StudioProject.create(at: url)
-                self.gpu.projectFolder = self.project?.directory
-                self.projectState = ProjectAppState()
-                self.rememberRecent(url)
-                self.step = .images
-                self.message = "Project created. Import the images or clips for your concept."
-            }
-        }
-    }
-
-    func openProject(url selected: URL) {
-        guard !refuseWhileComputerBusy(
-            "Finish the current computer action or Stop everything before changing projects."
-        ) else { return }
-        whenConfirmed(discardDraftsConfirmation) {
-            self.perform("Opening your project…") {
-                await self.releaseProject()
-                self.demoMode = false
-                self.loadSavedChoices()
-                self.gpu = self.makeGPUWorkspace(demoMode: false)
-                self.projectAccess = selected
-                _ = selected.startAccessingSecurityScopedResource()
-                self.project = try await StudioProject.open(at: selected)
-                self.gpu.projectFolder = self.project?.directory
-                self.projectState = ProjectAppState.load(from: selected)
-                self.rememberRecent(selected)
-                if let job = self.project?.job { self.applyJobChoices(job) }
-                self.selectedImageID = self.project?.images.first?.id
-                self.message = "Project opened. Your saved choices and final captions are preserved."
-                self.migrateOutsideSkill()
-                self.startImageAnalysis()
-            }
-        }
-    }
-
-    func releaseProject() async {
-        chatGPTWorkGeneration += 1
-        await chatGPT.cancelAndWait()
-        await openRouter.cancelAndWait()
-        stopImageAnalysis()
-        editTask?.cancel()
-        await editTask?.value
-        if let prompt = pendingPrompt { answer(prompt, .cancel) }
-        if demoMode, let directory = project?.directory,
-           directory.standardizedFileURL == demoDirectory.standardizedFileURL {
-            DemoProject.remove(at: directory)
-        }
-        projectAccess?.stopAccessingSecurityScopedResource()
-        projectAccess = nil
-        project = nil
-        projectState = ProjectAppState()
-        analyses = [:]
-        mappingProposals = [:]
-        datasetAdvice = ""
-        comparison = ""
-        captionDrafts = [:]
-        runPendingIDs = []
-        usingPodCaptioner = false
-        requestBaseURL = ""
-    }
-
-    func closeProject() async {
-        await stopEverything()
-        guard !gpu.hasRunningPod else { errorMessage = gpu.message; return }
-        await releaseProject()
-    }
-
-    func stopEverything() async {
-        chatGPTWorkGeneration += 1
-        await chatGPT.cancelAndWait()
-        await openRouter.cancelAndWait()
-        task?.cancel()
-        editTask?.cancel()
-        stopImageAnalysis()
-        await task?.value
-        await editTask?.value
-        await gpu.stopEverything()
-    }
-
-    func saveProject() {
-        do {
-            try project?.save()
-            message = unsavedCaptionCount > 0
-                ? "Project configuration saved. "
-                + "Save your \(unsavedCaptionCount) caption drafts on Review before closing."
-                : "Project saved."
-        } catch { errorMessage = Self.describe(error) }
-    }
-
-    // MARK: Photos and analysis
-
-    func importImages(_ urls: [URL]) {
-        guard !urls.isEmpty else { return }
-        perform("Importing training data…") {
-            for url in urls {
-                let accessed = url.startAccessingSecurityScopedResource()
-                defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-                try self.project?.importFiles([url])
-                self.completed += 1
-            }
-            self.selectedImageID = self.project?.images.first?.id
-            self.startImageAnalysis()
-            self.message = "Training data imported. Review the selected images and clips before captioning."
-        }
-    }
-
-    func importFolder(_ folder: URL) {
-        perform("Importing folder contents…") {
-            let accessed = folder.startAccessingSecurityScopedResource()
-            defer { if accessed { folder.stopAccessingSecurityScopedResource() } }
-            try self.project?.importFiles(MediaEditor.importableFiles(in: folder))
-            self.selectedImageID = self.project?.images.first?.id
-            self.startImageAnalysis()
-            self.message = "Training data imported."
-        }
     }
 
     // MARK: - Lane ui stored state (added 2026-10-11; owned by the view layer, see AppLifetime.swift)

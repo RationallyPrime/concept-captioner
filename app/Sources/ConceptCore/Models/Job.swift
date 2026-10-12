@@ -258,7 +258,8 @@ public struct Job: Sendable, Equatable {
     /// Not part of the job file and not part of equality.
     public var directory: URL?
 
-    /// Validates like `Job._check`: at least one concept, unique triggers, every sample mapping.
+    /// Validates unique triggers and every sample mapping. An empty concept list is a draft job
+    /// that can be filled in before captioning or training.
     public init(
         skill: String? = nil,
         profile: String = "h3-still",
@@ -317,12 +318,17 @@ public struct Job: Sendable, Equatable {
     }
 
     private func check() throws {
-        guard !triggers.isEmpty else { throw ConfigurationError("a job needs at least one concept") }
         guard Set(triggers).count == triggers.count else {
             throw ConfigurationError("concept triggers must be unique")
         }
         for (sampleID, mapping) in samples {
             try checkMapping(sampleID, mapping)
+        }
+    }
+
+    public func requireConcepts() throws {
+        guard !concepts.isEmpty else {
+            throw ConfigurationError("Add a concept before captioning or training.")
         }
     }
 

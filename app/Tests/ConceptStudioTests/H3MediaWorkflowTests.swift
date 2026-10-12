@@ -48,7 +48,7 @@ struct H3MediaWorkflowTests {
         project.job = try Job(profile: "ltx-video", concepts: [Concept(trigger: "MOVE8", targetConcept: .motion)])
         let original = directory.appendingPathComponent("clip.mp4")
         try await H3MediaFixtures.audiovisualClip(at: original)
-        try project.importFiles([original])
+        try await project.importFiles([original])
         let id = try #require(project.images.first?.id)
         let source = try #require(project.images.first?.url)
         let output = directory.appendingPathComponent("approved.mp4")
@@ -126,7 +126,7 @@ struct H3MediaWorkflowTests {
         defer { try? FileManager.default.removeItem(at: project.directory) }
         let original = project.directory.appendingPathComponent("clip.mp4")
         try await MediaFixtures.video(at: original, times: (0 ..< 50).map { Double($0) / 24 })
-        try project.importFiles([original])
+        try await project.importFiles([original])
         project.job.profile = "ltx-video"
         try project.save()
         let other = try #require(project.images.first { $0.id == "garden.png" })
@@ -159,7 +159,7 @@ struct H3MediaWorkflowTests {
         var project = try StudioProject.create(at: directory)
         let source = directory.appendingPathComponent("clip.mp4")
         try await MediaFixtures.video(at: source, times: (0 ..< 50).map { Double($0) / 24 })
-        try project.importFiles([source])
+        try await project.importFiles([source])
         let before = try Data(contentsOf: project.imagesDirectory.appendingPathComponent("clip.mp4"))
         let defaults = IsolatedDefaults()
         defer { defaults.remove() }
@@ -181,7 +181,7 @@ struct H3MediaWorkflowTests {
         var project = try StudioProject.create(at: directory)
         let source = directory.appendingPathComponent("clip.mp4")
         try await MediaFixtures.video(at: source, times: (0 ..< 30).map { Double($0) / 24 })
-        try project.importFiles([source])
+        try await project.importFiles([source])
         project.job.skill = try makeSkill(named: "custom-captions", in: directory, profile: "custom").path
         project.job.profile = "custom"
         try project.save()

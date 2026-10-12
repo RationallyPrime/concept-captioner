@@ -52,7 +52,6 @@ extension GPUWorkspace {
                 "inference_steps": .int(inferenceSteps), "guidance_scale": .double(4),
                 "num_frames": .int(run.generatesVideo ? frames : 1), "frame_rate": .double(24),
             ]
-            try await agent.start("generate-\(run.trainer)", gpus: [plan.train?.gpus.first ?? 0], params: params)
             self.generation = GeneratedComparison(
                 runID: id, sourceRunID: run.runID, checkpoint: checkpoint.path, trainer: run.trainer,
                 volumeID: run.volumeID, startedAt: Date(), state: .generating,
@@ -61,6 +60,7 @@ extension GPUWorkspace {
             self.lastActivity = Date()
             self.saveProjectRecord()
             self.persist()
+            try await agent.start("generate-\(run.trainer)", gpus: [plan.train?.gpus.first ?? 0], params: params)
             self.message = "Generating matched base and LoRA outputs. "
                 + "The same prompts, seeds and settings apply to both."
         }
@@ -72,9 +72,7 @@ extension GPUWorkspace {
             let own = services.first { $0.name == "generate-\(generation.trainer)" && $0.runID == generation.runID }
             if own?.active == true { return }
             let files = try await agent.runFiles(runID: generation.runID)
-            guard files.contains(where: { $0.path == "comparison.json"
-                    || ["png", "mp4"].contains(($0.path as NSString).pathExtension)
-            }) else {
+            guard files.contains(where: { Self.isGeneratedOutput($0.path) }) else {
                 generation.state = .failed
                 generation.failure = "Generation ended without outputs. Read its saved log before retrying."
                 self.generation = generation
@@ -100,7 +98,7 @@ extension GPUWorkspace {
             throw StudioError.message("Connect this generation's storage to retrieve its outputs.")
         }
         let files = try await agent.runFiles(runID: generation.runID).filter {
-            $0.path == "comparison.json" || ["png", "jpg", "webp", "mp4"].contains(($0.path as NSString).pathExtension)
+            Self.isGeneratedOutput($0.path)
         }
         guard !files.isEmpty else { throw StudioError.message("No generated files are available yet.") }
         let folder = try resultsFolder(for: generation.runID)
@@ -124,6 +122,10 @@ extension GPUWorkspace {
         persist()
         message = complete ? "Generated outputs saved into this project. The computer can now be stopped."
             : generation.failure ?? "Generation did not finish."
+    }
+
+    nonisolated static func isGeneratedOutput(_ path: String) -> Bool {
+        path == "comparison.json" || ["png", "jpg", "webp", "mp4"].contains((path as NSString).pathExtension)
     }
 
     func comparisonManifest(_ comparison: GeneratedComparison) -> ComparisonManifest? {

@@ -17,10 +17,14 @@ struct TrainingInitializationView: View {
                 Button("Choose AI Toolkit recipe…") { chooseRecipe() }
                 if let recipe = workspace.nativeRecipeOriginal {
                     Text("Recipe copied: \(recipe.lastPathComponent)").font(.callout)
-                    Text("Imported precision, optimizer and layer selection are kept. The controls below choose "
-                        + "the new run's steps, alpha, learning rate and batch settings. Starting weights require "
-                        + "the imported rank.")
-                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                    Text(
+                        "Imported save cadence, retention, precision, guidance, buckets, optimizer "
+                            + "and layer selection are kept. "
+                            + "The controls below choose "
+                            + "the new run's steps, alpha, learning rate and batch settings. Starting weights require "
+                            + "the imported rank."
+                    )
+                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
                     Button("Choose starting LoRA weights…") { chooseCheckpoint() }
                     if workspace.initialCheckpoint != nil {
                         Label("Starting weights copied into this project", systemImage: "checkmark.circle")

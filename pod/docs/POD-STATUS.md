@@ -4,7 +4,11 @@ State after the 2026-10-11 source review repairs and the Phase 2 H3 source addit
 current published tag, `v0.2.3-clean-20261011`, is a clean build of `main` at
 `b79086183bba40e8120f0cba1ee59173f10108a5` (review repairs, direct dataset upload and the H3
 additions included) with the repository Dockerfiles and no overlay; it has had anonymous
-tag-to-digest checks and a CPU smoke (2026-10-12) but no real-pod run yet. The previous clean
+tag-to-digest checks and a CPU smoke (2026-10-12). The owner/Claude subsequently
+completed the real H3 still-image run documented in the
+[walkthrough](../../docs/process/walkthrough-2026-10-11.md): 3,000 steps, 69 stills,
+private LoRA publication and pod stop. This is a recorded runtime acceptance, not a new
+GPU check performed during these repairs. The previous clean
 tag `v0.2.2-clean-20261011` (from `2789c1d3`) stays published. The
 earlier clean tag `v0.2.1-clean-20261011` (from `ce52a220`, before those repairs) stays
 published. The real-pod evidence below was gathered on the overnight
@@ -28,7 +32,8 @@ hash and billing bucket, is in
   authenticated `/tensorboard/` proxy. vLLM and LTX preprocessing arguments are allowlisted.
 - **Transfer scripts and trainer wrappers** (`pod/scripts`): Hub dataset pull or authenticated
   local dataset installation, AI Toolkit
-  (FLUX/H3) and LTX launchers, LoRA push. The new H3 additions described below are source-only.
+  (FLUX/H3) and LTX launchers, LoRA push. H3 still-image training has the owner/Claude runtime acceptance above;
+  clip training, external warm-start, Resume and matched generation remain unexercised live.
 - **podctl** (`pod/podctl`): command-line client for the agent.
 - **Images**, public on GHCR under tag `v0.2.3-clean-20261011` (clean build from commit
   `b7908618`; digests in [images/README](../images/README.md)): `concept-captioner-pod-base`,
@@ -58,6 +63,12 @@ published), with a SHA-256 manifest. Build and push logs are on cx53 under
 `/home/hive/work/concept-captioner-pod-verify-20261010`.
 
 ## Verified offline only
+
+- **Walkthrough recipe integration, 2026-10-12:** all **315 pod-script tests** pass, with Ruff
+  check/format clean. H3 checkpoint settings and explicit no-adapter guidance settings survive
+  import and merge. The merged Circlestone/guidance-loss combination is rejected before model
+  downloads. The exact published-source compatibility witness is linked under Open below;
+  these new server guards/defaults await the separate image rebuild.
 
 - **Review repairs, 2026-10-11:** agent **660 passed**, scripts **291 passed**, podctl
   **125 passed**; Ruff and formatting clean. Independent source review covers generation
@@ -251,23 +262,25 @@ The r2 history: runtime source
   tests** passed at the first complete code gate; final narrow selector/initialization
   closure is recorded separately in the private freeze receipt. The fake inference tests
   verify call/recipe/output contracts; they are not GPU generation or a fake product gallery.
-- Deployment and actual H3 capacity/training/Resume/generation remain pending. No image
-  rebuild, hosted request, new pod, private-media training or quality experiment was done
-  in this source-only phase. Earlier FLUX/LTX receipts remain evidence for their exact images.
+- At the end of this source phase, deployment and H3 runtime checks were pending. The later
+  v0.2.3 image and owner/Claude still-image run supersede that deployment/training gap.
+  H3 clips, external warm-start, Resume and generation still need live acceptance. Earlier
+  FLUX/LTX receipts remain evidence for their exact images.
 
 ## Open
 
-- **Current baseline versus new H3:** `v0.2.3-clean-20261011` now images the H3 source below;
-  it has not run on hosted GPUs. The earlier clean `v0.2.2-clean-20261011` build already included
-  the previous review repairs/direct uploads; app RunPod secret references and the macOS CI
-  repair are landed. The new H3 initializer/recipe/clip/generator code has not been imaged
-  or run on hosted GPUs. Previous direct-upload/cleanup repairs have clean CPU/image proof,
-  with real-pod coverage limited to the earlier r1/r2 receipts. No new GPU was rented here.
+- **Current baseline:** v0.2.3 includes the H3 initializer/recipe/clip/generator code and has
+  the owner/Claude still-image training acceptance above. The new walkthrough controls
+  send explicit save and guidance fields through the image’s existing `extra` contract;
+  [the source witness](../../docs/process/walkthrough-gpu-source-witness-2026-10-12.json)
+  executes that exact published validator/wrapper. New script defaults and extra comparison
+  receipt fields are source changes awaiting Claude-owned image publication. This is offline
+  compatibility evidence, not new live acceptance of those controls or pod-disk restart.
 - **Caption quality.** The 3B and 8B captions failed the concept boundary in the cancelled
   five-image experiment; none is training data. The larger comparison is deferred by Hákon.
 - **Caption inference while training runs.** Both services were resident at once, but the
   caption request ran after training exited.
-- **Not run live through this new app/pod path:** H3 training, external initialization,
+- **Not run live through this new app/pod path:** H3 clip training, external initialization,
   same-run continuation, joint audio and matched generation. H3 registration/loader/network
   keys are source-verified. Other live gaps: parquet datasets, recovery after an agent
   crash, CUDA driver R570.

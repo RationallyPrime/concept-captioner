@@ -9,6 +9,7 @@ final class GPUWorkspace {
     var volumes: [GPUVolume] = []
     var selectedGPU = ""
     var selectedVolume = ""
+    @ObservationIgnored var hasLoadedVolumes = false
     var gpuCount = 1
     /// The limit for the next rental. While a pod runs, `activeBudget` is the one enforced.
     var budget = 10.0
@@ -32,7 +33,8 @@ final class GPUWorkspace {
     var storage: AgentStorageUsage?
     var message = "Refresh available computers to see current prices."
     var isBusy = false
-    private(set) var isStopping = false
+    private var operationRevision = 0
+    var isStopping = false
     var elapsedCost = 0.0
     var trainer = "aitoolkit" {
         didSet {
@@ -52,6 +54,15 @@ final class GPUWorkspace {
     var nativeRecipeOriginal: URL?
     var initialCheckpoint: URL?
     var learningRate = 0.0001
+    var checkpointEvery = 250
+    var checkpointRetention = 4
+    var checkpointPrecision = "float16"
+    var guidanceLoss = false
+    var guidanceTargetText = "3.5"
+    var guidanceTarget: JSONValue {
+        (try? JSONValue(parsing: Data(guidanceTargetText.utf8))) ?? .null
+    }
+
     /// Training resolution in pixels; one of `resolutionChoices`. Shown under Advanced.
     var trainingResolutions = [512]
     var resolution: Int {
@@ -120,6 +131,8 @@ final class GPUWorkspace {
 
     static let activePodKey = "ConceptStudio.activePod"
     static let pendingResultKey = "ConceptStudio.pendingResult"
+    /// Set when the person chose "No saved storage", so later launches do not select a network volume.
+    static let noSavedStorageKey = "ConceptStudio.noSavedStorage"
 
     init(
         demoMode: Bool,
@@ -156,7 +169,7 @@ final class GPUWorkspace {
         provider = runpodKey.isEmpty ? nil : RunPodProvider(key: runpodKey, transport: transport)
         self.hubToken = hubToken
         self.imageName = imageName
-        if let networkVolumeID { selectedVolume = networkVolumeID }
+        if let networkVolumeID, !prefersNoSavedStorage { selectedVolume = networkVolumeID }
         if result == nil, let data = preferences.data(forKey: Self.pendingResultKey) {
             result = try? JSONDecoder().decode(TrainingResult.self, from: data)
             if let result, !RunArtifacts.validRunID(result.runID) { self.result = nil }
@@ -202,9 +215,11 @@ final class GPUWorkspace {
             async let volumes = provider.volumes()
             self.offers = try await offers
             self.volumes = try await volumes
-            if !self.volumes.contains(where: { $0.id == self.selectedVolume }) {
+            if (!self.hasLoadedVolumes && self.selectedVolume.isEmpty && !self.prefersNoSavedStorage)
+                || (!self.selectedVolume.isEmpty && !self.volumes.contains(where: { $0.id == self.selectedVolume })) {
                 self.selectedVolume = self.volumes.first?.id ?? ""
             }
+            self.hasLoadedVolumes = true
             self.selectAvailableOffer()
             self.message = self.availableOffers.isEmpty
                 ? "No computers are available beside this storage. Choose other storage, fewer GPUs, or refresh later."
@@ -222,14 +237,14 @@ final class GPUWorkspace {
             }
             guard let provider = self.provider,
                   let offer = self.availableOffers.first(where: { $0.id == self.selectedGPU }),
-                  let volume = self.volumes.first(where: { $0.id == self.selectedVolume }),
-                  !self.imageName.isEmpty, self.budget.isFinite, self.budget > 0 else {
+                  self.selectedVolume.isEmpty || self.volumes.contains(where: { $0.id == self.selectedVolume }),
+                  self.budget.isFinite, self.budget > 0 else {
                 throw StudioError
                     .message(
-                        "Choose a computer, storage and a positive budget. "
-                            + "Add the training image in Settings if it is missing."
+                        "Choose an available computer and a positive budget."
                     )
             }
+            let volume = self.volumes.first { $0.id == self.selectedVolume }
             let started = Date()
             self.agentToken = try Self.newAgentToken()
             // Credentials go to the account's secret store; the pod only ever sees placeholders.
@@ -246,7 +261,8 @@ final class GPUWorkspace {
             self.saved = SavedPod(
                 pod: created, started: started, hourlyRate: max(created.cost, self.quotedHourlyRate),
                 budget: self.budget, trainer: self.trainer, runID: "", outputRepo: self.outputRepo,
-                idleMinutes: self.idleMinutes, volumeID: volume.id, agentSecret: credentials.agentSecret
+                idleMinutes: self.idleMinutes, volumeID: volume?.id ?? "pod:" + created.id,
+                agentSecret: credentials.agentSecret
             )
             self.connectAgent(created)
             self.lastActivity = Date()
@@ -276,11 +292,15 @@ final class GPUWorkspace {
     private func refreshState() async {
         guard let provider, let current = pod, hasRunningPod else { return }
         let resultBefore = result
+        let settlementRevision = isBusy ? nil : operationRevision
         var agentAnswered = false
         do {
             try await enforceLimits()
             guard hasRunningPod else { return }
-            pod = try await provider.status(id: current.id)
+            let currentStatus = try await provider.status(id: current.id)
+            if !currentStatus.isRunning { freezePodCost() }
+            updateHourlyRate(currentStatus)
+            pod = currentStatus
             persist()
             guard hasRunningPod else { return }
             guard let agent else {
@@ -302,8 +322,12 @@ final class GPUWorkspace {
             updateTrainingService(services)
             if !runID.isEmpty { try await updateProgress(agent, services: services) }
             // A result created while this refresh was in flight is judged on the next one.
-            if !isBusy, result == resultBefore { try await settleResult(agent, services: services) }
-            if !isBusy { try await settleGeneration(agent, services: services) }
+            if settlementRevision == operationRevision, !isBusy, result == resultBefore { try await settleResult(
+                agent,
+                services: services
+            ) }
+            if settlementRevision == operationRevision,
+               !isBusy { try await settleGeneration(agent, services: services) }
         } catch is CancellationError {
             return
         } catch {
@@ -317,32 +341,6 @@ final class GPUWorkspace {
             await stopEverything()
             if !hasRunningPod { message = "Stopped the idle computer to avoid further GPU charges." }
         }
-    }
-
-    private func updateProgress(_ agent: any PodAgent, services: [AgentService]) async throws {
-        if historyRunID != runID {
-            // TensorBoard is started by train(); after an agent restart it is down until started again.
-            if !services.contains(where: { $0.name == "tensorboard" && $0.active }) {
-                try? await agent.start("tensorboard", gpus: [], params: ["logdir": .string("/workspace/runs")])
-            }
-            // Retried on every refresh until the full curve arrives.
-            if let history = try? await agent.history(runID: runID), !history.isEmpty {
-                merge(history)
-                historyRunID = runID
-            }
-        }
-        if let point = try await agent.latest(runID: runID) { merge([point]) }
-        if let log = try? await agent.runLog(runID: runID) { logs = log }
-        persist()
-        saveProjectRecord()
-    }
-
-    private func merge(_ incoming: [TrainingPoint]) {
-        var byStep = Dictionary(points.map { ($0.step, $0) }, uniquingKeysWith: { first, _ in first })
-        for point in incoming {
-            byStep[point.step] = point
-        }
-        points = byStep.values.sorted { $0.step < $1.step }
     }
 
     func connectAgent(_ pod: RentedPod) {
@@ -411,6 +409,7 @@ final class GPUWorkspace {
 
     func perform(_ action: @escaping @MainActor () async throws -> Void) async {
         guard !isBusy, !isStopping else { return }
+        operationRevision += 1
         isBusy = true
         let work = Task {
             defer { self.isBusy = false }
@@ -418,118 +417,16 @@ final class GPUWorkspace {
                 try await action()
             } catch is CancellationError {
                 self.message = "Action cancelled. Check the computer status before closing."
-            } catch { self.message = error.localizedDescription }
+            } catch {
+                self.message = error.localizedDescription
+                self.failure = self.message
+            }
         }
         operationTask = work
         await withTaskCancellationHandler {
             await work.value
         } onCancel: {
             work.cancel()
-        }
-    }
-}
-
-// MARK: - Cost guards and stopping
-
-extension GPUWorkspace {
-    func enforceLimits(now: Date = Date()) async throws {
-        guard let saved, hasRunningPod else { return }
-        elapsedCost = max(0, now.timeIntervalSince(saved.started)) / 3600 * saved.hourlyRate
-        let exceededRun = activeBudgetedRun.flatMap { run in
-            run.gpuBudgetUSD.map { currentRunCost(run, podCost: elapsedCost) >= $0 }
-        } == true
-        if elapsedCost >= saved.budget || exceededRun {
-            let stranded = resultNeedsSaving
-            await stopEverything(discardingPendingResult: true)
-            if !hasRunningPod {
-                message = (exceededRun ? "This training run's budget was reached."
-                    : "Your computer's spending limit was reached.") + " The GPU is stopped."
-                    + (stranded ? " Your model and generated files stay on your network storage; rent a computer "
-                        + "on the same storage to retrieve them." : "")
-            }
-        }
-    }
-
-    /// The spending limit enforced on the running pod.
-    var activeBudget: Double? {
-        hasRunningPod ? saved?.budget : nil
-    }
-
-    /// Raises the running pod's limit. The caller confirms with the user first; lowering is refused
-    /// because it could stop the pod the moment it is applied.
-    @discardableResult
-    func raiseBudget(to newBudget: Double) -> Bool {
-        guard var saved, hasRunningPod, newBudget.isFinite, newBudget > saved.budget else {
-            message = "Enter a spending limit above the current one."
-            return false
-        }
-        saved.budget = newBudget
-        self.saved = saved
-        budget = newBudget
-        persist()
-        message = "Spending limit raised to \(StudioMoney.format(newBudget))."
-        return true
-    }
-
-    /// Stops the pod. Refuses, with a message, while a finished LoRA is unsaved unless
-    /// `discardingPendingResult` is set (the budget sets it; the run stays on the volume).
-    func stopEverything(discardingPendingResult: Bool = false) async {
-        guard !isStopping else { return }
-        if !discardingPendingResult, resultNeedsSaving {
-            message = "Your trained model or generated outputs are not saved yet. Retrieve them first, or stop "
-                + "anyway: they stay on your network storage for retrieval from the next computer on that storage."
-            return
-        }
-        isStopping = true
-        defer { isStopping = false }
-        operationTask?.cancel()
-        await operationTask?.value
-        guard let provider, let pod else { return }
-        do {
-            if let current = try? await provider.status(id: pod.id) {
-                self.pod = current
-                persist()
-                if !current.isRunning {
-                    message = "RunPod confirms this computer is stopped. Saved storage remains."
-                    trainingState = "stopped"
-                    return
-                }
-            }
-            // Provider stop also works when the agent is unreachable; it is the final cost control.
-            try await provider.stop(id: pod.id)
-            for _ in 0 ..< 20 {
-                let updated = try await provider.status(id: pod.id)
-                self.pod = updated
-                persist()
-                if !updated.isRunning {
-                    message = "Computer stopped. GPU billing has ended; saved storage remains."
-                    trainingState = "stopped"
-                    return
-                }
-                try await Task.sleep(for: .seconds(1))
-            }
-            message = "Stop was requested, but RunPod has not confirmed it. Keep this window open and retry Stop."
-        } catch {
-            message = "Could not confirm the computer is stopped. Retry Stop or stop it in your RunPod account."
-        }
-    }
-
-    func terminate() async {
-        await stopEverything()
-        guard !hasRunningPod, let provider, let pod else { return }
-        await perform {
-            try await provider.terminate(id: pod.id)
-            let agentSecret = self.saved?.agentSecret ?? ""
-            self.pod = nil
-            self.saved = nil
-            self.agent = nil
-            if !self.demoMode {
-                self.preferences.removeObject(forKey: Self.activePodKey)
-                try self.deleteAgentToken("pod.\(pod.id)")
-            }
-            // A secret left behind is harmless once the pod is gone; launch pruning removes it.
-            if !agentSecret.isEmpty { try? await provider.deleteSecret(name: agentSecret) }
-            self.message = "Computer removed. Your separate network storage remains in RunPod."
         }
     }
 }
@@ -544,8 +441,24 @@ extension GPUWorkspace {
     }
 
     var availableOffers: [GPUOffer] {
-        guard let volume = volumes.first(where: { $0.id == selectedVolume }) else { return [] }
-        return offers.filter { $0.memory >= requiredGPUMemoryGB && $0.isAvailable(in: volume.dataCenter) }
+        let volume = volumes.first { $0.id == selectedVolume }
+        guard selectedVolume.isEmpty || volume != nil else { return [] }
+        return offers.filter { offer in
+            offer.memory >= requiredGPUMemoryGB && offer.secure && offer.maxCount.secure >= gpuCount
+                && offer.price.secure > 0 && (volume.map { offer.isAvailable(in: $0.dataCenter) }
+                    ?? offer.hasAvailableLocation)
+        }
+    }
+
+    var prefersNoSavedStorage: Bool {
+        !demoMode && preferences.bool(forKey: Self.noSavedStorageKey)
+    }
+
+    /// The person's storage choice, remembered across launches like the Settings volume ID.
+    func chooseStorage(_ volumeID: String) {
+        selectedVolume = volumeID
+        if !demoMode { preferences.set(volumeID.isEmpty, forKey: Self.noSavedStorageKey) }
+        selectAvailableOffer()
     }
 
     func selectAvailableOffer() {
@@ -585,11 +498,40 @@ extension GPUWorkspace {
     /// The network volume mounted at /workspace on the current pod.
     var currentVolumeID: String {
         if let volume = saved?.volumeID, !volume.isEmpty { return volume }
-        return pod?.volumeID ?? selectedVolume
+        if let pod { return pod.volumeID ?? "pod:" + pod.id }
+        return selectedVolume
     }
 
     /// Whether the Mac is being kept awake for the running pod.
     var keepsMacAwake: Bool {
         sleepGuard.isHeld
+    }
+}
+
+extension GPUWorkspace {
+    private func updateProgress(_ agent: any PodAgent, services: [AgentService]) async throws {
+        if historyRunID != runID {
+            // TensorBoard is started by train(); after an agent restart it is down until started again.
+            if !services.contains(where: { $0.name == "tensorboard" && $0.active }) {
+                try? await agent.start("tensorboard", gpus: [], params: ["logdir": .string("/workspace/runs")])
+            }
+            // Retried on every refresh until the full curve arrives.
+            if let history = try? await agent.history(runID: runID), !history.isEmpty {
+                merge(history)
+                historyRunID = runID
+            }
+        }
+        if let point = try await agent.latest(runID: runID) { merge([point]) }
+        if let log = try? await agent.runLog(runID: runID) { logs = log }
+        persist()
+        saveProjectRecord()
+    }
+
+    private func merge(_ incoming: [TrainingPoint]) {
+        var byStep = Dictionary(points.map { ($0.step, $0) }, uniquingKeysWith: { first, _ in first })
+        for point in incoming {
+            byStep[point.step] = point
+        }
+        points = byStep.values.sorted { $0.step < $1.step }
     }
 }

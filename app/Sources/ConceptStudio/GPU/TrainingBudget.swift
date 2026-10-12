@@ -5,7 +5,7 @@ extension GPUWorkspace {
     /// Welcome can retain the active global rental while another project is open. The pod's
     /// saved run is its budget source in that case; it is not imported into the other project.
     var activeBudgetedRun: TrainingRun? {
-        guard hasRunningPod, let result, result.state == .training else { return nil }
+        guard hasRunningPod, trainingState != "stopped", let result, result.state == .training else { return nil }
         let run = runHistory.first { $0.runID == result.runID } ?? saved?.run
         guard let run, run.runID == result.runID, run.volumeID == currentVolumeID else { return nil }
         return run

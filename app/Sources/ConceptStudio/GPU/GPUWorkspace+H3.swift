@@ -24,6 +24,31 @@ extension GPUWorkspace {
         nativeRecipe != nil
     }
 
+    var h3RecipeSettings: JSONObject {
+        nativeRecipe?.settings
+            ?? runHistory.first(where: { $0.runID == repeatSourceRunID })?.params["extra"]?.objectValue ?? [:]
+    }
+
+    var h3UsesTrainingAdapter: Bool {
+        h3RecipeSettings["model"]?.objectValue?["use_training_adapter"]?.boolValue ?? true
+    }
+
+    nonisolated static func validateH3Guidance(settings: JSONObject, guidanceLoss: Bool) throws {
+        guard !guidanceLoss || settings["model"]?.objectValue?["use_training_adapter"]?.boolValue == false else {
+            throw StudioError.message("The Circlestone H3 training adapter requires guidance preservation loss "
+                + "to stay off. Import a native recipe with use_training_adapter: false to train without it.")
+        }
+    }
+
+    nonisolated static func validateH3Guidance(_ run: TrainingRun) throws {
+        guard run.isH3 else { return }
+        let settings = run.params["extra"]?.objectValue ?? [:]
+        try validateH3Guidance(
+            settings: settings,
+            guidanceLoss: settings["train"]?.objectValue?["do_guidance_loss"]?.boolValue ?? false
+        )
+    }
+
     var requiredGPUMemoryGB: Int {
         isH3Training ? 96 : Self.minimumGPUMemoryGB
     }
@@ -42,9 +67,15 @@ extension GPUWorkspace {
         }
     }
 
+    /// The starting model a caption profile trains by default: H3 for `h3-`, LTX-2 for `ltx-`, else FLUX.
+    nonisolated static func projectModel(forProfile profile: String) -> String {
+        if profile.hasPrefix("h3-") { return h3BaseModel }
+        return profile.hasPrefix("ltx-") ? "Lightricks/LTX-2" : "black-forest-labs/FLUX.1-dev"
+    }
+
     /// Changes the next run's model; an existing computer keeps its installed trainer image.
     func chooseTrainingModel(_ model: String) {
-        guard !isBusy, !isTraining else { return }
+        guard !isBusy, !isTraining, model != baseModel else { return }
         let neededTrainer = model == "Lightricks/LTX-2" ? "ltx" : "aitoolkit"
         guard !hasRunningPod || trainer == neededTrainer else {
             message = "This computer has a different trainer. Stop and remove it before choosing this model."
@@ -55,7 +86,31 @@ extension GPUWorkspace {
         nativeRecipe = nil
         nativeRecipeOriginal = nil
         initialCheckpoint = nil
+        if isH3Training {
+            checkpointEvery = 300
+            checkpointRetention = 40
+            checkpointPrecision = "float32"
+            guidanceLoss = false
+            guidanceTargetText = "3.5"
+            trainingResolutions = [768, 1024]
+        } else {
+            checkpointEvery = 250
+            checkpointRetention = 4
+            checkpointPrecision = "float16"
+            guidanceLoss = false
+            trainingResolutions = [512]
+        }
         selectAvailableOffer()
+    }
+
+    nonisolated static func validGuidanceTarget(_ value: JSONValue) -> Bool {
+        if let number = value.doubleValue { return number.isFinite && number >= 0 && number <= 20 }
+        if let values = value.arrayValue {
+            return values.count == 2 && values.allSatisfy {
+                $0.doubleValue.map { $0.isFinite && $0 >= 0 && $0 <= 20 } == true
+            }
+        }
+        return false
     }
 
     func importTrainingRecipe(from source: URL) throws {
@@ -81,6 +136,11 @@ extension GPUWorkspace {
         batchSize = recipe.batchSize
         accumulation = recipe.accumulation
         trainingResolutions = recipe.resolutions
+        checkpointEvery = recipe.checkpointEvery
+        checkpointRetention = recipe.checkpointRetention
+        checkpointPrecision = recipe.checkpointPrecision
+        guidanceLoss = recipe.guidanceLoss
+        guidanceTargetText = String(data: recipe.guidanceTarget.pythonDumpsData(), encoding: .utf8) ?? "3.5"
         // Counters and the old target step count never become this new run's target.
         message = "H3 recipe imported. Choose starting LoRA weights to warm-start a new run, "
             + "or train from the base model. Your new training length stays editable."
@@ -120,7 +180,15 @@ extension GPUWorkspace {
                 + "Restore the imported rank or remove the starting weights for a new rank.")
         }
         let canonical = original.deletingLastPathComponent().appendingPathComponent("initial-recipe.json")
-        try JSONValue.object(recipe.settings).pythonDumpsData().write(to: canonical, options: .atomic)
+        // Initializer files bind model/network quality to starting weights. Editable save
+        // and guidance-target settings travel in run.extra, which the published trainer
+        // already merges after the initializer. Keep that existing four-section wire shape.
+        var initializer = recipe.settings
+        initializer.removeValue(forKey: "save")
+        var train = initializer["train"]?.objectValue ?? [:]
+        train.removeValue(forKey: "guidance_loss_target")
+        initializer["train"] = .object(train)
+        try JSONValue.object(initializer).pythonDumpsData().write(to: canonical, options: .atomic)
         return try TrainingInitialization(
             checkpoint: checkpoint,
             recipe: canonical,

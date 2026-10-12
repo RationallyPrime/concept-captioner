@@ -21,6 +21,7 @@ struct LocalTrainingDataset {
 
     static func prepare(projectFolder: URL) async throws -> LocalTrainingDataset {
         let project = try await StudioProject.open(at: projectFolder)
+        try project.job.requireConcepts()
         guard !project.images.isEmpty else { throw StudioError.message("Include training images or clips first.") }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("studio-upload-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

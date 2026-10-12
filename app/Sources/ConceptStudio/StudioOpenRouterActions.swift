@@ -14,6 +14,8 @@ extension StudioSession {
         rememberChoices()
         await openRouter.refresh()
         guard generation == chatGPTWorkGeneration, !demoMode, !busy, !Task.isCancelled else { return }
+        _ = try? await refreshProviderModels(for: "openrouter")
+        guard generation == chatGPTWorkGeneration, !demoMode, !busy, !Task.isCancelled else { return }
         message = openRouter.errorMessage == nil ? "OpenRouter connected. Select a captioning model in Captions." : ""
     }
 }

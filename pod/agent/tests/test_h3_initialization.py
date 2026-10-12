@@ -30,7 +30,8 @@ def initializer(paths):
     (folder / "initial-lora.safetensors").write_bytes(
         struct.pack("<Q", len(header)) + header + bytes(64)
     )
-    recipe = RULES["quality_settings"]()
+    quality = RULES["quality_settings"]()
+    recipe = {section: quality[section] for section in ("model", "network", "train", "dataset")}
     recipe["network"].update(linear=2, linear_alpha=2)
     recipe["network"]["network_kwargs"] = {"only_if_contains": ["blocks.20.attn.out_proj"]}
     (folder / "initial-recipe.json").write_text(json.dumps(recipe))

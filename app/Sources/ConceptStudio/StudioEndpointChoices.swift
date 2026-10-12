@@ -37,22 +37,6 @@ enum ProviderChoices {
     static func defaultModel(for kind: String) -> String {
         all.first { $0.kind == kind }?.defaultModel ?? ""
     }
-
-    /// The model to show after switching provider from `old` to `new`. A model the user typed is
-    /// kept; the new provider's default is offered only when the field is empty or still holds the
-    /// previous provider's default (`previousDefault`, which may differ from the table, e.g. the
-    /// model a rented computer serves).
-    static func model(
-        afterSwitchingFrom old: String,
-        to new: String,
-        current: String,
-        previousDefault: String? = nil,
-        newDefault: String? = nil
-    ) -> String {
-        let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
-        let untouched = trimmed.isEmpty || trimmed == (previousDefault ?? defaultModel(for: old))
-        return untouched ? (newDefault ?? defaultModel(for: new)) : current
-    }
 }
 
 @MainActor
@@ -60,10 +44,29 @@ extension StudioSession {
     static let defaultPodImageName =
         "ghcr.io/rationallyprime/concept-captioner-pod-{trainer}:v0.2.3-clean-20261011"
 
-    func normalizePodImageChoice() {
-        if podImageName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            podImageName = Self.defaultPodImageName
+    /// Builds before 2026-10-12 saved the shipped default image as the training-image preference,
+    /// where it read as a manual override. Once per install, a stored value that is exactly such a
+    /// default (this registry path with the `{trainer}` placeholder, any tag) is cleared to mean
+    /// automatic. Anything else, and anything entered after the migration, is kept.
+    static let podImageMigrationKey = "ConceptStudio.shippedDefaultPodImageCleared"
+
+    nonisolated static func isShippedDefaultPodImage(_ name: String) -> Bool {
+        name.range(
+            of: #"\Aghcr\.io/rationallyprime/concept-captioner-pod-\{trainer\}:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}\z"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private func loadPodImageChoice() {
+        var stored = preferences.string(forKey: "podImage") ?? ""
+        if !preferences.bool(forKey: Self.podImageMigrationKey) {
+            if Self.isShippedDefaultPodImage(stored) {
+                stored = ""
+                preferences.set("", forKey: "podImage")
+            }
+            preferences.set(true, forKey: Self.podImageMigrationKey)
         }
+        podImageName = stored
     }
 
     var vllmTargetURL: String {
@@ -81,8 +84,7 @@ extension StudioSession {
         criticKind = endpointKind
         criticModel = modelName
         customBaseURL = preferences.string(forKey: "vllmBaseURL") ?? ""
-        podImageName = preferences.string(forKey: "podImage") ?? ""
-        normalizePodImageChoice()
+        loadPodImageChoice()
         volumeID = preferences.string(forKey: "volumeID") ?? ""
         requestBaseURL = ""
         criticRequestBaseURL = ""
@@ -96,22 +98,25 @@ extension StudioSession {
     }
 
     /// Call when the captioning provider changes from `old` to `new` (views: `.onChange(of:)`).
-    /// A model the user typed is kept. With ChatGPT sign-in, OpenAI models come from the account.
+    /// Switching resets the model to the new provider's default; with ChatGPT sign-in, OpenAI starts
+    /// on the account's first model.
     func providerChanged(from old: String, to new: String) {
-        guard !(new == "openai" && openAIUsesChatGPT) else { return }
-        modelName = ProviderChoices.model(
-            afterSwitchingFrom: old, to: new, current: modelName,
-            previousDefault: defaultModel(for: old), newDefault: defaultModel(for: new)
-        )
+        guard old != new else { return }
+        if new == "openai", openAIUsesChatGPT {
+            modelName = chatGPT.availableModels.first?.slug ?? ""
+            return
+        }
+        modelName = defaultModel(for: new)
     }
 
     /// Call when the reviewer's provider changes, like `providerChanged(from:to:)`.
     func criticProviderChanged(from old: String, to new: String) {
-        guard !(new == "openai" && openAIUsesChatGPT) else { return }
-        criticModel = ProviderChoices.model(
-            afterSwitchingFrom: old, to: new, current: criticModel,
-            previousDefault: defaultModel(for: old), newDefault: defaultModel(for: new)
-        )
+        guard old != new else { return }
+        if new == "openai", openAIUsesChatGPT {
+            criticModel = chatGPT.availableModels.first?.slug ?? ""
+            return
+        }
+        criticModel = defaultModel(for: new)
     }
 
     func applyJobChoices(_ job: Job) {
@@ -249,13 +254,13 @@ extension StudioSession {
         gpu.datasetContainsVideo = project?.images.contains { Sources.isVideo(Sources.suffix(of: $0.id)) } ?? false
         if !preservingTrainer, !gpu.hasRunningPod, !gpu.hasNativeRecipe,
            ["black-forest-labs/FLUX.1-dev", "Lightricks/LTX-2"].contains(gpu.baseModel) {
-            gpu.trainer = gpu.profile.hasPrefix("ltx-") ? "ltx" : "aitoolkit"
-            if gpu.profile.hasPrefix("h3-") { gpu.baseModel = GPUWorkspace.h3BaseModel }
+            // The model picker's path, so the project's model arrives with that model's checkpoint,
+            // precision and resolution defaults; an unchanged model keeps the values already edited.
+            gpu.chooseTrainingModel(GPUWorkspace.projectModel(forProfile: gpu.profile))
         }
     }
 
     func configureGPU() {
-        normalizePodImageChoice()
         updateTrainingProjectDefaults()
         guard !demoMode else { return }
         do {

@@ -4,8 +4,9 @@ import Foundation
 /// defaults, so a record written by an older build still restores (and stays under budget).
 struct SavedPod: Codable {
     var pod: RentedPod
-    let started: Date
-    let hourlyRate: Double
+    var started: Date
+    var accruedGPUCostUSD = 0.0
+    var hourlyRate: Double
     var budget: Double
     var trainer: String
     var runID: String
@@ -25,6 +26,7 @@ extension SavedPod {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         pod = try values.decode(RentedPod.self, forKey: .pod)
         started = try values.decode(Date.self, forKey: .started)
+        accruedGPUCostUSD = try values.decodeIfPresent(Double.self, forKey: .accruedGPUCostUSD) ?? 0
         hourlyRate = try values.decode(Double.self, forKey: .hourlyRate)
         budget = try values.decode(Double.self, forKey: .budget)
         trainer = try values.decode(String.self, forKey: .trainer)

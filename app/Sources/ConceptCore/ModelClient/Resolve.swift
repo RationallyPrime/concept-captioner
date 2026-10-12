@@ -62,6 +62,15 @@ public struct ResolvedEndpoint: Sendable {
 }
 
 public extension Endpoints {
+    /// The fixed Pydantic AI Gateway proxy origin encoded by a supported gateway key.
+    static func gatewayProxyBaseURL(for apiKey: String) throws -> URL {
+        guard apiKey.range(of: #"^pylf_v[0-9]+_(us|eu)_[a-zA-Z0-9_-]+\z"#, options: .regularExpression) != nil else {
+            throw ConfigurationError("Pydantic AI Gateway key must encode the supported us or eu region")
+        }
+        let region = apiKey.split(separator: "_")[2]
+        return URL(string: "https://gateway-\(region).pydantic.dev/proxy")!
+    }
+
     /// "provider:model" -> EndpointSpec (both sides trimmed, like `str.partition` + `strip`).
     static func parseSpec(_ spec: String) throws -> EndpointSpec {
         guard let colon = spec.firstIndex(of: ":") else {
@@ -103,8 +112,11 @@ public extension Endpoints {
             guard let target = try baseURL(spec) else {
                 throw ConfigurationError("kind vllm needs base_url")
             }
-            let configured = try keys.vllmBaseURL.map(checkBaseURL)
-            if configured.map(Origin.init) != Origin(target) {
+            let credentialMatches = try vllmCredentialMatchesTarget(
+                targetURL: target.absoluteString,
+                configuredBaseURL: keys.vllmBaseURL
+            )
+            if !credentialMatches {
                 apiKey = nil
             }
         }
@@ -198,15 +210,8 @@ public extension Endpoints {
         apiKey: String,
         transport: any HTTPTransport
     ) throws -> any ModelClient {
-        // Match the installed Python provider's key-region inference, using only the documented
-        // production US/EU hosts. No environment, job URL or arbitrary key region chooses a host.
-        guard apiKey.range(of: #"^pylf_v[0-9]+_(us|eu)_[a-zA-Z0-9_-]+\z"#, options: .regularExpression) != nil else {
-            throw ConfigurationError("Pydantic AI Gateway key must encode the supported us or eu region")
-        }
-        let region = apiKey.split(separator: "_")[2]
-        let base = URL(string: region == "us"
-            ? "https://gateway-us.pydantic.dev/proxy"
-            : "https://gateway-eu.pydantic.dev/proxy")!
+        // The key selects only one of the documented production US/EU proxy hosts.
+        let base = try gatewayProxyBaseURL(for: apiKey)
         switch String(spec.kind.dropFirst("gateway/".count)) {
         case "google", "google-cloud":
             return GeminiClient(
@@ -234,6 +239,13 @@ public extension Endpoints {
     private static func baseURL(_ spec: EndpointSpec) throws -> URL? {
         guard let text = spec.baseURL else { return nil }
         return try checkBaseURL(text)
+    }
+
+    /// Whether the configured vLLM credential is allowed for the requested target origin.
+    static func vllmCredentialMatchesTarget(targetURL: String, configuredBaseURL: String?) throws -> Bool {
+        let target = try checkBaseURL(targetURL)
+        let configured = try configuredBaseURL.map(checkBaseURL)
+        return configured.map(Origin.init) == Origin(target)
     }
 
     /// Accept https anywhere, or plain http only to a loopback / private host (Python `check_base_url`).

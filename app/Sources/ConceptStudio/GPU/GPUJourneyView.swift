@@ -21,6 +21,7 @@ struct GPUJourneyView: View {
     /// The journey footer already shows spend and Stop everything; the Welcome sheet does not.
     var showsSpendControls = true
     @State private var confirmTermination = false
+    @State private var confirmDiscardingTermination = false
     @State private var newBudget: Double?
 
     init(session: StudioSession, step: StudioStep, showsSpendControls: Bool = true) {
@@ -56,8 +57,20 @@ struct GPUJourneyView: View {
             Button("Remove computer", role: .destructive) { Task { await workspace.terminate() } }
         } message: {
             Text(
-                "Stopping clears temporary files. Removing deletes the computer. Saved network storage remains."
+                "Removing deletes this computer and its pod disk. Separate network storage remains. "
+                    + workspace.outputCustodyExplanation
             )
+        }
+        .confirmationDialog(
+            "Remove this computer and delete its unsaved outputs?",
+            isPresented: $confirmDiscardingTermination
+        ) {
+            Button("Remove and delete outputs", role: .destructive) {
+                Task { await workspace.terminate(discardingUndeliveredOutputs: true) }
+            }
+        } message: {
+            Text("These are only on this computer's pod disk and cannot be recovered after removal: "
+                + workspace.undeliveredPodOutputs.joined(separator: ", ") + ".")
         }
     }
 
@@ -94,12 +107,16 @@ struct GPUJourneyView: View {
             }
             Divider()
             StudioSection(
-                title: "Persistent storage",
-                subtitle: "Network storage keeps checkpoints after stopping. "
-                    + "It is billed separately, even when stopped."
+                title: "Training storage",
+                subtitle: "Choose reusable network storage or a disk that stays with this computer. "
+                    + "Storage is billed separately, including while stopped."
             ) {
                 Form {
-                    Picker("Saved storage", selection: $workspace.selectedVolume) {
+                    Picker("Saved storage", selection: Binding(
+                        get: { workspace.selectedVolume },
+                        set: { workspace.chooseStorage($0) }
+                    )) {
+                        Text("No saved storage · use this computer’s disk").tag("")
                         ForEach(workspace.volumes) { volume in
                             Text("\(volume.name) · \(volume.size) GB · \(volume.dataCenter)").tag(volume.id)
                         }
@@ -107,6 +124,18 @@ struct GPUJourneyView: View {
                     .disabled(workspace.hasRunningPod)
                     .onChange(of: workspace.selectedVolume) { _, _ in workspace.selectAvailableOffer() }
                 }.formStyle(.columns)
+                if workspace.selectedVolume.isEmpty, !workspace.hasRunningPod {
+                    Text("A 300 GB disk stays with this computer. Stopping keeps your training files; "
+                        + "removing the computer deletes them. The result is pushed "
+                        + "when training finishes if a Hugging Face destination is available, or saved to your Mac. "
+                        + "Temporary system files are cleared when the computer restarts.")
+                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let volume = workspace.volumes.first(where: { $0.id == workspace.selectedVolume }) {
+                    Text("Computer availability is limited to \(volume.dataCenter), where this storage lives.")
+                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                }
                 if workspace.volumes.isEmpty, !workspace.demoMode,
                    let url = URL(string: "https://console.runpod.io/storage") {
                     Link("Create project storage in RunPod", destination: url)
@@ -146,7 +175,9 @@ struct GPUJourneyView: View {
             Form {
                 if workspace.quotedHourlyRate > 0 || workspace.hasRunningPod {
                     LabeledContent("Computer price") {
-                        Text(StudioMoney.perHour(workspace.pod?.cost ?? workspace.quotedHourlyRate))
+                        Text(StudioMoney.perHour(workspace.hasRunningPod
+                                ? workspace.pod?.cost ?? workspace.quotedHourlyRate
+                                : workspace.saved?.hourlyRate ?? workspace.quotedHourlyRate))
                             .font(.headline).monospacedDigit()
                     }
                 }
@@ -178,10 +209,27 @@ struct GPUJourneyView: View {
                 .help("Renting starts GPU billing, so it has no keyboard shortcut.")
             if workspace.pod != nil {
                 if !workspace.hasRunningPod {
-                    Text("Remove this stopped computer before renting another. Saved network storage remains.")
+                    Button("Start this stopped computer · last rate "
+                        + StudioMoney.perHour(workspace.saved?.hourlyRate ?? 0)) {
+                            Task { await workspace.startStoppedComputer() }
+                        }.disabled(workspace.isBusy)
+                    Text(workspace.outputCustodyExplanation)
                         .font(.callout).foregroundStyle(StudioStyle.supportingText)
                 }
-                Button("Remove computer…", role: .destructive) { confirmTermination = true }
+                if workspace.hasUndeliveredPodOutputs, !workspace.hasRunningPod {
+                    Text("Unsaved outputs keep this computer from being removed. "
+                        + workspace.stoppedPodDiskCostExplanation)
+                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                    Button("Remove anyway and delete these outputs…", role: .destructive) {
+                        confirmDiscardingTermination = true
+                    }
+                    .disabled(workspace.isBusy)
+                    .help("Deletes the pod disk with the outputs that were never pushed or saved.")
+                } else {
+                    Button("Remove computer…", role: .destructive) { confirmTermination = true }
+                        .disabled(workspace.hasUndeliveredPodOutputs)
+                        .help("Push or save outputs from a pod disk before removing its computer.")
+                }
             }
         }
     }
@@ -271,11 +319,14 @@ struct GPUJourneyView: View {
                     + "compare saved checkpoints to find the best result."
             ) {
                 Form {
-                    Stepper("Training steps: \(workspace.steps)", value: $workspace.steps, in: 25 ... 10000, step: 25)
+                    TextField("Training steps", value: $workspace.steps, format: .number.grouping(.never))
+                        .help("Enter a positive whole number of training updates, such as 3000.")
+                        .disabled(workspace.isBusy || workspace.isTraining)
                 }.formStyle(.columns)
                 TrainingBudgetView(session: session, workspace: workspace)
                 DisclosureGroup("Advanced training controls") {
-                    advancedTraining.padding(.top, 12).disabled(workspace.isBusy || workspace.isTraining)
+                    AdvancedTrainingControls(workspace: workspace).padding(.top, 12)
+                        .disabled(workspace.isBusy || workspace.isTraining)
                 }
                 Button("Start training", systemImage: "play.fill") {
                     Task { await workspace.train(datasetRepo: datasetRepo, captureLocal: session.captureTrainingInputs)
@@ -302,52 +353,6 @@ struct GPUJourneyView: View {
             Divider()
             RunHistoryView(session: session, workspace: workspace)
         }
-    }
-
-    private var advancedTraining: some View {
-        Form {
-            Picker("Training resolution", selection: $workspace.resolution) {
-                ForEach(GPUWorkspace.resolutionChoices, id: \.self) { Text("\($0) px").tag($0) }
-            }
-            .help("Sets photo training and generated-output resolution. Video dimensions come from approved clips.")
-            if workspace.trainingResolutions.count > 1 {
-                Text("Imported image resolutions: " + workspace.trainingResolutions.map(String.init)
-                    .joined(separator: ", ")
-                    + " px. Changing the resolution picker replaces this set with one resolution.")
-                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
-            }
-            Stepper("LoRA rank: \(workspace.rank)", value: $workspace.rank, in: 1 ... 128)
-                .help("How much detail the small trained add-on can hold. Higher values use more memory.")
-            Stepper("LoRA alpha: \(workspace.alpha)", value: $workspace.alpha, in: 1 ... 128)
-            Stepper("Batch size: \(workspace.batchSize)", value: $workspace.batchSize, in: 1 ... 32)
-            Stepper("Gradient accumulation: \(workspace.accumulation)", value: $workspace.accumulation, in: 1 ... 32)
-            TextField("Learning rate", value: $workspace.learningRate, format: .number)
-                .help("How much the model changes at each step. Keep the default for your first run.")
-            TextField("Triggers", text: $workspace.triggerWords)
-            TextField("Caption profile", text: $workspace.profile)
-            TextField("Training seed", value: $workspace.seed, format: .number)
-            if workspace.datasetContainsVideo, workspace.trainer == "ltx" || workspace.isH3Training {
-                Text(
-                    "Video training uses every frame at the dimensions and rate approved in Images. To change a "
-                        + "clip's dimensions or length, approve its segment again, then caption and publish it. "
-                        + "The trainer refuses hidden cropping or truncation."
-                )
-                .font(.callout).foregroundStyle(StudioStyle.supportingText)
-            }
-            Toggle("Keep a caption model on GPU 0 while training", isOn: $workspace.keepCaptionServer)
-            if workspace.keepCaptionServer { TextField("Caption model", text: $workspace.captionModel) }
-            StudioTermsHelp(terms: [
-                .trainingSteps,
-                .rank,
-                .alpha,
-                .learningRate,
-                .batchSize,
-                .gradientAccumulation,
-                .resolution,
-                .seed,
-                .trigger,
-            ])
-        }.formStyle(.columns)
     }
 
     private var repeatedRun: TrainingRun? {

@@ -16,9 +16,14 @@ the new fix-round decisions recorded in
 Ratification defines the required behavior; it does not claim that pending implementation or
 live verification has completed. Current-source notes include the 2026-10-11 review repairs;
 test results and live acceptance are recorded separately in CORE-STATUS and APP-STATUS.
+The 2026-10-12 rows implement the owner's subsequent walkthrough authorization, rather than
+retroactively extending the earlier ratification date.
 
 | Date | Change | Where |
 | --- | --- | --- |
+| 2026-10-12 | Empty `concepts: []` is a valid unconfigured project; `requireConcepts()` / `require_concepts()` guard captioning and execution, while populated concept validation remains unchanged | Job, Runner, native project workflow |
+| 2026-10-12 | Native folder/media import retains matching text/response sidecars across target renames; text-only captions receive imported provenance, existing human-final records remain protected | Project folder, sidecars |
+| 2026-10-12 | Gemini model identifiers accept and normalize Google's `models/` prefix | GeminiClient |
 | 2026-10-10 | Provider set grows to `vercel` and the Pydantic AI Gateway upstreams | Convention 4, Resolve |
 | 2026-10-10 | Anthropic and Gemini thinking follow the model family (pydantic-ai 2.55 tables), not one fixed mapping | Convention 3, AnthropicClient, GeminiClient |
 | 2026-10-10 | `KeyStore.vllmBaseURL`: the vLLM key is bound to the endpoint the user configured | Resolve |
@@ -406,12 +411,16 @@ public struct Job: Sendable, Equatable {
     /// Not serialized and not part of `==` (equality is the job file's content).
     public var directory: URL? = nil
 
-    /// Validates like `Job._check`: at least one concept, unique triggers, every sample mapping.
+    /// Validates like `Job._check`: unique triggers and every supplied sample mapping.
+    /// Empty concepts describe an unconfigured project. Execution calls requireConcepts().
     public init(skill: String? = nil, profile: String = "h3-still", concepts: [Concept],
                 samples: OrderedDictionary<String, OrderedDictionary<String, String>?> = [:],
                 singleSubjectOnly: Bool = false, endpoints: Endpoints? = nil,
                 captionerThinking: ThinkingLevel = .low, criticThinking: ThinkingLevel = .high,
                 policyOverrides: OrderedDictionary<String, String> = [:]) throws
+
+    /// Refuses execution while the project has no concept; draft load/save remain valid.
+    public func requireConcepts() throws
 
     /// App mapping policy using the existing serialized mapping; no new job fields.
     public var requiresLocatorMapping: Bool { get } // any concept requires a locator
@@ -447,7 +456,9 @@ Validation rules (all `ConfigurationError`, messages as in Python where it has o
   `"\(what) must not contain control characters"`).
 - `traits_to_learn`, `attributes_to_describe`: no blank items.
 - `concurrency` in 1...64.
-- `"a job needs at least one concept"`, `"concept triggers must be unique"`.
+- `"concept triggers must be unique"` remains a load-time validation. Empty `concepts` is a valid
+  draft project; `requireConcepts()` / `require_concepts()` raises `"Add a concept before captioning or training."`
+  before captioning or training. This lets new projects be saved and reopened without a fictional concept.
 - per sample: `"sample '<id>': mapping must name at least one trigger"` (empty mapping),
   `"sample '<id>': unknown triggers [...]"` (sorted), `"sample '<id>': each trigger needs a locator sentence"`,
   `"single_subject_only jobs map exactly one trigger per sample"`.
@@ -1333,6 +1344,10 @@ decides model capabilities (today: the `gemini-3.1-flash-image` thinking levels,
 high]` on the Developer API, the full scale on Vertex). The gateway's Google routes use both
 `bearerAuth: true` and `.vertex`.
 
+The initializer removes one leading `models/` from the model identifier. Both a typed
+`gemini-…` name and the `models/gemini-…` form returned by Google produce the same
+`requestedModel` and request path.
+
 Request: `POST {baseURL}/models/{model}:generateContent`, headers `x-goog-api-key`,
 `Content-Type: application/json`, plus bearer Authorization when `bearerAuth`. Body:
 
@@ -1397,6 +1412,8 @@ public struct ResolvedEndpoint: Sendable {
 extension Endpoints {
     /// "provider:model" -> EndpointSpec; ConfigurationError "endpoint spec must look like provider:model, got '<s>'"
     public static func parseSpec(_ spec: String) throws -> EndpointSpec
+    /// Same origin decision used by captioning and the native model catalog; nil means no trusted origin.
+    public static func vllmCredentialMatchesTarget(targetURL: String, configuredBaseURL: String?) throws -> Bool
 
     public static func resolve(_ spec: String, thinking: ThinkingLevel = .none, keys: any KeyStore,
                                transport: any HTTPTransport = URLSessionTransport()) throws -> ResolvedEndpoint

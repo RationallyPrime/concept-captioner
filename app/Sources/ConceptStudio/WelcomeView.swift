@@ -7,15 +7,22 @@ struct WelcomeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 32) {
+            VStack(alignment: .leading, spacing: 28) {
                 introduction
                 Divider()
-                if !session.recentPaths.isEmpty { recentProjects }
+                workflow
+                Divider()
+                if session.recentPaths.isEmpty {
+                    StudioSection(title: "Your projects") {
+                        Text("Projects you create or open appear here, with their folder locations.")
+                            .foregroundStyle(StudioStyle.supportingText)
+                    }
+                } else { recentProjects }
                 if session.busy { ProgressView(session.message) }
             }
-            .frame(maxWidth: 820, alignment: .leading)
-            .padding(48)
-            .frame(maxWidth: .infinity, minHeight: 650, alignment: .center)
+            .frame(maxWidth: 920, alignment: .leading)
+            .padding(40)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
         .background(StudioStyle.canvas)
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -39,30 +46,67 @@ struct WelcomeView: View {
     }
 
     private var introduction: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            Text("ConceptStudio")
-                .font(.system(size: 36, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .firstTextBaseline, spacing: 20) {
+                Text("ConceptStudio")
+                    .font(.system(size: 36, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                SettingsLink { Label("Accounts & settings", systemImage: "gearshape") }
+                    .help("Connect captioning, publishing and training accounts.")
+                Button("Help", systemImage: "questionmark.circle") { openWindow(id: "help") }
+                    .help("Read the training explanation or look up a term.")
+            }
             Text(
                 "Use your photos or clips to teach an image or video model a person, an object, a style or a movement."
             )
             .fixedSize(horizontal: false, vertical: true)
-            Text("Create a project folder to keep its training data, captions and saved runs together, "
-                + "or open a project you have already started. The Images screen explains the training process.")
+            Text("Each project keeps its examples, captions and training runs in a folder you choose.")
                 .foregroundStyle(StudioStyle.supportingText).fixedSize(horizontal: false, vertical: true)
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 10) { startButtons }
                 VStack(alignment: .leading, spacing: 10) { startButtons }
             }
             .controlSize(.large).disabled(session.busy)
-            Text("The demo walks through every step with practice photos. No accounts, no uploads, no charges.")
+            Text("The demo uses practice photos and simulated training. No account or rented computer is needed.")
                 .font(.callout).foregroundStyle(StudioStyle.supportingText)
                 .fixedSize(horizontal: false, vertical: true)
-            SettingsLink { Label("Accounts & settings", systemImage: "gearshape") }
-                .help("Opens account authorization, saved keys and model connection settings.")
-            Button("ConceptStudio Help", systemImage: "questionmark.circle") { openWindow(id: "help") }
-                .help("Open the training explanation and definitions without opening a project.")
         }
+    }
+
+    private var workflow: some View {
+        HStack(alignment: .top, spacing: 24) {
+            workflowStage(
+                1,
+                title: "Prepare examples",
+                screens: "Images · Concepts · Mapping",
+                detail: "Choose photos or clips and identify the concept you want to train."
+            )
+            Divider()
+            workflowStage(
+                2,
+                title: "Write captions",
+                screens: "Captioning · Review · Publish",
+                detail: "Describe the selected examples, review the text and prepare the training data."
+            )
+            Divider()
+            workflowStage(
+                3,
+                title: "Train and compare",
+                screens: "GPU pods · Training · Monitor",
+                detail: "Choose a computer and budget, run training, then save and try the model."
+            )
+        }.fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func workflowStage(_ number: Int, title: String, screens: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("\(number). \(title)").font(.headline).accessibilityAddTraits(.isHeader)
+            Text(detail).fixedSize(horizontal: false, vertical: true)
+                .foregroundStyle(StudioStyle.supportingText)
+            Text(screens).font(.caption).foregroundStyle(StudioStyle.supportingText)
+                .fixedSize(horizontal: false, vertical: true)
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder private var startButtons: some View {

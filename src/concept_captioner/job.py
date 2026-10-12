@@ -199,13 +199,16 @@ class Job(BaseModel):
     @model_validator(mode="after")
     def _check(self) -> Job:
         triggers = [concept.trigger for concept in self.concepts]
-        if not triggers:
-            raise ValueError("a job needs at least one concept")
         if len(set(triggers)) != len(triggers):
             raise ValueError("concept triggers must be unique")
         for sample_id, mapping in self.samples.items():
             self._check_mapping(sample_id, mapping)
         return self
+
+    def require_concepts(self) -> None:
+        """Reject a draft job when starting work that needs a trigger."""
+        if not self.concepts:
+            raise ConfigurationError("Add a concept before captioning or training.")
 
     def _check_mapping(self, sample_id: str, mapping: dict[str, str] | None) -> None:
         if mapping is None:

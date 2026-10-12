@@ -19,6 +19,18 @@ struct ConceptsView: View {
                     + "Start with one concept. The captions describe everything else in your training data, "
                     + "while a trigger names the concept itself.")
                     .fixedSize(horizontal: false, vertical: true)
+                if concepts.isEmpty {
+                    Text(
+                        "This project is ready for its first concept. "
+                            + "Add one before continuing to captioning or training."
+                    )
+                    .foregroundStyle(StudioStyle.supportingText).fixedSize(horizontal: false, vertical: true)
+                    Button("Add the first concept…", systemImage: "plus") {
+                        editor = EditorSelection(existing: nil)
+                    }
+                    .buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
+                    .disabled(session.busy || session.editing)
+                }
                 if session.demoMode {
                     StudioNotice("The demo starts with the facial identity of one fictional adult. "
                         + "Its original trigger is NORA7. The three synthetic photos vary the clothes, "
@@ -55,7 +67,7 @@ struct ConceptsView: View {
                 .buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
                 .keyboardShortcut(.return, modifiers: .command)
                 .help("Save these concepts and open \(session.nextStep?.title ?? "the next step") (⌘↩)")
-                .disabled(session.project == nil || session.busy || session.editing)
+                .disabled(session.project == nil || concepts.isEmpty || session.busy || session.editing)
             }.padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading)
                 .background(StudioStyle.canvas)
         }
