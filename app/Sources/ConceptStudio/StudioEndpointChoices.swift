@@ -58,7 +58,7 @@ enum ProviderChoices {
 @MainActor
 extension StudioSession {
     static let defaultPodImageName =
-        "ghcr.io/rationallyprime/concept-captioner-pod-{trainer}:v0.2.2-clean-20261011"
+        "ghcr.io/rationallyprime/concept-captioner-pod-{trainer}:v0.2.3-clean-20261011"
 
     func normalizePodImageChoice() {
         if podImageName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

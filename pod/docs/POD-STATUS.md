@@ -1,10 +1,11 @@
 # POD-STATUS
 
-State after the 2026-10-11 source review repairs, with Phase 2 H3 source additions pending
-independent acceptance/publication. The current published tag,
-`v0.2.2-clean-20261011`, is a clean build of `main` at `2789c1d33a4aec015ad1728f24b72be3445e4b8f`
-(the review repairs and the direct dataset upload included) with the repository Dockerfiles and
-no overlay; it has had anonymous pulls by digest and a CPU smoke but no real-pod run yet. The
+State after the 2026-10-11 source review repairs and the Phase 2 H3 source additions. The
+current published tag, `v0.2.3-clean-20261011`, is a clean build of `main` at
+`b79086183bba40e8120f0cba1ee59173f10108a5` (review repairs, direct dataset upload and the H3
+additions included) with the repository Dockerfiles and no overlay; it has had anonymous
+tag-to-digest checks and a CPU smoke (2026-10-12) but no real-pod run yet. The previous clean
+tag `v0.2.2-clean-20261011` (from `2789c1d3`) stays published. The
 earlier clean tag `v0.2.1-clean-20261011` (from `ce52a220`, before those repairs) stays
 published. The real-pod evidence below was gathered on the overnight
 `v0.2.0-overnight20261011-r2` tag (accepted source `98708207`, with two files overlaid onto older
@@ -29,8 +30,8 @@ hash and billing bucket, is in
   local dataset installation, AI Toolkit
   (FLUX/H3) and LTX launchers, LoRA push. The new H3 additions described below are source-only.
 - **podctl** (`pod/podctl`): command-line client for the agent.
-- **Images**, public on GHCR under tag `v0.2.2-clean-20261011` (clean build from commit
-  `2789c1d3`; digests in [images/README](../images/README.md)): `concept-captioner-pod-base`,
+- **Images**, public on GHCR under tag `v0.2.3-clean-20261011` (clean build from commit
+  `b7908618`; digests in [images/README](../images/README.md)): `concept-captioner-pod-base`,
   `-aitoolkit`, `-ltx`; plus a fake image for compose tests. Public RunPod template
   `87fxs5v8fn` points at the base image; it carries no token, and the agent refuses to start
   without one.
@@ -256,7 +257,8 @@ The r2 history: runtime source
 
 ## Open
 
-- **Current baseline versus new H3:** the clean `v0.2.2-clean-20261011` build already includes
+- **Current baseline versus new H3:** `v0.2.3-clean-20261011` now images the H3 source below;
+  it has not run on hosted GPUs. The earlier clean `v0.2.2-clean-20261011` build already included
   the previous review repairs/direct uploads; app RunPod secret references and the macOS CI
   repair are landed. The new H3 initializer/recipe/clip/generator code has not been imaged
   or run on hosted GPUs. Previous direct-upload/cleanup repairs have clean CPU/image proof,

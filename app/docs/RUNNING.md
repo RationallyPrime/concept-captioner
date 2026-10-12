@@ -173,9 +173,9 @@ again when you reopen it; the copied files remain, but the unsubmitted selection
 **Resume latest checkpoint** instead continues a saved run on its original storage using
 that run's checkpoint and state.
 
-The current published `v0.2.2-clean-20261011` image predates these H3 additions. An updated
-AI Toolkit image is required before exercising H3 training or generation; source tests and
-clip inspection do not establish successful GPU execution.
+The default `v0.2.3-clean-20261011` images include these H3 additions. They have not yet run
+H3 training or generation on a rented GPU; source tests and clip inspection do not establish
+successful GPU execution.
 
 With a configured Hub token, publishing sends included training targets and saved sidecars at the dataset root, imagefolder metadata, and
 `concept-captioner/job.yaml` in one Hub commit. The image names remain the shared sample IDs.
@@ -186,7 +186,7 @@ Without a Hub token, Publish shows **Check training data**. It checks the includ
 saved captions locally. **Start training** then captures a temporary immutable copy, uploads
 files directly through the authenticated pod agent and waits for dataset installation before
 launching the trainer. Each file is limited to 2 GiB and the dataset to 20 GiB. Editing is held
-only while the copies are captured. The default `v0.2.2-clean-20261011` agent includes this
+only while the copies are captured. The default `v0.2.3-clean-20261011` agent includes this
 route; older r2 images do not. No Hub dataset account is needed, but access requirements for a
 gated base model such as FLUX.1-dev still apply.
 
