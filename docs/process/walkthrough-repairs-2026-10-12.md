@@ -106,3 +106,26 @@ of provider account checks, new H3 settings, pod-disk restart/retrieval, H3 clip
 warm-start, Resume and matched H3 generation remains distinct from offline fixtures. A stable
 Developer ID certificate and signed sandbox/Photos/bookmark/Keychain acceptance remain required
 for distribution.
+
+## Review follow-ups (2026-10-12)
+
+The owner authorized repairing the PR #6 review findings on this branch.
+
+| Finding | Repair |
+| --- | --- |
+| H3 project defaults | Opening an `h3-` (or `ltx-`) profile project now goes through the model picker's path, so H3 gets 300/40/float32/[768, 1024] with guidance off. Running pods, imported recipes, custom models and preserved trainers are untouched as before. |
+| Stopped pod with unsaved outputs | Removal is still blocked by default; the message states the disk's estimated monthly cost (300 GB at RunPod's published $0.20/GB/month stopped-pod rate, labelled as an estimate). A separate confirmation, naming the runs and comparisons that would be lost, removes the computer anyway. |
+| H3 recipe adapter | A native recipe without `use_training_adapter` uses the adapter only when it names `assistant_lora_path`, as before PR #6. The import writes that choice explicitly; guidance loss stays refused whenever the adapter is on. |
+| Single-file import | Choosing individual images or clips imports without companions when their folder cannot be listed (as in a sandboxed build). Folder import still requires its listing. |
+| Custom-server key check | Settings tests the saved key against the Settings URL only, never a project's server or a rented computer's caption server. |
+| ChatGPT plan notice | The one-time "You're using your ChatGPT plan" alert is shown again in Settings after a first sign-in. |
+| OpenAI model list | Embedding, speech, transcription, image/video generation, moderation, realtime/audio, search and legacy completion models are left out by name; "Other model…" remains. |
+| Provider-change comment | Describes the reset to the new provider's default. |
+| Publishing refusal | The real reason (for example, no images) is shown instead of "Cancelled". |
+| Mapping bulk actions | While the open sample has unconfirmed edits, Accept all skips it and neither Accept all nor Undo replaces the draft. |
+| No saved storage | The explicit choice is remembered across launches; picking a volume, or saving a volume ID in Settings, replaces it. |
+| Training-image preference | Once per install, a stored value exactly matching the shipped default pattern `ghcr.io/rationallyprime/concept-captioner-pod-{trainer}:<tag>` is cleared to Automatic. |
+
+Each behavior change has a focused test. Full local Swift run: 550 tests passed (289 app,
+261 Core); strict SwiftLint and SwiftFormat lint passed. No Python or pod code changed; POD-SPEC
+gained one sentence on the adapter rule.
