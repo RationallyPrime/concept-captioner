@@ -79,4 +79,9 @@ preferences; the stale copy can write an old training image override back.
     the saved key (the same free request that item 6's key check makes), filter it to models that
     accept images (and video for clips) where the provider reports input types, and show it as a
     dropdown with an "Other model…" free-text escape for vLLM, gateways and new names. Switching
-    provider resets the model to that provider's default.
+    provider resets the model to that provider's default. A Gemini model typed as
+    `models/gemini-…` (the form Google lists) must work: strip the `models/` prefix, which the
+    client already adds to the request URL.
+14. **Observation: captioned samples read "Ready".** On Captioning, the 47 imported photos that
+    already have captions show "Ready", the same as uncaptioned ones, though a normal run skips
+    them. Show that they already have a caption (and whether it is final or imported).
