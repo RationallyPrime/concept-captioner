@@ -228,8 +228,9 @@ extension StudioSession {
         gpu.datasetContainsVideo = project?.images.contains { Sources.isVideo(Sources.suffix(of: $0.id)) } ?? false
         if !preservingTrainer, !gpu.hasRunningPod, !gpu.hasNativeRecipe,
            ["black-forest-labs/FLUX.1-dev", "Lightricks/LTX-2"].contains(gpu.baseModel) {
-            gpu.trainer = gpu.profile.hasPrefix("ltx-") ? "ltx" : "aitoolkit"
-            if gpu.profile.hasPrefix("h3-") { gpu.baseModel = GPUWorkspace.h3BaseModel }
+            // The model picker's path, so the project's model arrives with that model's checkpoint,
+            // precision and resolution defaults; an unchanged model keeps the values already edited.
+            gpu.chooseTrainingModel(GPUWorkspace.projectModel(forProfile: gpu.profile))
         }
     }
 

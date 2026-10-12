@@ -318,6 +318,33 @@ struct H3TrainingTests {
         #expect(session.gpu.isH3Training && session.gpu.hasNativeRecipe)
     }
 
+    @MainActor @Test func h3ProjectDefaultsMatchTheModelPickersH3Defaults() async throws {
+        let (preferences, suite) = try temporaryPreferences()
+        defer { preferences.removePersistentDomain(forName: suite) }
+        var project = try await makeDemoProject()
+        defer { try? FileManager.default.removeItem(at: project.directory) }
+        project.job.profile = "h3-image"
+        let session = StudioSession(preferences: preferences, secrets: MemorySecretStore())
+        session.project = project
+        session.updateTrainingProjectDefaults()
+        let gpu = session.gpu
+        #expect(gpu.isH3Training)
+        #expect(gpu.checkpointEvery == 300 && gpu.checkpointRetention == 40)
+        #expect(gpu.checkpointPrecision == "float32" && !gpu.guidanceLoss)
+        #expect(gpu.trainingResolutions == [768, 1024])
+        // Edited values survive a later visit while the project's model is unchanged.
+        gpu.checkpointEvery = 500
+        session.updateTrainingProjectDefaults()
+        #expect(gpu.checkpointEvery == 500)
+        // An LTX project takes the same path and gets the generic defaults back.
+        gpu.chooseTrainingModel("black-forest-labs/FLUX.1-dev")
+        gpu.checkpointPrecision = "float32"
+        session.project?.job.profile = "ltx-video"
+        session.updateTrainingProjectDefaults()
+        #expect(gpu.trainer == "ltx" && gpu.baseModel == "Lightricks/LTX-2")
+        #expect(gpu.checkpointPrecision == "float16" && gpu.trainingResolutions == [512])
+    }
+
     @MainActor @Test func changedModelDuringCaptureCannotBypassH3MemoryAdmission() async throws {
         let (preferences, suite) = try temporaryPreferences()
         defer { preferences.removePersistentDomain(forName: suite) }

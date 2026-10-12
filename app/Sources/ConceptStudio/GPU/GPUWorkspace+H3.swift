@@ -67,6 +67,12 @@ extension GPUWorkspace {
         }
     }
 
+    /// The starting model a caption profile trains by default: H3 for `h3-`, LTX-2 for `ltx-`, else FLUX.
+    nonisolated static func projectModel(forProfile profile: String) -> String {
+        if profile.hasPrefix("h3-") { return h3BaseModel }
+        return profile.hasPrefix("ltx-") ? "Lightricks/LTX-2" : "black-forest-labs/FLUX.1-dev"
+    }
+
     /// Changes the next run's model; an existing computer keeps its installed trainer image.
     func chooseTrainingModel(_ model: String) {
         guard !isBusy, !isTraining, model != baseModel else { return }
