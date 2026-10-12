@@ -890,7 +890,9 @@ directly. H3 app defaults are 300-step saves, 40 retained checkpoints, float32 s
 requires guidance preservation loss to remain off; Advanced shows this requirement. Only
 an imported native recipe with explicit `model.use_training_adapter: false` exposes the
 guidance toggle and target (default 3.5). App import, training and resume reject adapter-on
-(or omitted/default-on) plus guidance-on before transferring inputs. The pod wrapper
+(or omitted/default-on) plus guidance-on before transferring inputs. A native recipe that
+omits `use_training_adapter` used the adapter only if it names `assistant_lora_path`; the
+import writes that actual choice explicitly into the canonical settings. The pod wrapper
 checks the effective merged recipe before downloading model assets. Zero retention keeps all
 checkpoints. FLUX/LTX defaults stay unchanged. Saved precision affects exported weights,
 independently of BF16 training precision. The previous v1 recipe/runtime enabled guidance

@@ -410,10 +410,9 @@ struct H3TrainingTests {
         #expect(workspace.failure?.contains("Circlestone") == true)
     }
 
-    @Test(arguments: ["true", "absent", "assistant"])
-    func nativeRecipeRefusesGuidanceWithExplicitOrDefaultCirclestoneAdapter(_ adapter: String) {
+    @Test(arguments: ["true", "assistant"])
+    func nativeRecipeRefusesGuidanceWithExplicitOrNamedCirclestoneAdapter(_ adapter: String) {
         let replacement = switch adapter {
-        case "absent": ""
         case "assistant": "assistant_lora_path: /old/private/minimax_h3_image_training_adapter.safetensors"
         default: "use_training_adapter: true"
         }
@@ -421,5 +420,20 @@ struct H3TrainingTests {
         #expect(throws: StudioError.self) {
             _ = try NativeTrainingRecipe.load(Data(text.utf8))
         }
+    }
+
+    @Test func nativeRecipeWithoutAnAdapterKeepsTrainingWithoutOne() throws {
+        let text = Self.recipe.replacingOccurrences(of: "use_training_adapter: false", with: "")
+        let recipe = try NativeTrainingRecipe.load(Data(text.utf8))
+        #expect(recipe.settings["model"]?.objectValue?["use_training_adapter"] == .bool(false))
+        #expect(recipe.guidanceLoss)
+        let named = text.replacingOccurrences(of: "do_guidance_loss: true", with: "do_guidance_loss: false")
+            .replacingOccurrences(
+                of: "low_vram: false",
+                with: "low_vram: false\n        assistant_lora_path: /old/minimax_h3_image_training_adapter.safetensors"
+            )
+        let withAdapter = try NativeTrainingRecipe.load(Data(named.utf8))
+        #expect(withAdapter.settings["model"]?.objectValue?["use_training_adapter"] == .bool(true))
+        #expect(!withAdapter.guidanceLoss)
     }
 }

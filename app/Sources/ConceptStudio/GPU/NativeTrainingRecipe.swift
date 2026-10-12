@@ -45,7 +45,10 @@ struct NativeTrainingRecipe {
         var effective = process
         effective["dataset"] = datasets?.first ?? process["dataset"] ?? .object([:])
         var sourceModel = model
-        sourceModel["use_training_adapter"] = model["use_training_adapter"] ?? .bool(true)
+        // A native AI Toolkit recipe names its adapter by path; without one it trained without an
+        // adapter, and the import keeps that rather than adding Circlestone.
+        sourceModel["use_training_adapter"] = model["use_training_adapter"]
+            ?? .bool(model["assistant_lora_path"]?.stringValue?.isEmpty == false)
         effective["model"] = .object(sourceModel)
         let settings = try projectedSettings(effective, model: model)
         let network = process["network"]?.objectValue ?? [:]
