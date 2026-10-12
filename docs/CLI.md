@@ -101,9 +101,30 @@ The job's `endpoints.captioner` is required for `run` unless `--endpoint` suppli
 | `gateway/<upstream>` | `PYDANTIC_AI_GATEWAY_API_KEY`; only the upstreams supported by pydantic-ai and this package are accepted |
 | `vllm` | `base_url` in the endpoint or `VLLM_BASE_URL`; optional `VLLM_API_KEY` |
 
-Hosted providers read credentials from their environment variables. Credentials are not job fields. For an OpenAI-compatible server other than api.openai.com, use `kind: vllm` and `base_url`. Custom URLs must use HTTPS, or HTTP to a loopback/private address or single-label service hostname. The saved `VLLM_API_KEY` is sent only when the destination origin matches the origin configured in `VLLM_BASE_URL`; a job-specified different host receives no authorization header.
+Hosted providers read credentials from their environment variables. Credentials are not job fields. For an OpenAI-compatible server other than api.openai.com, use `kind: vllm` and `base_url`. Custom URLs must use HTTPS, or HTTP to a loopback/private/link-local address, a single-label service hostname, a `.local`/`.internal` hostname, or `localhost.localdomain`. The saved `VLLM_API_KEY` is sent only when the destination origin matches the origin configured in `VLLM_BASE_URL`; a job-specified different host receives no authorization header.
 
 An endpoint may also set `output_mode` (`native`, `prompted` or `tool`), pydantic-ai `settings`, and `concurrency` (1–64; default 4). `captioner_thinking` and `critic_thinking` accept `none`, `minimal`, `low`, `medium`, `high` or `xhigh`. CLI endpoint flags replace the matching job endpoint; other job settings remain in effect.
+
+### Caption on the GPU that will train
+
+On a machine with vLLM installed and enough GPU memory for the chosen vision model, start
+the server in one terminal. This is an example model; vLLM is installed separately from this CLI:
+
+```sh
+vllm serve Qwen/Qwen3-VL-32B-Instruct --port 8000 --max-model-len 16384
+```
+
+In a second terminal on that machine, with the CLI environment active:
+
+```sh
+export VLLM_BASE_URL=http://localhost:8000/v1
+concept-captioner run job.yaml --images ./images --out ./images \
+  --endpoint vllm:Qwen/Qwen3-VL-32B-Instruct
+```
+
+After captioning finishes, press **Ctrl-C** in the server terminal and wait for it to exit
+before starting training on the same GPU. This releases the captioning model's GPU memory.
+For ConceptStudio-managed pods, use the app's GPU controls and the [pod guide](../pod/README.md).
 
 ## Skills and profiles
 
@@ -118,7 +139,7 @@ The bundled profile files are:
 
 Profiles describe caption shape; selecting a profile does not establish that a provider can inspect that media or that a trainer accepts that target. The profile names resolve to files under `references/profiles/` in the selected skill. Set `profile:` in the job, or pass `--profile`; a `.md` path can point at a custom profile. Use `skill:` or `--skill` to choose a skill directory.
 
-The skill body is loaded with any explicitly named references, followed by the profile, `policy_overrides`, the mapped concepts and locators for the sample, and the response contract. The entire instruction set is supplied on each call. Use `show-prompt` to inspect the exact captioner or critic prompt for one sample.
+The skill body is loaded with any explicitly named references, followed by the profile, `policy_overrides`, the mapped concepts and locators for the sample, and the response contract. The entire instruction set is supplied on each call. Use `show-prompt` to inspect the exact captioner or critic instructions for one sample; it does not print the media, user turn or provider output schema.
 
 ## Job fields and path resolution
 
