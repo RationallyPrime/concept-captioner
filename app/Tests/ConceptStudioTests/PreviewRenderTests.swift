@@ -60,7 +60,8 @@ struct PreviewRenderTests {
         await session.task?.value
         #expect(session.errorMessage == nil)
         #expect(session.demoMode)
-        _ = try #require(session.project?.directory)
+        let projectDirectory = try #require(session.project?.directory)
+        #expect(projectDirectory.standardizedFileURL == demoDirectory.standardizedFileURL)
         session.gpu = GPUWorkspace(demoMode: true, preferences: preferences)
         await prewarmThumbnails(session.project?.images.map(\.url) ?? [])
         for step in StudioStep.allCases {

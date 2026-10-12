@@ -65,7 +65,8 @@ GPU run.
 
 - Full local Swift run: 540 tests passed (279 app tests and 261 Core tests). The later Help/search
   changes passed a focused 30-test run; final native UI changes compiled in the rebuilt app.
-- Python reference: 118 tests passed. Pod scripts: 315 tests passed. Strict SwiftLint, SwiftFormat,
+- Python reference: 118 tests passed. Pod scripts: 315 tests passed. The full pod-agent suite passed with one skip after its
+  initializer fixture was restricted to the canonical four sections. Strict SwiftLint, SwiftFormat,
   Ruff checks/format checks and `git diff --check` passed. Release packaging without a Developer
   ID correctly refuses before building; shell syntax validation passed.
 - Independent source reviews covered accounts, project/import/mapping, GPU/training, the glossary,
@@ -73,7 +74,8 @@ GPU run.
 - Actual SwiftUI offscreen rendering covered all nine journey screens, Welcome, Settings,
   concept/media editors, Help, both glossary reading levels, Advanced training, account states,
   empty states and progress/results states in light/dark and minimum/default sizes. The main pass
-  produced 126 PNGs; bounded later captures cover changed Help, training and navigation states.
+  produced 126 PNGs; 16 later captures cover Help/training and eight cover navigation/empty
+  captioning. A final isolated renderer run also produced 126 PNGs and proved its unique demo path.
 - In the running rebuilt app, all nine sidebar rows were selectable. The native demo completed
   captions, review, simulated publication, simulated rental/training, saved-result history and
   Stop. The computer ended Stopped and its run Finished. Concepts' command-return action worked;
@@ -88,7 +90,9 @@ GPU run.
   caption row was below the offscreen capture's viewport, so failure-layout acceptance comes from
   the native check. Offscreen video frames do not establish video playback.
 - Remote CI, including the older runner Swift compiler, is checked on the pull request separately
-  from these local receipts. No local pass is presented as a remote result.
+  from these local receipts. The first remote pass caught two pod-agent fixtures constructing a
+  five-section initializer; the fixtures were repaired without widening the four-section contract.
+  No local pass is presented as a remote result.
 
 The rebuilt preview is `app/dist/ConceptStudio.app` in the owner's primary checkout. It contains
 this branch's application changes even while source integration awaits the pull request.
