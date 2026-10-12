@@ -349,7 +349,7 @@ struct HubClientTests {
         let batch = try StubTransport.body(of: requests[1])
         #expect(requests[1].value(forHTTPHeaderField: "Accept") == "application/vnd.git-lfs+json")
         #expect(batch["operation"] as? String == "upload" && batch["hash_algo"] as? String == "sha256")
-        #expect(batch["transfers"] as? [String] == ["basic", "multipart"])
+        #expect(batch["transfers"] as? [String] == ["basic"], "multipart is never advertised")
         let objects = try #require(batch["objects"] as? [[String: Any]])
         #expect(objects.count == 1 && objects[0]["oid"] as? String == bigOID && objects[0]["size"] as? Int == big.count)
 
@@ -399,7 +399,8 @@ struct HubClientTests {
                 message: "m"
             )
         }
-        #expect(multipart?.localizedDescription == "unsupported: multipart LFS upload (> 5 GB) is not supported")
+        #expect(multipart?
+            .localizedDescription == "unsupported: multipart upload requested; only files under 5 GB are supported")
         let batch = try StubTransport.body(of: #require(await transport.requests.last))
         #expect((batch["objects"] as? [[String: Any]])?.count == 1, "the ignored file never reaches the LFS batch")
 

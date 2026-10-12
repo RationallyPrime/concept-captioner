@@ -381,7 +381,10 @@ public struct HubClient: Sendable {
         request.setValue(HubClient.lfsMediaType, forHTTPHeaderField: "Content-Type")
         request.httpBody = JSONValue.object([
             "operation": .string("upload"),
-            "transfers": .array([.string("basic"), .string("multipart")]),
+            // Only single-request uploads: the Hub then answers every object below its 5 GB
+            // single-PUT ceiling with a basic upload. Advertising multipart made it hand back
+            // chunked uploads for ordinary files (a 16 MB photo), which this client does not do.
+            "transfers": .array([.string("basic")]),
             "objects": .array(objects.map { .object(["oid": .string($0.oid), "size": .int($0.size)]) }),
             "hash_algo": .string("sha256"),
         ]).pythonDumpsData()
@@ -403,7 +406,7 @@ public struct HubClient: Sendable {
             // No actions: the server already stores this object.
             guard let upload = object["actions"]?.objectValue?["upload"]?.objectValue else { continue }
             if upload["header"]?.objectValue?["chunk_size"] != nil {
-                throw HubError.unsupported("multipart LFS upload (> 5 GB) is not supported")
+                throw HubError.unsupported("multipart upload requested; only files under 5 GB are supported")
             }
             let uploadAction = try LFSAction(upload, named: "upload", in: entry)
             var verifyAction: LFSAction?
