@@ -1,9 +1,19 @@
 import ConceptCore
 import SwiftUI
 
+private struct ProviderModelRefreshIdentity: Equatable {
+    let cacheKey: ProviderModelCacheKey
+    let usesChatGPT: Bool
+}
+
 struct CaptioningView: View {
     @Bindable var session: StudioSession
     @State private var overwrite = false
+    @State private var refreshingModels = false
+    @State private var catalogRequestGeneration = 0
+    @State private var modelCatalogStatus: String?
+    @State private var testingConnection = false
+    @State private var connectionTestStatus: String?
 
     var captionFormatSelection: Binding<String> {
         Binding(
@@ -32,16 +42,51 @@ struct CaptioningView: View {
                                 title: "Model", model: $session.modelName, models: session.chatGPT.availableModels
                             ).disabled(session.busy)
                         } else {
-                            TextField("Model", text: $session.modelName)
-                                .help(
-                                    "Use the model identifier from your provider. "
-                                        + "A gateway can use many models with one key."
-                                )
+                            ProviderModelPicker(
+                                title: "Model",
+                                providerKind: session.endpointKind,
+                                model: $session.modelName,
+                                choices: availableModels,
+                                isRefreshing: refreshingModels,
+                                refresh: { Task { await refreshModels(force: true) } }
+                            ).disabled(session.busy)
                         }
                         Picker("Caption format", selection: captionFormatSelection) {
                             ForEach(profiles, id: \.self) { Text(profileTitle($0)).tag($0) }
                         }.disabled(session.demoMode)
-                    }.formStyle(.columns)
+                    }.formStyle(.columns).disabled(session.busy)
+                    if !session.demoMode && !(session.endpointKind == "openai" && session.openAIUsesChatGPT) {
+                        if let modelCatalogStatus {
+                            Text(modelCatalogStatus)
+                                .font(.callout)
+                                .foregroundStyle(StudioStyle.supportingText)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    HStack(spacing: 12) {
+                        Button(testingConnection ? "Testing connection…" : "Test captioning connection") {
+                            testConnection()
+                        }
+                        .disabled(session.busy || session.editing || refreshingModels)
+                        .help(
+                            "Sends a small request with the selected account and model. It uses that account’s credits "
+                                + "or ChatGPT allowance, but saves no project captions."
+                        )
+                        if testingConnection {
+                            ProgressView().controlSize(.small)
+                            Button("Cancel test") { session.cancel() }
+                                .help("Cancels the request. The test never writes project captions.")
+                        } else if let connectionTestStatus {
+                            Label(
+                                connectionTestStatus,
+                                systemImage: connectionTestStatus == "Connection succeeded."
+                                    ? "checkmark.circle"
+                                    : "exclamationmark.triangle"
+                            )
+                            .font(.callout)
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                     if session.demoMode {
                         Text("The demo uses prepared FLUX captions, so its format stays fixed. "
                             + "In a real project, choose the format your training model expects.")
@@ -57,6 +102,7 @@ struct CaptioningView: View {
                     )
                     .font(.callout).foregroundStyle(StudioStyle.supportingText)
                     Toggle("Have a second model check the caption", isOn: $session.useCritic)
+                        .disabled(session.busy)
                     if session.useCritic {
                         Form {
                             Picker("Reviewer provider", selection: $session.criticKind) {
@@ -76,7 +122,7 @@ struct CaptioningView: View {
                                     text: $session.criticRequestBaseURL
                                 )
                             }
-                        }.formStyle(.columns)
+                        }.formStyle(.columns).disabled(session.busy)
                         Text(
                             "The reviewer can reject a caption with notes. "
                                 + "It reads the same target, can request a revision and check it again, "
@@ -106,7 +152,7 @@ struct CaptioningView: View {
                             Text("A skill folder supplies the caption-writing instructions and its available formats.")
                                 .font(.callout).foregroundStyle(StudioStyle.supportingText)
                         }.padding(.top, 12)
-                    }
+                    }.disabled(session.busy)
                     DisclosureGroup("Advanced model and batch controls") {
                         Form {
                             Picker("Thinking effort", selection: $session.modelThinking) {
@@ -131,8 +177,8 @@ struct CaptioningView: View {
                             Text("Final captions are always protected. Turn this on to replace earlier model captions.")
                                 .font(.caption).foregroundStyle(StudioStyle.supportingText)
                         }.formStyle(.columns).padding(.top, 12)
-                    }
-                }.disabled(session.busy)
+                    }.disabled(session.busy)
+                }
                 Divider()
                 DisclosureGroup("Optional: caption on a rented computer") {
                     VStack(alignment: .leading, spacing: 14) {
@@ -171,6 +217,21 @@ struct CaptioningView: View {
                             symbol: "person.crop.rectangle"
                         )
                     }
+                    if session.unprotectedImportedCount > 0 {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(
+                                "\(session.unprotectedImportedCount) imported captions can be replaced "
+                                    + "when overwrite is on."
+                            )
+                            .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                            .fixedSize(horizontal: false, vertical: true)
+                            Button("Protect imported captions", systemImage: "lock") {
+                                session.protectImportedCaptions()
+                            }
+                            .disabled(session.busy || session.editing || session.demoMode)
+                            .help("Mark all imported captions as final so captioning runs skip them.")
+                        }
+                    }
                     if session.project?.images.isEmpty == true {
                         ContentUnavailableView(
                             "Import images or clips first",
@@ -180,7 +241,6 @@ struct CaptioningView: View {
                     }
                     LazyVStack(alignment: .leading, spacing: 14) {
                         ForEach(session.project?.images ?? []) { image in
-                            let status = captionStatus(for: image)
                             HStack(alignment: .top, spacing: 14) {
                                 PhotoView(url: image.url).frame(width: 72, height: 64)
                                     .background(StudioStyle.surface, in: RoundedRectangle(cornerRadius: 6))
@@ -188,8 +248,8 @@ struct CaptioningView: View {
                                     Text(image.id).font(.headline).textSelection(.enabled)
                                         .fixedSize(horizontal: false, vertical: true)
                                     Label(
-                                        status.title,
-                                        systemImage: status.symbol
+                                        image.captionState.label,
+                                        systemImage: image.captionState.symbol
                                     )
                                     .font(.callout)
                                     if let partial = session.partialCaptions[image.id], !partial.isEmpty {
@@ -220,6 +280,16 @@ struct CaptioningView: View {
         .onChange(of: session.openAIUsesChatGPT) { _, _ in session.rememberChoices() }
         .onChange(of: session.endpointKind) { old, new in session.providerChanged(from: old, to: new) }
         .onChange(of: session.criticKind) { old, new in session.criticProviderChanged(from: old, to: new) }
+        .onChange(of: session
+            .providerModelChoices[session.providerModelCacheKey(for: session.endpointKind)]) { _, models in
+                modelCatalogStatus = models.map { "\($0.count) models listed." }
+        }
+        .onChange(of: modelCatalogTaskID) { _, _ in
+            catalogRequestGeneration &+= 1
+            refreshingModels = false
+            modelCatalogStatus = nil
+        }
+        .task(id: modelCatalogTaskID) { await refreshModels() }
     }
 
     private var captionAction: some View {
@@ -242,11 +312,23 @@ struct CaptioningView: View {
     }
 
     private var captionCost: String {
+        if session.project?.images.isEmpty != false {
+            return "No images or clips are included. Include at least one on Images before captioning."
+        }
         if session.demoMode { return "Shows prepared captions. No model request or charge." }
         if session.usesChatGPTForThisRun {
             return "OpenAI requests use your ChatGPT plan. Any other provider uses its own account credits."
         }
         return "Uses your provider account credits. Hosted captioning needs no rented GPU."
+    }
+
+    private var availableModels: [ProviderModelChoice] {
+        ProviderModelCatalog.forCaptioning(
+            session.providerModelChoices[session.providerModelCacheKey(for: session.endpointKind)] ?? [],
+            includesVideo: session.project?.images.contains {
+                Sources.isVideo(Sources.suffix(of: $0.id))
+            } == true
+        )
     }
 
     private var profiles: [String] {
@@ -263,17 +345,87 @@ struct CaptioningView: View {
             "plain": "Plain prose",
         ][profile] ?? profile
     }
+}
 
-    private func captionStatus(for image: ProjectImage) -> (title: String, symbol: String) {
-        if image.isFinal { return ("Final · protected", "lock.fill") }
-        switch image.status {
-        case .written: return ("Written", "checkmark.circle")
-        case .skipped: return ("Skipped", "arrow.right.circle")
-        case .needsMapping: return ("Needs mapping", "person.crop.rectangle")
-        case .unusable: return ("Unusable", "exclamationmark.triangle")
-        case .rejected: return ("Rejected", "hand.raised")
-        case .failed: return ("Failed", "exclamationmark.circle")
-        case nil: return ("Ready", "circle")
+private extension CaptioningView {
+    var modelCatalogTaskID: ProviderModelRefreshIdentity {
+        ProviderModelRefreshIdentity(
+            cacheKey: session.providerModelCacheKey(for: session.endpointKind),
+            usesChatGPT: session.openAIUsesChatGPT
+        )
+    }
+
+    @MainActor
+    func refreshModels(force: Bool = false) async {
+        guard !session.demoMode, !(session.endpointKind == "openai" && session.openAIUsesChatGPT) else { return }
+        let kind = session.endpointKind
+        let cacheKey = session.providerModelCacheKey(for: kind)
+        let requestID = modelCatalogTaskID
+        if !force, let models = session.providerModelChoices[cacheKey] {
+            modelCatalogStatus = "\(models.count) models listed."
+            return
         }
+        modelCatalogStatus = nil
+        catalogRequestGeneration &+= 1
+        let generation = catalogRequestGeneration
+        refreshingModels = true
+        defer {
+            if generation == catalogRequestGeneration { refreshingModels = false }
+        }
+        do {
+            let models = try await session.refreshProviderModels(for: kind)
+            try Task.checkCancellation()
+            guard requestID == modelCatalogTaskID else { return }
+            modelCatalogStatus = "\(models.count) models listed."
+        } catch is CancellationError {
+            // A provider switch cancels the previous catalog request.
+        } catch {
+            if requestID == modelCatalogTaskID { modelCatalogStatus = error.localizedDescription }
+        }
+    }
+
+    @MainActor
+    func testConnection() {
+        connectionTestStatus = nil
+        testingConnection = true
+        let generation = session.chatGPTWorkGeneration
+        let started = session.perform("Testing captioning connection…") {
+            defer { testingConnection = false }
+            do {
+                if session.demoMode {
+                    connectionTestStatus = "Demo connection works locally; no key or network used."
+                    return
+                }
+                if session.endpointKind == "openai", session.openAIUsesChatGPT {
+                    await session.prepareChatGPTModels(duringConnectionTest: true)
+                    try Task.checkCancellation()
+                    guard generation == session.chatGPTWorkGeneration, !session.demoMode else {
+                        throw CancellationError()
+                    }
+                    if session.chatGPT.availableModels.isEmpty, let issue = session.chatGPT.errorMessage {
+                        throw StudioError.message(issue)
+                    }
+                }
+                let endpoint = try session.endpoint()
+                _ = try await endpoint.client.request(
+                    instructions: "Return a Caption object with caption set to connected.",
+                    messages: [.user("Test connection")],
+                    output: OutputRequest(
+                        name: Caption.schemaName,
+                        schema: Caption.jsonSchema,
+                        mode: endpoint.outputMode
+                    ),
+                    settings: endpoint.settings
+                )
+                connectionTestStatus = "Connection succeeded."
+                session.message = "Captioning connection succeeded."
+            } catch is CancellationError {
+                connectionTestStatus = "Test cancelled. No project captions were written."
+            } catch {
+                connectionTestStatus = StudioSession.describe(error)
+                session.message = "Captioning connection test failed."
+            }
+        }
+        if !started { testingConnection = false }
     }
 }

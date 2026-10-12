@@ -11,6 +11,11 @@ struct NativeTrainingRecipe {
     let learningRate: Double
     let batchSize: Int
     let accumulation: Int
+    let checkpointEvery: Int
+    let checkpointRetention: Int
+    let checkpointPrecision: String
+    let guidanceLoss: Bool
+    let guidanceTarget: JSONValue
     let resolutions: [Int]
     var resolution: Int {
         resolutions.max() ?? 512
@@ -40,8 +45,7 @@ struct NativeTrainingRecipe {
         var effective = process
         effective["dataset"] = datasets?.first ?? process["dataset"] ?? .object([:])
         var sourceModel = model
-        sourceModel["use_training_adapter"] = model["use_training_adapter"]
-            ?? .bool(model["assistant_lora_path"]?.stringValue?.isEmpty == false)
+        sourceModel["use_training_adapter"] = model["use_training_adapter"] ?? .bool(true)
         effective["model"] = .object(sourceModel)
         let settings = try projectedSettings(effective, model: model)
         let network = process["network"]?.objectValue ?? [:]
@@ -50,6 +54,26 @@ struct NativeTrainingRecipe {
         let rank = network["linear"]?.intValue ?? 16
         let alpha = network["linear_alpha"]?.intValue ?? rank
         let lr = train["lr"]?.doubleValue ?? 0.0001
+        let save = process["save"]?.objectValue ?? [:]
+        guard save["save_every"] == nil || save["save_every"]?.intValue != nil,
+              save["max_step_saves_to_keep"] == nil || save["max_step_saves_to_keep"]?.intValue != nil,
+              save["dtype"] == nil || save["dtype"]?.stringValue != nil,
+              train["do_guidance_loss"] == nil || train["do_guidance_loss"]?.boolValue != nil else {
+            throw StudioError.message("The imported save and guidance fields have unsupported types. "
+                + "No settings were replaced.")
+        }
+        let checkpointEvery = save["save_every"]?.intValue ?? 300
+        let checkpointRetention = save["max_step_saves_to_keep"]?.intValue ?? 40
+        let checkpointPrecision = save["dtype"]?.stringValue ?? "float32"
+        let guidanceLoss = train["do_guidance_loss"]?.boolValue ?? false
+        let guidanceTarget = train["guidance_loss_target"] ?? .double(3.5)
+        try GPUWorkspace.validateH3Guidance(settings: settings, guidanceLoss: guidanceLoss)
+        guard checkpointEvery > 0, checkpointRetention >= 0,
+              ["float16", "float32", "bfloat16", "fp16", "fp32", "bf16"].contains(checkpointPrecision),
+              GPUWorkspace.validGuidanceTarget(guidanceTarget) else {
+            throw StudioError.message("The imported checkpoint cadence, retention, saved precision or guidance target "
+                + "is unsupported. No settings were replaced.")
+        }
         let batch = train["batch_size"]?.intValue ?? 1
         let accumulation = train["gradient_accumulation_steps"]?.intValue
             ?? train["gradient_accumulation"]?.intValue ?? 1
@@ -68,11 +92,12 @@ struct NativeTrainingRecipe {
         }
         return NativeTrainingRecipe(
             settings: settings,
-            rank: rank,
-            alpha: alpha,
-            learningRate: lr,
-            batchSize: batch,
-            accumulation: accumulation,
+            rank: rank, alpha: alpha, learningRate: lr, batchSize: batch, accumulation: accumulation,
+            checkpointEvery: checkpointEvery,
+            checkpointRetention: checkpointRetention,
+            checkpointPrecision: checkpointPrecision,
+            guidanceLoss: guidanceLoss,
+            guidanceTarget: guidanceTarget,
             resolutions: resolutions
         )
     }
@@ -102,7 +127,7 @@ struct NativeTrainingRecipe {
             return result
         }
         var settings: JSONObject = [:]
-        for section in ["model", "network", "train", "dataset"] {
+        for section in ["model", "network", "train", "dataset", "save"] {
             settings[section] = try .object(filtered(effective[section]?.objectValue ?? [:], section: section))
         }
         return settings

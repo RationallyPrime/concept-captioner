@@ -2,14 +2,59 @@ import AppKit
 import SwiftUI
 
 struct StudioDefinitionView: View {
+    @State private var selected: StudioTerm
+
+    init(term: StudioTerm) {
+        _selected = State(initialValue: term)
+    }
+
+    var body: some View {
+        ScrollView {
+            StudioDefinitionContent(term: selected) { selected = $0 }.padding(20)
+        }
+        .frame(width: 430, height: 440)
+        .disclosureGroupStyle(StudioDisclosureStyle())
+    }
+}
+
+struct StudioDefinitionContent: View {
     let term: StudioTerm
+    let select: (StudioTerm) -> Void
+    @AppStorage("studio.glossaryReadingLevel") private var level = GlossaryReadingLevel.plain
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(term.title).font(.headline).accessibilityAddTraits(.isHeader)
-            Text(term.definition).foregroundStyle(StudioStyle.supportingText)
-                .fixedSize(horizontal: false, vertical: true)
-        }.padding(20).frame(width: 340, alignment: .leading)
+            Text(term.title).font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
+            Picker("Explanation", selection: $level) {
+                ForEach(GlossaryReadingLevel.allCases) { Text($0.title).tag($0) }
+            }.pickerStyle(.segmented).labelsHidden().accessibilityLabel("Explanation detail")
+            Text(level == .plain ? term.definition : term.technicalDefinition)
+                .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                .lineSpacing(3)
+            if level == .technical, term.entry.definitionScope == "concept_studio" {
+                Text("ConceptStudio terminology")
+                    .font(.caption).foregroundStyle(StudioStyle.supportingText)
+                    .help("This entry explains the product's usage; it is not a universal technical convention.")
+            }
+            if !term.related.isEmpty {
+                Divider().padding(.top, 4)
+                Text("Related terms").font(.headline)
+                ForEach(term.related) { related in
+                    Button(related.title) { select(related) }.buttonStyle(.link)
+                        .help("Read the definition of \(related.title).")
+                }
+            }
+            if !term.sources.isEmpty {
+                DisclosureGroup("Sources") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(term.sources) { source in
+                            Link(source.title, destination: source.url)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }.padding(.top, 6)
+                }
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

@@ -36,6 +36,7 @@ public struct Runner: Sendable {
         concurrency: Int? = nil,
         overwrite: Bool = false
     ) throws {
+        try job.requireConcepts()
         let loadedSkill = try skill ?? Skills.load(path: job.skill, relativeTo: job.directory)
         let profileName = profile ?? job.profile
         let inFlight = concurrency ?? captioner.concurrency

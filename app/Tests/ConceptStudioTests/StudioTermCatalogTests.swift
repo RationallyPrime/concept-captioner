@@ -6,12 +6,44 @@ import Testing
 @MainActor
 struct StudioTermCatalogTests {
     @Test func searchFindsNamesAndOperationalMeaningWithoutAProject() {
-        #expect(StudioTerm.search("  VRAM  ").contains(.vram))
-        #expect(StudioTerm.search("optimizer").contains(.checkpoint))
-        #expect(StudioTerm.search("already completed steps").contains(.resume))
-        #expect(StudioTerm.search("h3").contains(.fps))
+        #expect(StudioTerm.search("  VRAM  ").first == .vram)
+        #expect(StudioTerm.search("LoRA").first == .lora)
+        #expect(StudioTerm.search("class noun").first == .classNoun)
+        #expect(StudioTerm.search("optimization").contains(.checkpoint))
+        #expect(StudioTerm.search("resume").contains(.resume))
+        #expect(StudioTerm.search("frames per second").contains(.fps))
         #expect(StudioTerm.search("no-such-definition-837").isEmpty)
         #expect(StudioTerm.search(" ").contains(.apiKey))
+    }
+
+    @Test func suppliedGlossaryKeepsBothReadingsAliasesAndValidLearningPaths() throws {
+        let glossary = StudioGlossaryCatalog.supplied
+        #expect(glossary.entryCount == 177)
+        #expect(glossary.entries.count == glossary.entryCount)
+        #expect(glossary.sections.count == 11)
+        #expect(glossary.sources.count == 81)
+        let entryIDs = Set(StudioTerm.allCases.map(\.rawValue))
+        let sections = Set(StudioGlossaryCatalog.allSections.map(\.id))
+        let sources = Set(glossary.sources.map(\.id))
+        #expect(entryIDs.count == StudioGlossaryCatalog.allEntries.count)
+        for step in StudioStep.allCases {
+            #expect(Set(step.definitionTerms).count == step.definitionTerms.count)
+        }
+        for entry in StudioGlossaryCatalog.allEntries {
+            #expect(!entry.plainLanguage.isEmpty && !entry.goodStuff.isEmpty)
+            #expect(sections.contains(entry.sectionId))
+            #expect(Set(entry.relatedTerms).isSubset(of: entryIDs))
+            #expect(Set(entry.sourceIds).isSubset(of: sources))
+        }
+        #expect(StudioTerm.search("low-rank adaptation").contains(.lora))
+        #expect(StudioTerm.search("trigger token").contains(.trigger))
+        #expect(StudioTerm.search("α/√r").contains(.alpha))
+        #expect(StudioTerm.checkpoint.related.contains(.resume))
+        #expect(StudioTerm(rawValue: "not-a-term") == nil)
+        let variant = try #require(StudioTerm(rawValue: "model-variant"))
+        #expect(variant.entry.definitionScope == "concept_studio")
+        #expect(variant.technicalDefinition.contains("checkpoint"))
+        #expect(GlossaryReadingLevel.technical.title == "Show me the good stuff")
     }
 
     @Test func operationalTermsRenderNativeLinksAndDispatchTheirCatalogIdentity() throws {

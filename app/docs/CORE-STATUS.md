@@ -1,6 +1,6 @@
 # CORE-STATUS
 
-State of ConceptCore, the Swift captioning library, after the 2026-10-11 review repairs;
+State of ConceptCore, the Swift captioning library, including the 2026-10-12 walkthrough integration;
 earlier live checks date from lab commit `e620882` (2026-10-10); the approved-video
 Gemini proof below is from 2026-10-11. The
 contract is [CORE-SPEC.md](CORE-SPEC.md). The day-by-day record is in
@@ -23,6 +23,16 @@ All nine modules of CORE-SPEC, with focused tests:
   response records, skip of human-final captions; cancellation drains before returning.
 - **Sources and sinks:** local folder, sidecar sink; Hub client with LFS upload and verify,
   imagefolder source and sink.
+
+## Walkthrough contract changes, 2026-10-12
+
+- Empty `concepts: []` loads and saves as an unconfigured project in both languages.
+  The runner refuses execution until a concept is defined; populated concept validation is unchanged.
+- The native Gemini client normalizes Google’s `models/` prefix. The provider catalog UI
+  uses read-only model lists separately from paid caption execution.
+- Native media import now preserves matching caption and response sidecars through file
+  renaming/normalization; text-only captions retain imported status, and human-final records
+  retain their protection. The serialized job and sidecar formats remain shared with the CLI.
 
 ## Overnight extensions
 
@@ -66,8 +76,8 @@ All nine modules of CORE-SPEC, with focused tests:
 
 ## Verified offline only
 
-- **260 Core tests in 38 suites pass** in the latest walkthrough/H3/help integration gate. The Python
-  reference suite passes **117 tests**, including the H3 clip-profile addition after the
+- **261 Core tests in 38 suites pass** in the 2026-10-12 walkthrough/glossary integration gate. The Python
+  reference suite passes **118 tests**, including the H3 clip-profile addition after the
   mixed-metadata and unrelated-Parquet closures. These are offline
   checks. Native-media and category cases include exact video bytes, 24 fps metadata,
   OpenRouter/vLLM video wire bodies, encoded-size refusal and all seven categories in both

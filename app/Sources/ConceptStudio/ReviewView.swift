@@ -213,11 +213,9 @@ struct ReviewView: View {
                 }
             }.formStyle(.columns)
         }
-        .onChange(of: choice.wrappedValue.kind) { old, new in
+        .onChange(of: choice.wrappedValue.kind) { _, new in
             guard !(new == "openai" && session.openAIUsesChatGPT) else { return }
-            choice.wrappedValue.model = ProviderChoices.model(
-                afterSwitchingFrom: old, to: new, current: choice.wrappedValue.model
-            )
+            choice.wrappedValue.model = ProviderChoices.defaultModel(for: new)
         }
     }
 

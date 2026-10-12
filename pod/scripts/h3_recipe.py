@@ -54,6 +54,7 @@ def comparison_recipe(process: dict[str, Any]) -> dict[str, Any]:
         "model": selected(process["model"], "model"),
         "network": selected(process["network"], "network"),
         "train": selected(process["train"], "train"),
+        "save": selected(process["save"], "save"),
         "datasets": [
             {
                 **selected(row, "dataset"),
@@ -95,6 +96,7 @@ def validate_recipe(raw: Any) -> dict[str, Any]:
         raise ValueError("Initial recipe currently supports the fl2va_pruned H3 partition")
     if "use_training_adapter" in model and type(model["use_training_adapter"]) is not bool:
         raise ValueError("use_training_adapter must be a boolean")
+    validate_guidance(raw)
     network = raw["network"]
     if network.get("type", "lora") != "lora":
         raise ValueError("Initial H3 weights must be a LoRA network")
@@ -107,6 +109,17 @@ def validate_recipe(raw: Any) -> dict[str, Any]:
     # Reject non-finite JSON values before either native config writer sees them.
     json.dumps(raw, allow_nan=False)
     return raw
+
+
+def validate_guidance(settings: dict[str, Any]) -> None:
+    """The pinned Circlestone adapter requires ordinary, non-CFG-augmented training."""
+    if settings.get("model", {}).get("use_training_adapter", True) and settings.get(
+        "train", {}
+    ).get("do_guidance_loss", False):
+        raise ValueError(
+            "Circlestone H3 training adapter requires do_guidance_loss=false; "
+            "use an explicit use_training_adapter=false recipe to train without it"
+        )
 
 
 def validate_initialization(value: Any) -> dict[str, str] | None:
@@ -253,7 +266,10 @@ def quality_settings(*, video: bool = False) -> dict[str, Any]:
                 ]
             },
         },
+        "save": {"save_every": 300, "max_step_saves_to_keep": 40, "dtype": "float32"},
         "train": {
+            "do_guidance_loss": False,
+            "guidance_loss_target": 3.5,
             "dtype": "bf16",
             "optimizer": "adamw",
             "noise_scheduler": "flowmatch",

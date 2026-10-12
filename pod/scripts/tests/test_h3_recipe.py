@@ -44,6 +44,7 @@ def weights(rank=2, prefix="diffusion_model.blocks.20.attn.out_proj"):
 
 def canonical():
     value = recipe.quality_settings()
+    value.pop("save")
     value["network"].update(linear=2, linear_alpha=2)
     return value
 
@@ -280,6 +281,7 @@ def test_h3_pair_binds_actual_trained_network_recipe_and_no_assistant(tmp_path, 
                         "pretrained_lora_path": "/private/initializer.safetensors",
                     },
                     "train": {"dtype": "bf16", "optimizer": "adamw"},
+                    "save": {"dtype": "float32", "save_every": 300, "max_step_saves_to_keep": 40},
                     "datasets": [
                         {
                             "folder_path": "/private/input",
@@ -340,3 +342,90 @@ def test_h3_pair_binds_actual_trained_network_recipe_and_no_assistant(tmp_path, 
     assert manifest["state"] == "complete" and manifest["comparison_training_adapter"] is False
     assert "/private/" not in json.dumps(manifest["effective_native_config"])
     assert not checkpoint.exists()
+
+
+def test_h3_save_guidance_and_buckets_reach_native_config_and_generation_receipt(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("PODAGENT_WORKSPACE", str(tmp_path))
+    root = tmp_path / "datasets/approved"
+    root.mkdir(parents=True)
+    (root / "still.png").write_bytes(b"synthetic image boundary")
+    (root / "still.txt").write_text("NORA7 portrait")
+    run = tmp_path / "runs/new"
+    run.mkdir(parents=True)
+    cfg = wrapper.validate_run_config(
+        {
+            "run_id": "new",
+            "dataset": {"path": str(root)},
+            "base_model": recipe.MODEL,
+            "triggers": ["NORA7"],
+            "steps": 3000,
+            "rank": 32,
+            "resolution": [768, 1024],
+            "save_every": 375,
+            "extra": {
+                "save": {"save_every": 375, "max_step_saves_to_keep": 17, "dtype": "float32"},
+                "model": {"use_training_adapter": False},
+                "train": {"do_guidance_loss": True, "guidance_loss_target": 3.5},
+            },
+        },
+        tmp_path,
+    )
+    process = wrapper.build_native_config(cfg, run)["config"]["process"][0]
+    assert process["save"] == {
+        "dtype": "float32",
+        "save_every": 375,
+        "max_step_saves_to_keep": 17,
+        "push_to_hub": False,
+    }
+    assert process["train"]["do_guidance_loss"] is True
+    assert process["train"]["guidance_loss_target"] == 3.5
+    assert process["datasets"][0]["resolution"] == [768, 1024]
+    receipt = recipe.comparison_recipe(process)
+    assert receipt["save"] == {"dtype": "float32", "save_every": 375, "max_step_saves_to_keep": 17}
+    assert receipt["train"]["guidance_loss_target"] == 3.5
+    assert receipt["datasets"][0]["resolution"] == [768, 1024]
+
+
+@pytest.mark.parametrize("adapter", [None, True, False])
+def test_effective_guidance_rejects_circlestone_before_model_download(
+    tmp_path, monkeypatch, adapter
+):
+    monkeypatch.setenv("PODAGENT_WORKSPACE", str(tmp_path))
+    root = tmp_path / "datasets/approved"
+    root.mkdir(parents=True)
+    (root / "still.png").write_bytes(b"synthetic image boundary")
+    (root / "still.txt").write_text("NORA7 portrait")
+    run = tmp_path / "runs/new"
+    run.mkdir(parents=True)
+    extra = {"train": {"do_guidance_loss": True, "guidance_loss_target": 3.5}}
+    if adapter is not None:
+        extra["model"] = {"use_training_adapter": adapter}
+    cfg = wrapper.validate_run_config(
+        {
+            "run_id": "new",
+            "dataset": {"path": str(root)},
+            "base_model": recipe.MODEL,
+            "triggers": ["NORA7"],
+            "rank": 32,
+            "extra": extra,
+        },
+        tmp_path,
+    )
+    if adapter is False:
+        process = wrapper.build_native_config(cfg, run)["config"]["process"][0]
+        assert "assistant_lora_path" not in process["model"]
+        assert process["train"]["do_guidance_loss"] is True
+    else:
+        with pytest.raises(ValueError, match="Circlestone"):
+            wrapper.build_native_config(cfg, run)
+
+
+def test_initializer_rejects_guidance_on_with_circlestone():
+    settings = canonical()
+    settings["train"]["do_guidance_loss"] = True
+    with pytest.raises(ValueError, match="Circlestone"):
+        recipe.validate_recipe(settings)
+    settings["model"]["use_training_adapter"] = False
+    assert recipe.validate_recipe(settings)["train"]["do_guidance_loss"] is True

@@ -61,6 +61,7 @@ class Runner:
         concurrency: int | None = None,
         overwrite: bool = False,
     ) -> None:
+        job.require_concepts()
         self.job = job
         self.skill = skill or skills.load(job.skill, relative_to=job.directory)
         self.profile_name = profile or job.profile

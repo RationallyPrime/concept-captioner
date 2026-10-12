@@ -171,7 +171,8 @@ struct JobTests {
     func validation() throws {
         let nora = try Concept(trigger: "NORA7", classNoun: "woman")
         let ivan = try Concept(trigger: "IVAN9", classNoun: "man")
-        #expect(configurationMessage { try Job(concepts: []) } == "a job needs at least one concept")
+        let draft = try Job(profile: "flux-image", concepts: [])
+        #expect(try Job.load(yaml: draft.dump()) == draft)
         #expect(configurationMessage { try Job(concepts: [nora, nora]) } == "concept triggers must be unique")
         #expect(configurationMessage { try Job(concepts: [nora], samples: ["x.png": [:]]) }
             == "sample 'x.png': mapping must name at least one trigger")

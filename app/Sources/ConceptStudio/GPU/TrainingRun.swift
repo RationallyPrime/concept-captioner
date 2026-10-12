@@ -218,7 +218,8 @@ extension GPUWorkspace {
 
     var estimatedPodCost: Double {
         guard let saved else { return 0 }
-        return max(0, Date().timeIntervalSince(saved.started)) / 3600 * saved.hourlyRate
+        return saved.accruedGPUCostUSD
+            + (hasRunningPod ? max(0, Date().timeIntervalSince(saved.started)) / 3600 * saved.hourlyRate : 0)
     }
 
     func refreshRunFiles(_ id: String) async {
@@ -262,6 +263,15 @@ extension GPUWorkspace {
         if let values = run.params["resolution"]?.arrayValue?.compactMap(\.intValue) {
             trainingResolutions = values
         } else if let value = run.params["resolution"]?.intValue { trainingResolutions = [value] }
+        checkpointEvery = run.params["save_every"]?.intValue ?? (run.isH3 ? 300 : 250)
+        let save = run.params["extra"]?.objectValue?["save"]?.objectValue ?? [:]
+        checkpointRetention = save["max_step_saves_to_keep"]?.intValue ?? (run.isH3 ? 40 : 4)
+        checkpointPrecision = save["dtype"]?.stringValue ?? (run.isH3 ? "float32" : "float16")
+        let train = run.params["extra"]?.objectValue?["train"]?.objectValue ?? [:]
+        guidanceLoss = train["do_guidance_loss"]?.boolValue ?? false
+        guidanceTargetText = String(
+            data: (train["guidance_loss_target"] ?? .double(3.5)).pythonDumpsData(), encoding: .utf8
+        ) ?? "3.5"
         triggerWords = run.params["triggers"]?.arrayValue?.compactMap(\.stringValue).joined(separator: ",") ?? ""
         profile = run.params["profile"]?.stringValue ?? "flux-image"
         seed = run.params["seed"]?.intValue ?? 42
@@ -282,6 +292,7 @@ extension GPUWorkspace {
                   self.currentVolumeID == run.volumeID else {
                 throw StudioError.message("Resume needs the same trainer and this run's saved storage.")
             }
+            try Self.validateH3Guidance(run)
             guard totalSteps > run.latestStep, !self.resultNeedsSaving else {
                 throw StudioError.message("Retrieve pending outputs first, then choose a total above the latest step.")
             }
@@ -329,16 +340,16 @@ extension GPUWorkspace {
             )
             self.persist()
             self.persistResult()
-            var startedTrainer = false
-            defer { if !startedTrainer { self.finishFailedPreparation(previousResult: run.result) } }
+            var trainerStartAttempted = false
+            defer { if !trainerStartAttempted { self.finishFailedPreparation(previousResult: run.result) } }
             if let local {
                 try await self.installTrainingDataset(local, repo: "", revision: nil, name: run.runID, agent: agent)
             }
             try await self.prepareCaptionServerForTraining(agent, plan: plan)
             try Task.checkCancellation()
             try self.checkCurrentRunBudget()
+            trainerStartAttempted = true
             try await agent.start("trainer-\(run.trainer)", gpus: plan.train?.gpus ?? [], params: params)
-            startedTrainer = true
             self.trainingState = "running"
             self.lastActivity = Date()
             await self.recordNewTrainingRun(

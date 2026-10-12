@@ -1,0 +1,4233 @@
+{
+  "schema_version": "1.0.0",
+  "title": "Concept Studio — Dual-layer glossary",
+  "language": "en",
+  "editorial_status": "Complete first draft",
+  "created": "2026-10-11",
+  "entry_count": 177,
+  "mode_labels": {
+    "plain_language": "Plain language",
+    "good_stuff": "Show me the good stuff"
+  },
+  "scope_note": "Educational vocabulary for image and video concept training. Inclusion does not imply an exposed control or a supported feature in the current application.",
+  "source_note": "Definitions are original editorial wording. Primary papers and official documentation support technical usage; Concept Studio usages are explicitly marked. Defaults and compatibility remain model- and trainer-specific.",
+  "alias_note": "Aliases include common labels and related search phrases. They are discovery aids; consult each definition before treating two labels as equivalent.",
+  "naming_conventions": [
+    {
+      "name": "Checkpoint / model variant",
+      "text": "Checkpoint means a saved point in a training run. Model variant is the provisional name for a derived, usable model; it can become the base for another run."
+    },
+    {
+      "name": "Noise schedule / learning rate schedule",
+      "text": "Always qualify the schedule. Noise schedule concerns generation or the noise path; learning rate schedule concerns optimization. Scheduler is retained only to explain terminology imported from other tools."
+    },
+    {
+      "name": "Training step / sampling step / timestep",
+      "text": "A training step is one optimizer update here. A sampling step advances a generation. A timestep identifies a position on a noise or probability path."
+    },
+    {
+      "name": "Training and generation strengths",
+      "text": "Learning rate, LoRA alpha, LoRA strength, guidance scale, reference strength, and denoising strength have separate entries. Do not collapse them into a generic strength."
+    },
+    {
+      "name": "Trigger word / trigger token",
+      "text": "Trigger word is the preferred label, with trigger phrase and trigger token searchable. The visible identifier need not be one tokenizer token."
+    },
+    {
+      "name": "Resampling",
+      "text": "Name the operation: image resampling, temporal resampling, dataset resampling, or a re-denoising/refinement pass. The generic entry explains the ambiguity."
+    },
+    {
+      "name": "Concept Studio terminology",
+      "text": "Concept, concept boundary, concept captioning, and other explicitly marked product usages are proposed editorial definitions, not claims of a universal formal convention or an implemented feature."
+    }
+  ],
+  "sections": [
+    {
+      "id": "foundations",
+      "title": "Models, concepts, and learning",
+      "description": "The vocabulary for what you are starting with, what you are teaching, and what training produces.",
+      "entry_count": 15
+    },
+    {
+      "id": "captioning",
+      "title": "Concept boundaries, captions, and datasets",
+      "description": "How examples express the concept you want to teach—and the details you do not want tied to it.",
+      "entry_count": 23
+    },
+    {
+      "id": "components",
+      "title": "Inside the generation pipeline",
+      "description": "What the major components do, with the mathematical detail kept in “Show me the good stuff.”",
+      "entry_count": 16
+    },
+    {
+      "id": "training-controls",
+      "title": "Training progress and controls",
+      "description": "The units, settings, and saved states used to run and compare training.",
+      "entry_count": 24
+    },
+    {
+      "id": "adaptation",
+      "title": "LoRA structure and other adaptation methods",
+      "description": "How learning is constrained, where it happens, and which personalization methods differ from one another.",
+      "entry_count": 15
+    },
+    {
+      "id": "evaluation",
+      "title": "Generalization, failure modes, and evaluation",
+      "description": "How to tell whether the concept was learned usefully, rather than merely fitted.",
+      "entry_count": 19
+    },
+    {
+      "id": "generation-controls",
+      "title": "Prompts, sampling, and generation controls",
+      "description": "How a trained model is steered and how its predictions become a finished result.",
+      "entry_count": 34
+    },
+    {
+      "id": "video",
+      "title": "Video, motion, and time",
+      "description": "The concepts that do not reduce to making one good frame.",
+      "entry_count": 10
+    },
+    {
+      "id": "compute",
+      "title": "Memory, precision, and execution",
+      "description": "Useful vocabulary for understanding resource limits without turning the glossary into a hardware manual.",
+      "entry_count": 10
+    },
+    {
+      "id": "artifacts",
+      "title": "Files, compatibility, and export",
+      "description": "What your trained result contains and what another application needs in order to use it.",
+      "entry_count": 4
+    },
+    {
+      "id": "supporting",
+      "title": "Supporting data vocabulary",
+      "description": "Searchable background terms, not a proposed beginner setup checklist.",
+      "entry_count": 7
+    }
+  ],
+  "entries": [
+    {
+      "id": "model",
+      "term": "Model",
+      "section_id": "foundations",
+      "aliases": [],
+      "plain_language": "A learned system that turns inputs into predictions. In this app, its predictions help create images or video.",
+      "good_stuff": "A parameterized function, together with the architecture and learned parameters needed to evaluate it. In generative software, “model” can also mean a bundle of components; a text encoder, generative network, and VAE are not necessarily one neural network.",
+      "related_terms": [
+        "base-model",
+        "architecture",
+        "pipeline"
+      ],
+      "source_ids": [
+        "optimization",
+        "ldm"
+      ],
+      "definition_scope": "standard",
+      "display_order": 1
+    },
+    {
+      "id": "base-model",
+      "term": "Base model",
+      "section_id": "foundations",
+      "aliases": [],
+      "plain_language": "The already-trained model you start from. Your LoRA builds on its abilities rather than learning image or video generation from scratch.",
+      "good_stuff": "The pretrained parameter state that serves as the reference for an adaptation. In ordinary LoRA training, those reference weights remain frozen while adapter parameters are optimized. “Base” describes its role: a previously fine-tuned model variant can itself be the base for another training run.",
+      "related_terms": [
+        "model-variant",
+        "lora",
+        "fine-tuning"
+      ],
+      "source_ids": [
+        "peft-concepts"
+      ],
+      "definition_scope": "standard",
+      "display_order": 2
+    },
+    {
+      "id": "architecture",
+      "term": "Model architecture",
+      "section_id": "foundations",
+      "aliases": [],
+      "plain_language": "The design of a model: what parts it contains and how they work together. Different designs need different compatible components.",
+      "good_stuff": "The computational structure of a neural network, including its layers, connections, dimensions, and input/output representations. Matching architecture is necessary for many weight-loading operations, but does not by itself establish semantic compatibility between an adapter and a particular pretrained weight state.",
+      "related_terms": [
+        "dit",
+        "model-weights",
+        "compatibility"
+      ],
+      "source_ids": [
+        "dit"
+      ],
+      "definition_scope": "standard",
+      "display_order": 3
+    },
+    {
+      "id": "model-variant",
+      "term": "Model variant",
+      "section_id": "foundations",
+      "aliases": [
+        "fine-tuned model",
+        "domain fine-tune"
+      ],
+      "plain_language": "A version of a model developed for a particular range of uses, such as portraits, illustration, or cinematic video.",
+      "good_stuff": "Concept Studio’s provisional name for a derived model with its own usable weight state, often produced by fine-tuning or merging. Other tools may call this a “checkpoint.” Here, checkpoint is reserved for a saved point in a training run. A variant may subsequently serve as a base model.",
+      "related_terms": [
+        "base-model",
+        "checkpoint",
+        "fine-tuning"
+      ],
+      "source_ids": [],
+      "definition_scope": "concept_studio",
+      "display_order": 4
+    },
+    {
+      "id": "model-weights",
+      "term": "Model weights",
+      "section_id": "foundations",
+      "aliases": [
+        "parameters",
+        "model parameters",
+        "weights"
+      ],
+      "plain_language": "The numbers that encode what a model has learned. Training changes selected numbers to change the model’s behavior.",
+      "good_stuff": "The numerical parameters used by a model’s computation: weight matrices, biases, and other learned tensors. “Weights” is often used collectively for these parameters. Frozen parameters are still model parameters; they simply are not updated in the current training run.",
+      "related_terms": [
+        "training",
+        "gradient",
+        "lora"
+      ],
+      "source_ids": [
+        "autograd"
+      ],
+      "definition_scope": "standard",
+      "display_order": 5
+    },
+    {
+      "id": "concept",
+      "term": "Concept",
+      "section_id": "foundations",
+      "aliases": [],
+      "plain_language": "The thing you want the model to learn: a particular person, object, style, outfit, place, movement, or other recognizable pattern.",
+      "good_stuff": "In Concept Studio, a named learning target with an explicit boundary between defining attributes and incidental variation. A concept is not automatically one token, one LoRA, or one dataset: a dataset may contain multiple concepts, and an adapter may learn more than one.",
+      "related_terms": [
+        "concept-boundary",
+        "concept-captioning",
+        "trigger-word"
+      ],
+      "source_ids": [],
+      "definition_scope": "concept_studio",
+      "display_order": 6
+    },
+    {
+      "id": "likeness",
+      "term": "Identity / likeness",
+      "section_id": "foundations",
+      "aliases": [
+        "identity",
+        "identity fidelity",
+        "likeness fidelity"
+      ],
+      "plain_language": "The features that make a generated subject recognizable as the particular person, animal, or character you intended.",
+      "good_stuff": "Subject-specific visual fidelity under changes in pose, expression, lighting, framing, and context. Likeness is not pixel similarity to a reference photograph. Which properties must remain stable—such as age, hairstyle, or costume—depends on the declared concept boundary.",
+      "related_terms": [
+        "concept-boundary",
+        "generalization",
+        "reference-conditioning"
+      ],
+      "source_ids": [
+        "dreambooth-paper"
+      ],
+      "definition_scope": "standard",
+      "display_order": 7
+    },
+    {
+      "id": "style",
+      "term": "Style",
+      "section_id": "foundations",
+      "aliases": [],
+      "plain_language": "A recognizable way an image or video looks, rather than the particular person or object it shows.",
+      "good_stuff": "A collection of visual or temporal rendering characteristics, such as mark-making, palette, texture, lighting treatment, or editing rhythm. In this glossary, a style concept aims to preserve selected rendering traits across different subjects and scenes; its exact boundary is a project decision.",
+      "related_terms": [
+        "concept",
+        "concept-boundary",
+        "entanglement"
+      ],
+      "source_ids": [],
+      "definition_scope": "concept_studio",
+      "display_order": 8
+    },
+    {
+      "id": "training",
+      "term": "Training",
+      "section_id": "foundations",
+      "aliases": [],
+      "plain_language": "Teaching a model from examples by repeatedly checking its predictions and adjusting the parts that are allowed to learn.",
+      "good_stuff": "Optimization of trainable parameters against an objective estimated from data. A training iteration typically computes predictions, evaluates a loss, and obtains gradients; an optimizer then updates parameters, possibly after accumulating gradients over several micro-batches.",
+      "related_terms": [
+        "training-step",
+        "loss",
+        "optimizer"
+      ],
+      "source_ids": [
+        "optimization",
+        "autograd"
+      ],
+      "definition_scope": "standard",
+      "display_order": 9
+    },
+    {
+      "id": "fine-tuning",
+      "term": "Fine-tuning",
+      "section_id": "foundations",
+      "aliases": [],
+      "plain_language": "Further training an existing model for a more specific purpose. Training a LoRA is one way to fine-tune.",
+      "good_stuff": "Adaptation initialized from a pretrained model rather than from a fresh random initialization. Fine-tuning may update existing parameters, added parameters such as LoRA factors, or both. The term does not specify a particular dataset size, training objective, or number of trainable weights.",
+      "related_terms": [
+        "base-model",
+        "lora",
+        "full-fine-tuning"
+      ],
+      "source_ids": [
+        "lora-paper",
+        "lora-training"
+      ],
+      "definition_scope": "standard",
+      "display_order": 10
+    },
+    {
+      "id": "full-fine-tuning",
+      "term": "Full fine-tuning",
+      "section_id": "foundations",
+      "aliases": [],
+      "plain_language": "Teaching the selected model component by updating its existing weights, rather than using a small LoRA add-on.",
+      "good_stuff": "Fine-tuning all parameters in the selected trainable component, rather than restricting adaptation to low-rank factors or another small subset. “Full” must name its scope: full denoiser training does not necessarily also train the text encoder or VAE.",
+      "related_terms": [
+        "fine-tuning",
+        "lora",
+        "target-modules"
+      ],
+      "source_ids": [
+        "text2image-training"
+      ],
+      "definition_scope": "standard",
+      "display_order": 11
+    },
+    {
+      "id": "adapter",
+      "term": "Adapter",
+      "section_id": "foundations",
+      "aliases": [],
+      "plain_language": "A learned add-on that changes what a compatible model can do. A LoRA is one kind of adapter.",
+      "good_stuff": "A separately parameterized adaptation mechanism used with a pretrained network. The term covers several designs, including low-rank weight updates and modules that introduce additional conditioning. An adapter is not generally a standalone generative model.",
+      "related_terms": [
+        "lora",
+        "reference-conditioning",
+        "compatibility"
+      ],
+      "source_ids": [
+        "lora-loading",
+        "ip-adapter"
+      ],
+      "definition_scope": "standard",
+      "display_order": 12
+    },
+    {
+      "id": "lora",
+      "term": "LoRA",
+      "section_id": "foundations",
+      "aliases": [
+        "low-rank adaptation"
+      ],
+      "plain_language": "A compact set of learned changes you attach to a compatible base model to teach it a concept or alter its behavior.",
+      "good_stuff": "Low-Rank Adaptation represents selected weight updates as ΔW = sBA while keeping the original weights frozen. Here s is a scale factor; for a weight matrix of shape d_out×d_in, B and A have shapes d_out×r and r×d_in. The adapter stores learned factors and configuration, not a complete base model.",
+      "related_terms": [
+        "rank",
+        "alpha",
+        "lora-strength"
+      ],
+      "source_ids": [
+        "lora-paper",
+        "lora-training"
+      ],
+      "definition_scope": "standard",
+      "display_order": 13
+    },
+    {
+      "id": "generation",
+      "term": "Generation",
+      "section_id": "foundations",
+      "aliases": [],
+      "plain_language": "Using a trained model to create an image or video. This uses what it has learned; it does not normally teach it anything new.",
+      "good_stuff": "The generative application of inference: executing a trained pipeline, often through iterative sampling, to produce an output conditioned on supplied inputs. Ordinary generation updates the current sample, not the model’s learned parameters.",
+      "related_terms": [
+        "inference",
+        "sampling",
+        "prompt"
+      ],
+      "source_ids": [
+        "ldm",
+        "schedulers"
+      ],
+      "definition_scope": "standard",
+      "display_order": 14
+    },
+    {
+      "id": "inference",
+      "term": "Inference",
+      "section_id": "foundations",
+      "aliases": [],
+      "plain_language": "Running a trained model to get a prediction or result. Image and video generation are examples of inference.",
+      "good_stuff": "Evaluation of a trained model on inputs without optimizing its parameters as part of that operation. Inference includes individual denoiser predictions, text or image encoding, caption generation, and complete media-generation pipelines; it is broader than generation alone.",
+      "related_terms": [
+        "generation",
+        "training",
+        "pipeline"
+      ],
+      "source_ids": [
+        "pipelines",
+        "checkpoint"
+      ],
+      "definition_scope": "standard",
+      "display_order": 15
+    },
+    {
+      "id": "dataset",
+      "term": "Dataset / training data",
+      "section_id": "captioning",
+      "aliases": [
+        "training data",
+        "training set"
+      ],
+      "plain_language": "The collection of examples used for a project. Training data is the part the model actually learns from.",
+      "good_stuff": "A structured collection of examples and associated conditioning or metadata. The training split contributes to parameter updates; validation and test splits have different roles. A media folder alone may not capture the full dataset without its captions, crops, clip selections, and concept assignments.",
+      "related_terms": [
+        "training-example",
+        "validation-data",
+        "metadata"
+      ],
+      "source_ids": [
+        "image-dataset"
+      ],
+      "definition_scope": "standard",
+      "display_order": 16
+    },
+    {
+      "id": "training-example",
+      "term": "Training example",
+      "section_id": "captioning",
+      "aliases": [
+        "training sample",
+        "sample"
+      ],
+      "plain_language": "One item the model learns from: usually an image or video clip together with its caption and any other required inputs.",
+      "good_stuff": "One logical sample supplied to the training objective. Its realized inputs may include a crop or clip, encoded conditioning, a sampled noise level, and random noise. Reusing a source image can therefore produce different training inputs without adding independent source evidence.",
+      "related_terms": [
+        "dataset",
+        "crop",
+        "timestep-sampling"
+      ],
+      "source_ids": [
+        "advanced-training",
+        "video-dataset"
+      ],
+      "definition_scope": "standard",
+      "display_order": 17
+    },
+    {
+      "id": "caption",
+      "term": "Caption",
+      "section_id": "captioning",
+      "aliases": [
+        "training caption"
+      ],
+      "plain_language": "Text describing what is actually in a training image or clip. It helps connect visible details with words.",
+      "good_stuff": "Textual conditioning paired with a training example. Unlike an inference prompt, it describes observed training content rather than requesting a new result. A caption should match the crop or clip actually trained, not unseen content outside it.",
+      "related_terms": [
+        "concept-captioning",
+        "prompt",
+        "trigger-word"
+      ],
+      "source_ids": [
+        "text2image-training",
+        "video-dataset"
+      ],
+      "definition_scope": "standard",
+      "display_order": 18
+    },
+    {
+      "id": "concept-boundary",
+      "term": "Concept boundary",
+      "section_id": "captioning",
+      "aliases": [],
+      "plain_language": "Your decision about what belongs to the concept and what should remain changeable. A person’s identity might belong; their current coat might not.",
+      "good_stuff": "An explicit partition of relevant attributes into intended invariants and controllable or incidental variation. The boundary is task-dependent: hairstyle can be incidental in an identity concept but defining in a hairstyle concept. It is a training specification, not a guarantee that the learned representation will obey that partition.",
+      "related_terms": [
+        "concept",
+        "concept-captioning",
+        "disentanglement"
+      ],
+      "source_ids": [],
+      "definition_scope": "concept_studio",
+      "display_order": 19
+    },
+    {
+      "id": "concept-captioning",
+      "term": "Concept captioning",
+      "section_id": "captioning",
+      "aliases": [
+        "concept-boundary captioning",
+        "boundary-aware captioning"
+      ],
+      "plain_language": "Use the trigger to name what you want to teach, and describe the surrounding details that you want to remain independently changeable.",
+      "good_stuff": "Concept Studio’s boundary-aware captioning method: use a concept identifier while explicitly describing observable attributes outside the declared concept boundary. For identity training, these may include clothing, pose, lighting, and background. This supplies a learning signal for separation; it does not mathematically force every uncaptioned attribute into the trigger or eliminate correlations in the dataset.",
+      "related_terms": [
+        "concept-boundary",
+        "trigger-word",
+        "entanglement"
+      ],
+      "source_ids": [],
+      "definition_scope": "concept_studio",
+      "display_order": 20
+    },
+    {
+      "id": "trigger-only-captioning",
+      "term": "Trigger-only captioning",
+      "section_id": "captioning",
+      "aliases": [
+        "trigger-only captions"
+      ],
+      "plain_language": "Captioning examples mainly with the concept’s trigger, sometimes with a general class word, instead of describing each example’s changing details.",
+      "good_stuff": "A captioning baseline in which textual conditioning is an identifier, optionally accompanied by a class descriptor, with little or no example-specific description. In a controlled comparison with concept captioning, retain the same data split and training configuration so that the captioning policy is the intended experimental difference.",
+      "related_terms": [
+        "concept-captioning",
+        "class-word",
+        "ablation"
+      ],
+      "source_ids": [],
+      "definition_scope": "concept_studio",
+      "display_order": 21
+    },
+    {
+      "id": "trigger-word",
+      "term": "Trigger word",
+      "section_id": "captioning",
+      "aliases": [
+        "trigger token",
+        "trigger phrase",
+        "concept identifier"
+      ],
+      "plain_language": "The word or phrase you use to call up a learned concept in a prompt. Use the same spelling that was used during training.",
+      "good_stuff": "A text identifier associated with a target concept through training. It may tokenize into multiple existing tokens; ordinary LoRA training does not automatically add a new vocabulary token or train a dedicated word embedding. The trigger conditions the adapted model—it is not a container holding the LoRA’s learned weights.",
+      "related_terms": [
+        "token",
+        "tokenizer",
+        "textual-inversion"
+      ],
+      "source_ids": [
+        "dreambooth-paper",
+        "tokenization",
+        "lora-training"
+      ],
+      "definition_scope": "standard",
+      "display_order": 22
+    },
+    {
+      "id": "class-word",
+      "term": "Class word",
+      "section_id": "captioning",
+      "aliases": [
+        "class token",
+        "class descriptor"
+      ],
+      "plain_language": "A general category word beside a trigger, such as “person,” “dog,” or “car.”",
+      "good_stuff": "A general semantic descriptor paired with a subject identifier, for example “vnrq person.” It draws on the pretrained model’s category knowledge while the identifier distinguishes the instance. It is not the same as the identifier and need not be a single tokenizer token.",
+      "related_terms": [
+        "trigger-word",
+        "prior-preservation",
+        "concept"
+      ],
+      "source_ids": [
+        "dreambooth-training"
+      ],
+      "definition_scope": "standard",
+      "display_order": 23
+    },
+    {
+      "id": "subject-mapping",
+      "term": "Subject mapping",
+      "section_id": "captioning",
+      "aliases": [
+        "concept assignment"
+      ],
+      "plain_language": "Marking which person or object in each example corresponds to which concept, especially when several subjects appear together.",
+      "good_stuff": "An explicit per-example association between visible subjects and concept identifiers. Its purpose is to avoid ambiguous or incorrectly assigned supervision in multi-concept data. A mapping can guide caption writing without implying that the trainer receives a segmentation mask or region-specific loss.",
+      "related_terms": [
+        "concept",
+        "caption",
+        "mask"
+      ],
+      "source_ids": [],
+      "definition_scope": "concept_studio",
+      "display_order": 24
+    },
+    {
+      "id": "dataset-diversity",
+      "term": "Dataset diversity",
+      "section_id": "captioning",
+      "aliases": [
+        "coverage"
+      ],
+      "plain_language": "Meaningful variety in your examples: different views, poses, expressions, backgrounds, lighting, and other details that should be allowed to change.",
+      "good_stuff": "Coverage of relevant variation in the intended training and deployment distributions. For a concept dataset, useful diversity varies non-defining attributes while retaining the target concept. Many near-identical frames increase item count without providing equivalent coverage of independent conditions.",
+      "related_terms": [
+        "dataset-balance",
+        "duplicates",
+        "generalization"
+      ],
+      "source_ids": [
+        "generalization"
+      ],
+      "definition_scope": "standard",
+      "display_order": 25
+    },
+    {
+      "id": "dataset-balance",
+      "term": "Dataset balance",
+      "section_id": "captioning",
+      "aliases": [],
+      "plain_language": "How much training attention each concept, view, or situation receives. A large pile of similar examples can drown out rarer ones.",
+      "good_stuff": "The relative representation and effective sampling probability of subsets or attributes. Raw counts, repeats, sampling weights, and batch construction all affect balance. Balance need not mean equal counts: its target should reflect the concept and intended use.",
+      "related_terms": [
+        "repeats",
+        "dataset-resampling",
+        "effective-batch-size"
+      ],
+      "source_ids": [
+        "dataloader"
+      ],
+      "definition_scope": "standard",
+      "display_order": 26
+    },
+    {
+      "id": "duplicates",
+      "term": "Duplicates and near-duplicates",
+      "section_id": "captioning",
+      "aliases": [
+        "duplicate",
+        "near-duplicate",
+        "deduplication"
+      ],
+      "plain_language": "Examples that are identical or so similar that they teach almost the same thing, such as neighboring frames from one shot.",
+      "good_stuff": "Repeated or highly dependent observations. Their presence can unintentionally increase the effective weight of a scene or condition. Keeping related crops, frames, or burst photographs across training and evaluation splits can also leak information; split by source group where independence matters.",
+      "related_terms": [
+        "dataset-diversity",
+        "data-leakage",
+        "validation-data"
+      ],
+      "source_ids": [
+        "memorization",
+        "data-leakage"
+      ],
+      "definition_scope": "standard",
+      "display_order": 27
+    },
+    {
+      "id": "augmentation",
+      "term": "Data augmentation",
+      "section_id": "captioning",
+      "aliases": [
+        "augmentation"
+      ],
+      "plain_language": "Making controlled variations of training examples, such as different crops, to expose the model to more useful variation.",
+      "good_stuff": "Transformations applied to training inputs that are intended to preserve the learning target. Their validity depends on the concept: mirroring changes asymmetric markings, and color shifts may destroy a color-defined style. Captions and other conditioning must remain consistent with the transformed example.",
+      "related_terms": [
+        "crop",
+        "concept-boundary",
+        "preprocessing"
+      ],
+      "source_ids": [
+        "transforms"
+      ],
+      "definition_scope": "standard",
+      "display_order": 28
+    },
+    {
+      "id": "crop",
+      "term": "Crop",
+      "section_id": "captioning",
+      "aliases": [
+        "cropping"
+      ],
+      "plain_language": "The part of an image or frame that is kept. Cropping changes what the model can actually see.",
+      "good_stuff": "A spatial selection from the source media before or during training. A crop can alter subject visibility, context, and the validity of captioned details. For video, inconsistent cropping across frames can introduce apparent motion that was not present in the source.",
+      "related_terms": [
+        "caption",
+        "aspect-ratio",
+        "bucketing"
+      ],
+      "source_ids": [
+        "image-processing",
+        "transforms"
+      ],
+      "definition_scope": "standard",
+      "display_order": 29
+    },
+    {
+      "id": "resolution",
+      "term": "Resolution",
+      "section_id": "captioning",
+      "aliases": [],
+      "plain_language": "The width and height of an image or video frame in pixels. More pixels can show more detail, but also require more work.",
+      "good_stuff": "The spatial dimensions of media, distinguished here from latent dimensions and display density. Source, training, and generation resolutions may differ. Increasing a low-resolution source’s pixel count does not create additional observed evidence about the original subject.",
+      "related_terms": [
+        "aspect-ratio",
+        "upscaling",
+        "latents"
+      ],
+      "source_ids": [
+        "image-processing",
+        "ldm"
+      ],
+      "definition_scope": "standard",
+      "display_order": 30
+    },
+    {
+      "id": "aspect-ratio",
+      "term": "Aspect ratio",
+      "section_id": "captioning",
+      "aliases": [],
+      "plain_language": "The shape of an image: its width compared with its height, such as square, portrait, or widescreen.",
+      "good_stuff": "The ratio W:H of spatial dimensions, independent of absolute resolution. Preserving aspect ratio avoids geometric stretching; adapting media to a different ratio requires cropping, padding, or another explicit transformation.",
+      "related_terms": [
+        "resolution",
+        "crop",
+        "bucketing"
+      ],
+      "source_ids": [
+        "image-processing"
+      ],
+      "definition_scope": "standard",
+      "display_order": 31
+    },
+    {
+      "id": "bucketing",
+      "term": "Aspect-ratio bucketing",
+      "section_id": "captioning",
+      "aliases": [
+        "bucketing",
+        "resolution buckets"
+      ],
+      "plain_language": "Grouping similarly shaped examples so they can train together without forcing every image into the same square crop.",
+      "good_stuff": "Assignment of examples to discrete compatible spatial shapes, followed by batching within those buckets. It can reduce padding or destructive cropping, but examples may still be resized and cropped to the selected bucket. Video training can additionally bucket by frame count.",
+      "related_terms": [
+        "aspect-ratio",
+        "batch-size",
+        "temporal-bucketing"
+      ],
+      "source_ids": [
+        "sd-config",
+        "video-dataset"
+      ],
+      "definition_scope": "standard",
+      "display_order": 32
+    },
+    {
+      "id": "repeats",
+      "term": "Repeats",
+      "section_id": "captioning",
+      "aliases": [],
+      "plain_language": "How many times an example is scheduled to appear within one training epoch.",
+      "good_stuff": "A dataset sampling multiplier. Uniform repeat factor R over N examples produces NR nominal presentations per epoch. Repetition changes exposure, not the number of independent source examples.",
+      "related_terms": [
+        "epoch",
+        "dataset-balance",
+        "dataset-resampling"
+      ],
+      "source_ids": [
+        "sd-config",
+        "dataloader"
+      ],
+      "definition_scope": "standard",
+      "display_order": 33
+    },
+    {
+      "id": "caption-dropout",
+      "term": "Caption dropout",
+      "section_id": "captioning",
+      "aliases": [],
+      "plain_language": "Occasionally training on an example without its caption. This changes what the model has to learn without help from text.",
+      "good_stuff": "Stochastic replacement of the complete text condition with an empty or designated null condition. It can support unconditional conditioning behavior, but it is not equivalent to dropping a few descriptive tags. For concept training, dropping the trigger changes the supervision and should be an intentional policy.",
+      "related_terms": [
+        "tag-dropout",
+        "dropout",
+        "cfg"
+      ],
+      "source_ids": [
+        "cfg",
+        "sd-config"
+      ],
+      "definition_scope": "standard",
+      "display_order": 34
+    },
+    {
+      "id": "tag-dropout",
+      "term": "Tag dropout",
+      "section_id": "captioning",
+      "aliases": [
+        "caption tag dropout"
+      ],
+      "plain_language": "Randomly leaving out individual caption tags during training, while retaining the others.",
+      "good_stuff": "Stochastic removal of caption units defined by the trainer’s delimiter or parser, not necessarily tokenizer tokens. Protect identifiers and phrases whose removal would change the intended supervision.",
+      "related_terms": [
+        "caption-dropout",
+        "caption-shuffling",
+        "trigger-word"
+      ],
+      "source_ids": [
+        "sd-config"
+      ],
+      "definition_scope": "standard",
+      "display_order": 35
+    },
+    {
+      "id": "caption-shuffling",
+      "term": "Caption shuffling",
+      "section_id": "captioning",
+      "aliases": [
+        "tag shuffling",
+        "shuffle caption"
+      ],
+      "plain_language": "Randomly reordering independent caption tags during training.",
+      "good_stuff": "Random permutation of caption units, optionally preserving a fixed prefix. Reordering must preserve meaning: shuffling words within a sentence can corrupt relationships between subjects, actions, and attributes.",
+      "related_terms": [
+        "tag-dropout",
+        "caption",
+        "token"
+      ],
+      "source_ids": [
+        "sd-config"
+      ],
+      "definition_scope": "standard",
+      "display_order": 36
+    },
+    {
+      "id": "caption-truncation",
+      "term": "Caption truncation",
+      "section_id": "captioning",
+      "aliases": [
+        "prompt truncation",
+        "truncation"
+      ],
+      "plain_language": "Cutting off text that is too long for the model. Anything removed is not part of the caption the model receives.",
+      "good_stuff": "Reduction of a token sequence to a supported or configured maximum length. Limits, special-token overhead, and truncation behavior depend on the tokenizer and encoder. In multi-encoder pipelines, different encoders may receive different effective portions of the same text.",
+      "related_terms": [
+        "token",
+        "tokenizer",
+        "text-encoder"
+      ],
+      "source_ids": [
+        "truncation"
+      ],
+      "definition_scope": "standard",
+      "display_order": 37
+    },
+    {
+      "id": "vlm",
+      "term": "Vision-language model",
+      "section_id": "captioning",
+      "aliases": [
+        "VLM",
+        "multimodal captioner"
+      ],
+      "plain_language": "A model that works with both pictures and words. An automatic captioner uses one to describe your images or clips.",
+      "good_stuff": "A model that relates visual inputs to language, for tasks such as description, question answering, or cross-modal representation. A caption generated by a VLM is a prediction, not a verified annotation; it still needs to match the visible content and your concept-captioning policy.",
+      "related_terms": [
+        "caption",
+        "concept-captioning",
+        "image-encoder"
+      ],
+      "source_ids": [
+        "captioning-model",
+        "clip"
+      ],
+      "definition_scope": "standard",
+      "display_order": 38
+    },
+    {
+      "id": "pipeline",
+      "term": "Pipeline",
+      "section_id": "components",
+      "aliases": [],
+      "plain_language": "The complete chain that turns your inputs into an image or video: interpreting the text, generating the content, and producing viewable pixels.",
+      "good_stuff": "An orchestrated composition of preprocessing, conditioning encoders, a generative network, a sampler and schedule, decoding, and postprocessing. The exact components depend on the model. A pipeline is not synonymous with its denoiser or with one weight file.",
+      "related_terms": [
+        "text-encoder",
+        "denoiser",
+        "vae"
+      ],
+      "source_ids": [
+        "pipelines"
+      ],
+      "definition_scope": "standard",
+      "display_order": 39
+    },
+    {
+      "id": "diffusion-model",
+      "term": "Diffusion model",
+      "section_id": "components",
+      "aliases": [],
+      "plain_language": "A generative model that learns how to recover structure from noise, then uses that ability to create new images or video.",
+      "good_stuff": "A generative model trained in relation to a noise-corruption process and a learned reverse process or equivalent denoising/score formulation. Implementations can predict noise, clean data, or another parameterization. Many tools group related flow-matching generators under the diffusion label, although their formulations are not identical.",
+      "related_terms": [
+        "denoiser",
+        "flow-matching",
+        "prediction-target"
+      ],
+      "source_ids": [
+        "ddpm",
+        "flow"
+      ],
+      "definition_scope": "standard",
+      "display_order": 40
+    },
+    {
+      "id": "flow-matching",
+      "term": "Flow matching",
+      "section_id": "components",
+      "aliases": [],
+      "plain_language": "A way to train a model to guide noise toward a finished result by learning which direction to move at each stage.",
+      "good_stuff": "A training framework that regresses a time-dependent vector field associated with a chosen probability path. Generation follows the learned field by solving an ordinary differential equation. The probability path and training target determine the specific formulation; flow matching is not simply another sampler setting.",
+      "related_terms": [
+        "rectified-flow",
+        "ode",
+        "timestep"
+      ],
+      "source_ids": [
+        "flow"
+      ],
+      "definition_scope": "standard",
+      "display_order": 41
+    },
+    {
+      "id": "rectified-flow",
+      "term": "Rectified flow",
+      "section_id": "components",
+      "aliases": [],
+      "plain_language": "A flow-based approach that learns from straight-line transitions between noise and examples, aiming to make generation easier to follow.",
+      "good_stuff": "A flow construction trained on linear interpolations between endpoint samples. With z₀ as noise and z₁ as data, one convention is z_t = (1−t)z₀ + tz₁ with conditional target z₁−z₀. The fitted marginal field need not have perfectly straight trajectories; time direction conventions vary across implementations.",
+      "related_terms": [
+        "flow-matching",
+        "prediction-target",
+        "timestep-shift"
+      ],
+      "source_ids": [
+        "rectified-flow",
+        "sd3"
+      ],
+      "definition_scope": "standard",
+      "display_order": 42
+    },
+    {
+      "id": "dit",
+      "term": "Diffusion Transformer",
+      "section_id": "components",
+      "aliases": [
+        "DiT"
+      ],
+      "plain_language": "A diffusion or related flow model whose main generation network uses a Transformer to work out relationships across the image or video.",
+      "good_stuff": "A generative backbone that processes image or video representations as token sequences using Transformer blocks, rather than requiring a U-Net backbone. “DiT” names an architectural family, not a training objective, sampler, or guarantee of any specific text encoder or VAE.",
+      "related_terms": [
+        "architecture",
+        "attention",
+        "latents"
+      ],
+      "source_ids": [
+        "dit",
+        "sd3"
+      ],
+      "definition_scope": "standard",
+      "display_order": 43
+    },
+    {
+      "id": "denoiser",
+      "term": "Denoiser",
+      "section_id": "components",
+      "aliases": [],
+      "plain_language": "The main generation network. At each stage, it predicts information that helps turn the current noisy result into a more coherent one.",
+      "good_stuff": "The network queried during iterative generation, conditioned on the current sample, time/noise level, and other inputs. Its native output may be noise, a clean-data estimate, a diffusion velocity parameterization, or a flow vector field. The sampler interprets that output to update the sample.",
+      "related_terms": [
+        "prediction-target",
+        "sampler",
+        "diffusion-model"
+      ],
+      "source_ids": [
+        "ddim",
+        "score-sde"
+      ],
+      "definition_scope": "standard",
+      "display_order": 44
+    },
+    {
+      "id": "latents",
+      "term": "Latents and latent space",
+      "section_id": "components",
+      "aliases": [
+        "latent",
+        "latent space",
+        "latent representation"
+      ],
+      "plain_language": "The model’s compact internal representation of an image or video, rather than the visible pixels themselves.",
+      "good_stuff": "Latents are variables or tensors in an internal representation; latent space is their representational domain. In a latent generative pipeline, an autoencoder typically maps media into these tensors and decodes them back. Latent channels are learned features, not simply a smaller RGB image.",
+      "related_terms": [
+        "vae",
+        "resolution",
+        "diffusion-model"
+      ],
+      "source_ids": [
+        "autoencoder",
+        "ldm"
+      ],
+      "definition_scope": "standard",
+      "display_order": 45
+    },
+    {
+      "id": "vae",
+      "term": "VAE",
+      "section_id": "components",
+      "aliases": [
+        "variational autoencoder"
+      ],
+      "plain_language": "The component that converts pictures or video into the model’s internal visual representation and converts that representation back into viewable media.",
+      "good_stuff": "A variational autoencoder models a latent posterior q(z|x) and decoder p(x|z), typically trained with reconstruction-related terms and a regularizer toward a latent prior. Generative pipelines commonly reuse its encoder/decoder as a lossy visual codec; video variants may compress time as well as space.",
+      "related_terms": [
+        "latents",
+        "pipeline",
+        "reconstruction"
+      ],
+      "source_ids": [
+        "vae",
+        "ltx"
+      ],
+      "definition_scope": "standard",
+      "display_order": 46
+    },
+    {
+      "id": "reconstruction",
+      "term": "Reconstruction",
+      "section_id": "components",
+      "aliases": [
+        "reconstruction error"
+      ],
+      "plain_language": "The result of converting an image or video into its internal representation and back again. Some details may change in that round trip.",
+      "good_stuff": "An output decoded from an encoded input, such as x̂ = D(E(x)), possibly with stochastic latent sampling. Reconstruction error measures information lost or changed by that representation. It is distinct from the denoising or flow loss used to train a generative adapter.",
+      "related_terms": [
+        "vae",
+        "latents",
+        "loss"
+      ],
+      "source_ids": [
+        "vae",
+        "autoencoder"
+      ],
+      "definition_scope": "standard",
+      "display_order": 47
+    },
+    {
+      "id": "text-encoder",
+      "term": "Text encoder",
+      "section_id": "components",
+      "aliases": [],
+      "plain_language": "The component that turns your caption or prompt into numerical information the generation model can use.",
+      "good_stuff": "A neural network that maps tokenized text into contextual token representations, pooled representations, or both for conditioning another model. A pipeline may use multiple text encoders. Freezing or training an encoder is a separate choice from training the generative network.",
+      "related_terms": [
+        "tokenizer",
+        "embedding",
+        "text-encoder-training"
+      ],
+      "source_ids": [
+        "flux",
+        "lora-training"
+      ],
+      "definition_scope": "standard",
+      "display_order": 48
+    },
+    {
+      "id": "tokenizer",
+      "term": "Tokenizer",
+      "section_id": "components",
+      "aliases": [],
+      "plain_language": "The tool that breaks text into the pieces a text encoder understands. Those pieces are not always whole words.",
+      "good_stuff": "The text-processing rules and vocabulary that map strings to token IDs and associated sequence metadata. Tokenization can depend on whitespace, punctuation, and the surrounding string. Changing the tokenizer can change the conditioning even when the visible trigger phrase appears unchanged.",
+      "related_terms": [
+        "token",
+        "trigger-word",
+        "caption-truncation"
+      ],
+      "source_ids": [
+        "tokenization"
+      ],
+      "definition_scope": "standard",
+      "display_order": 49
+    },
+    {
+      "id": "token",
+      "term": "Token",
+      "section_id": "components",
+      "aliases": [],
+      "plain_language": "One unit of text as the model sees it: sometimes a word, sometimes part of a word, punctuation, or a special marker.",
+      "good_stuff": "A discrete vocabulary item represented by an ID before embedding. Token count is not word count. In a visual Transformer, “token” can instead mean a vector representing a spatial or spatiotemporal patch; those visual tokens are not entries in the text tokenizer’s vocabulary.",
+      "related_terms": [
+        "tokenizer",
+        "embedding",
+        "dit"
+      ],
+      "source_ids": [
+        "tokenization",
+        "dit"
+      ],
+      "definition_scope": "standard",
+      "display_order": 50
+    },
+    {
+      "id": "embedding",
+      "term": "Embedding",
+      "section_id": "components",
+      "aliases": [],
+      "plain_language": "A collection of numbers representing something—such as a word, sentence, or image—in a form a model can work with.",
+      "good_stuff": "A vector or tensor representation produced by a lookup table or learned encoder. Its interpretation depends on the model and representation space. A token embedding, contextual text feature, image embedding, and the learned embedding file from textual inversion are related uses of the word, not interchangeable objects.",
+      "related_terms": [
+        "text-encoder",
+        "image-encoder",
+        "textual-inversion"
+      ],
+      "source_ids": [
+        "attention",
+        "clip",
+        "textual-inversion"
+      ],
+      "definition_scope": "standard",
+      "display_order": 51
+    },
+    {
+      "id": "attention",
+      "term": "Attention",
+      "section_id": "components",
+      "aliases": [],
+      "plain_language": "A mechanism that lets a model combine information from different parts of its input according to how relevant they are to one another.",
+      "good_stuff": "A content-dependent aggregation operation. Scaled dot-product attention uses softmax(QKᵀ/√d_k)V; self-attention draws queries, keys, and values from one sequence, while cross-attention can connect different sources. Joint multimodal attention is another design. Attention weights are not a guaranteed explanation of the model’s reasoning.",
+      "related_terms": [
+        "dit",
+        "text-encoder",
+        "conditioning"
+      ],
+      "source_ids": [
+        "attention",
+        "sd3"
+      ],
+      "definition_scope": "standard",
+      "display_order": 52
+    },
+    {
+      "id": "conditioning",
+      "term": "Conditioning",
+      "section_id": "components",
+      "aliases": [],
+      "plain_language": "Information you give a generator to steer its result, such as a prompt, reference picture, pose, or starting frame.",
+      "good_stuff": "Inputs that specify a conditional generative distribution p(x|c), rather than an unconditional p(x). Conditioning can enter through embeddings, concatenated latents, attention, modulation, or additional networks. Supplying conditioning during inference does not by itself update model parameters.",
+      "related_terms": [
+        "prompt",
+        "reference-conditioning",
+        "controlnet"
+      ],
+      "source_ids": [
+        "ldm",
+        "ip-adapter",
+        "controlnet"
+      ],
+      "definition_scope": "standard",
+      "display_order": 53
+    },
+    {
+      "id": "image-encoder",
+      "term": "Image encoder",
+      "section_id": "components",
+      "aliases": [],
+      "plain_language": "A component that turns a reference image into numerical features the model can use for guidance.",
+      "good_stuff": "A network that extracts visual representations, often for semantic or identity conditioning. In reference-conditioning contexts it is distinct from a VAE encoder, which usually creates the spatial latents used for reconstruction and generation. The supported representation depends on the receiving model or adapter.",
+      "related_terms": [
+        "embedding",
+        "reference-conditioning",
+        "vae"
+      ],
+      "source_ids": [
+        "clip",
+        "ip-adapter"
+      ],
+      "definition_scope": "standard",
+      "display_order": 54
+    },
+    {
+      "id": "training-run",
+      "term": "Training run",
+      "section_id": "training-controls",
+      "aliases": [
+        "run"
+      ],
+      "plain_language": "One training attempt using a particular starting model, dataset, and set of settings.",
+      "good_stuff": "A specific execution of a training configuration, with its data version, parameter initialization, random state, environment, logs, and saved outputs. Resuming a run continues its recorded state; starting from its weights with a fresh optimizer is a different optimization trajectory.",
+      "related_terms": [
+        "checkpoint",
+        "resume-training",
+        "reproducibility"
+      ],
+      "source_ids": [
+        "accelerate-checkpoint"
+      ],
+      "definition_scope": "standard",
+      "display_order": 55
+    },
+    {
+      "id": "hyperparameter",
+      "term": "Hyperparameter",
+      "section_id": "training-controls",
+      "aliases": [
+        "training setting"
+      ],
+      "plain_language": "A setting you choose for training, rather than a number the model learns—for example, learning rate, batch size, or LoRA rank.",
+      "good_stuff": "A configuration value governing the model, optimization procedure, or data sampling rather than a parameter directly optimized by the training loss. Hyperparameters may be fixed or governed by schedules; selecting them using validation results is itself part of model selection.",
+      "related_terms": [
+        "model-weights",
+        "learning-rate",
+        "validation"
+      ],
+      "source_ids": [
+        "hyperparameter-search"
+      ],
+      "definition_scope": "standard",
+      "display_order": 56
+    },
+    {
+      "id": "epoch",
+      "term": "Epoch",
+      "section_id": "training-controls",
+      "aliases": [],
+      "plain_language": "One scheduled pass through the training data. When repeats are enabled, that pass can include the same example several times.",
+      "good_stuff": "A trainer-defined traversal of its epoch dataset or sampling schedule. With N unique examples and uniform repeat factor R, the nominal presentation count is NR. Actual update counts depend on batching, accumulation, bucketing, and incomplete-batch handling; streamed or replacement-sampled data may use a configured epoch length instead.",
+      "related_terms": [
+        "repeats",
+        "training-step",
+        "effective-batch-size"
+      ],
+      "source_ids": [
+        "dataloader",
+        "sd-config"
+      ],
+      "definition_scope": "standard",
+      "display_order": 57
+    },
+    {
+      "id": "training-step",
+      "term": "Training step",
+      "section_id": "training-controls",
+      "aliases": [
+        "optimizer step",
+        "update step"
+      ],
+      "plain_language": "One update to the trainable model weights. A step may combine information from several examples or small batches.",
+      "good_stuff": "In this glossary, one optimizer update, not one forward pass or one diffusion timestep. With gradient accumulation, several micro-batches can contribute before a single update. Trainer logs sometimes use “step” differently, so imported counters should identify which event they count.",
+      "related_terms": [
+        "gradient-accumulation",
+        "epoch",
+        "sampling-steps"
+      ],
+      "source_ids": [
+        "accumulation"
+      ],
+      "definition_scope": "standard",
+      "display_order": 58
+    },
+    {
+      "id": "batch-size",
+      "term": "Batch size",
+      "section_id": "training-controls",
+      "aliases": [],
+      "plain_language": "How many training examples are processed together. Larger batches usually need more memory.",
+      "good_stuff": "The number of examples in a batch. In a training control, the label should specify whether it means the per-device micro-batch or the effective batch used for one optimizer update. A video clip generally counts as one example, not one example per frame.",
+      "related_terms": [
+        "micro-batch",
+        "effective-batch-size",
+        "temporal-bucketing"
+      ],
+      "source_ids": [
+        "dataloader",
+        "video-dataset"
+      ],
+      "definition_scope": "standard",
+      "display_order": 59
+    },
+    {
+      "id": "micro-batch",
+      "term": "Micro-batch",
+      "section_id": "training-controls",
+      "aliases": [
+        "microbatch",
+        "per-device batch size"
+      ],
+      "plain_language": "A smaller group of examples processed together before its learning signal is combined with other groups.",
+      "good_stuff": "The examples processed in one local forward/backward pass. Multiple micro-batches may contribute gradients to a single optimizer update. Reducing this size can reduce activation memory without requiring an equally small effective batch.",
+      "related_terms": [
+        "gradient-accumulation",
+        "batch-size",
+        "effective-batch-size"
+      ],
+      "source_ids": [
+        "gradient-sync"
+      ],
+      "definition_scope": "standard",
+      "display_order": 60
+    },
+    {
+      "id": "gradient-accumulation",
+      "term": "Gradient accumulation",
+      "section_id": "training-controls",
+      "aliases": [
+        "accumulation steps"
+      ],
+      "plain_language": "Combining the learning signals from several small batches before updating the model, so a larger training batch can fit in memory.",
+      "good_stuff": "Accumulating appropriately normalized gradients over A micro-batches before an optimizer step. In the usual equal-sized data-parallel case, B_effective = B_micro × A × D, where D is the number of participating devices. Equivalence to one large batch depends on normalization and model behavior.",
+      "related_terms": [
+        "micro-batch",
+        "effective-batch-size",
+        "training-step"
+      ],
+      "source_ids": [
+        "accumulation"
+      ],
+      "definition_scope": "standard",
+      "display_order": 61
+    },
+    {
+      "id": "effective-batch-size",
+      "term": "Effective batch size",
+      "section_id": "training-controls",
+      "aliases": [
+        "global batch size"
+      ],
+      "plain_language": "The total number of examples whose learning signals contribute to one update of the model.",
+      "good_stuff": "The aggregate batch represented by an optimizer update. For equal micro-batches under ordinary data parallelism, B_effective = B_micro × accumulation steps × device count. Partial batches, masks, variable-length losses, and custom reduction rules can change the exact per-example weighting.",
+      "related_terms": [
+        "batch-size",
+        "micro-batch",
+        "gradient-accumulation"
+      ],
+      "source_ids": [
+        "accumulation"
+      ],
+      "definition_scope": "standard",
+      "display_order": 62
+    },
+    {
+      "id": "learning-rate",
+      "term": "Learning rate",
+      "section_id": "training-controls",
+      "aliases": [
+        "LR"
+      ],
+      "plain_language": "How strongly training responds to each update’s learning signal. It controls training, not the strength of a LoRA when generating.",
+      "good_stuff": "The scale η applied by the optimizer to its update rule. For plain gradient descent, θ_next = θ − η∇L; adaptive optimizers further transform the gradient. The same numerical rate can behave differently across optimizers, parameter groups, batch conventions, and adapter parameterizations.",
+      "related_terms": [
+        "optimizer",
+        "learning-rate-schedule",
+        "lora-strength"
+      ],
+      "source_ids": [
+        "optimizers",
+        "autograd"
+      ],
+      "definition_scope": "standard",
+      "display_order": 63
+    },
+    {
+      "id": "learning-rate-schedule",
+      "term": "Learning rate schedule",
+      "section_id": "training-controls",
+      "aliases": [
+        "LR schedule",
+        "learning rate scheduler"
+      ],
+      "plain_language": "A plan for changing the learning rate as training progresses—for example, gradually reducing it toward the end.",
+      "good_stuff": "A rule that sets η as a function of training progress or monitored statistics. Constant, linear-decay, cosine, and plateau-based rules are examples. Its step unit must match the trainer’s update accounting. This is unrelated to the noise schedule used for generation.",
+      "related_terms": [
+        "learning-rate",
+        "warmup",
+        "noise-schedule"
+      ],
+      "source_ids": [
+        "optimizers"
+      ],
+      "definition_scope": "standard",
+      "display_order": 64
+    },
+    {
+      "id": "warmup",
+      "term": "Warmup",
+      "section_id": "training-controls",
+      "aliases": [
+        "learning rate warmup"
+      ],
+      "plain_language": "An opening period in which the learning rate rises toward its planned level instead of starting there immediately.",
+      "good_stuff": "An initial learning-rate schedule segment, often parameterized in optimizer updates or a fraction of the run. Warmup can help manage early optimization dynamics, but is not universally necessary. Warmup steps are training updates, not sampling steps.",
+      "related_terms": [
+        "learning-rate-schedule",
+        "training-step",
+        "optimizer"
+      ],
+      "source_ids": [
+        "optimizers",
+        "text2image-training"
+      ],
+      "definition_scope": "standard",
+      "display_order": 65
+    },
+    {
+      "id": "optimizer",
+      "term": "Optimizer",
+      "section_id": "training-controls",
+      "aliases": [],
+      "plain_language": "The rule the trainer uses to turn the model’s learning signal into changes to its weights.",
+      "good_stuff": "An algorithm that updates trainable parameters using gradients and possibly maintained state. SGD follows gradients directly or with momentum; Adam-family methods track moving gradient statistics to adapt updates. Optimizer choice interacts with learning rate, numerical precision, memory use, and regularization.",
+      "related_terms": [
+        "gradient",
+        "learning-rate",
+        "weight-decay"
+      ],
+      "source_ids": [
+        "optimizers",
+        "adamw"
+      ],
+      "definition_scope": "standard",
+      "display_order": 66
+    },
+    {
+      "id": "gradient",
+      "term": "Gradient",
+      "section_id": "training-controls",
+      "aliases": [],
+      "plain_language": "The training signal that indicates how small changes to each trainable number would change the loss.",
+      "good_stuff": "The vector of partial derivatives ∇θL of a scalar objective with respect to parameters θ. Backpropagation computes these derivatives through the model’s computation graph. An optimizer transforms the gradient into an update; the gradient is not itself the new weight value.",
+      "related_terms": [
+        "loss",
+        "optimizer",
+        "training-step"
+      ],
+      "source_ids": [
+        "autograd"
+      ],
+      "definition_scope": "standard",
+      "display_order": 67
+    },
+    {
+      "id": "loss",
+      "term": "Loss",
+      "section_id": "training-controls",
+      "aliases": [
+        "training loss",
+        "objective"
+      ],
+      "plain_language": "The error score training tries to reduce. It measures the task the model is practicing, not how beautiful the finished result looks.",
+      "good_stuff": "A scalar training objective. A common form is E[w(t)‖fθ(z_t,t,c)−y_t‖²], where y_t is the chosen prediction target. Lower loss means better fit to that objective under a comparable measurement setup. Changed targets, weighting, noise sampling, or data make raw losses non-comparable; visual quality and generalization still require evaluation.",
+      "related_terms": [
+        "prediction-target",
+        "validation-loss",
+        "loss-weighting"
+      ],
+      "source_ids": [
+        "ddpm",
+        "sd3",
+        "learning-curves"
+      ],
+      "definition_scope": "standard",
+      "display_order": 68
+    },
+    {
+      "id": "prediction-target",
+      "term": "Prediction target",
+      "section_id": "training-controls",
+      "aliases": [
+        "prediction type",
+        "epsilon prediction",
+        "v-prediction",
+        "velocity prediction"
+      ],
+      "plain_language": "What the model is being taught to predict at each noisy stage—for example, the noise that was added or a direction toward the result.",
+      "good_stuff": "The supervised quantity used in the generative loss. For z_t = a_t x + b_t ε, common targets include ε, x, and diffusion v = a_t ε − b_t x. Flow matching instead targets a path velocity. These parameterizations are not interchangeable; the loss and sampling implementation must agree.",
+      "related_terms": [
+        "loss",
+        "denoiser",
+        "flow-matching"
+      ],
+      "source_ids": [
+        "ddim",
+        "sd3",
+        "flow"
+      ],
+      "definition_scope": "standard",
+      "display_order": 69
+    },
+    {
+      "id": "timestep",
+      "term": "Timestep",
+      "section_id": "training-controls",
+      "aliases": [],
+      "plain_language": "A position along the process between a clean example and noise. It is not a count of how long you have trained.",
+      "good_stuff": "A discrete index or continuous variable identifying a point on a noise or probability path. Training typically samples timesteps independently; generation traverses a selected sequence. Numbering direction and scale are implementation-specific, so a larger t does not universally mean either cleaner or noisier.",
+      "related_terms": [
+        "noise-level",
+        "timestep-sampling",
+        "training-step"
+      ],
+      "source_ids": [
+        "ddpm",
+        "flow-scheduler"
+      ],
+      "definition_scope": "standard",
+      "display_order": 70
+    },
+    {
+      "id": "noise-level",
+      "term": "Noise level",
+      "section_id": "training-controls",
+      "aliases": [
+        "sigma",
+        "σ"
+      ],
+      "plain_language": "How much of the current representation is noise rather than recognizable signal.",
+      "good_stuff": "A parameter describing corruption along the model’s path, often denoted σ. Its relation to timestep and signal amplitude depends on the formulation: in z_t = a_t x + b_t ε, both coefficients matter. Values from different schedules need not represent equivalent corruption.",
+      "related_terms": [
+        "timestep",
+        "noise-schedule",
+        "snr"
+      ],
+      "source_ids": [
+        "score-sde",
+        "edm"
+      ],
+      "definition_scope": "standard",
+      "display_order": 71
+    },
+    {
+      "id": "timestep-sampling",
+      "term": "Training timestep sampling",
+      "section_id": "training-controls",
+      "aliases": [
+        "timestep sampling"
+      ],
+      "plain_language": "How the trainer chooses which noisy stages the model practices, and how often it practices each one.",
+      "good_stuff": "The distribution p(t) used to draw training-time path positions. Uniform, logit-normal, and shifted distributions allocate exposure differently. Changing p(t) generally changes the effective objective unless compensated by suitable weighting. This is distinct from the sequence of timesteps used for inference.",
+      "related_terms": [
+        "timestep",
+        "loss-weighting",
+        "noise-schedule"
+      ],
+      "source_ids": [
+        "sd3",
+        "advanced-training"
+      ],
+      "definition_scope": "standard",
+      "display_order": 72
+    },
+    {
+      "id": "loss-weighting",
+      "term": "Loss weighting",
+      "section_id": "training-controls",
+      "aliases": [],
+      "plain_language": "Giving some kinds of training error more influence than others—for example, errors at particular noise levels.",
+      "good_stuff": "Multipliers applied to per-example, per-region, or per-timestep losses before reduction. They change which errors drive optimization. The effect of weighting must be interpreted together with the data and timestep sampling distributions; a lower weighted loss can simply reflect a different weighting rule.",
+      "related_terms": [
+        "loss",
+        "timestep-sampling",
+        "min-snr"
+      ],
+      "source_ids": [
+        "min-snr"
+      ],
+      "definition_scope": "standard",
+      "display_order": 73
+    },
+    {
+      "id": "snr",
+      "term": "Signal-to-noise ratio",
+      "section_id": "training-controls",
+      "aliases": [
+        "SNR",
+        "log-SNR"
+      ],
+      "plain_language": "A measure of how strong the useful signal is compared with the noise at a particular stage.",
+      "good_stuff": "The ratio of signal power to noise power. For z_t = a_t x + b_t ε with normalized unit-variance signal and noise, the schedule SNR is a_t²/b_t². It is often expressed logarithmically and used to reason about noise levels or loss weighting.",
+      "related_terms": [
+        "noise-level",
+        "min-snr",
+        "loss-weighting"
+      ],
+      "source_ids": [
+        "cfg",
+        "min-snr"
+      ],
+      "definition_scope": "standard",
+      "display_order": 74
+    },
+    {
+      "id": "min-snr",
+      "term": "Min-SNR weighting",
+      "section_id": "training-controls",
+      "aliases": [
+        "Min-SNR gamma",
+        "SNR weighting"
+      ],
+      "plain_language": "A training method that changes how much different noise levels contribute to the loss, so some stages do not dominate the learning signal.",
+      "good_stuff": "A weighting strategy based on a clipped signal-to-noise ratio, controlled by a threshold γ. The actual multiplier depends on the prediction target; an ε-prediction formulation can use min(SNR,γ)/SNR. A formula designed for one diffusion objective should not be copied unchanged into an unrelated flow objective.",
+      "related_terms": [
+        "snr",
+        "prediction-target",
+        "loss-weighting"
+      ],
+      "source_ids": [
+        "min-snr"
+      ],
+      "definition_scope": "standard",
+      "display_order": 75
+    },
+    {
+      "id": "checkpoint",
+      "term": "Checkpoint",
+      "section_id": "training-controls",
+      "aliases": [
+        "training checkpoint"
+      ],
+      "plain_language": "A saved point in your training run. You can compare its results with earlier or later saves and choose which one to keep.",
+      "good_stuff": "A snapshot of learned weights at a particular training step, optionally accompanied by the state needed to resume optimization. A weights-only checkpoint can be usable for generation without being an exact resume point. In Concept Studio, a downloaded domain-specialized model is called a model variant instead.",
+      "related_terms": [
+        "model-variant",
+        "training-state",
+        "resume-training"
+      ],
+      "source_ids": [
+        "checkpoint"
+      ],
+      "definition_scope": "standard",
+      "display_order": 76
+    },
+    {
+      "id": "training-state",
+      "term": "Training state",
+      "section_id": "training-controls",
+      "aliases": [
+        "optimizer state",
+        "resume state"
+      ],
+      "plain_language": "The extra information needed to continue a run from where it stopped, not just the weights it had learned.",
+      "good_stuff": "The optimization and execution state associated with saved weights: optimizer moments, learning-rate scheduler state, progress counters, random states, and relevant data-order or scaler state. Which pieces are stored determines how faithfully a run can resume; identical continuation can still depend on the runtime.",
+      "related_terms": [
+        "checkpoint",
+        "resume-training",
+        "reproducibility"
+      ],
+      "source_ids": [
+        "checkpoint",
+        "reproducibility"
+      ],
+      "definition_scope": "standard",
+      "display_order": 77
+    },
+    {
+      "id": "resume-training",
+      "term": "Resume training",
+      "section_id": "training-controls",
+      "aliases": [
+        "resume",
+        "warm start"
+      ],
+      "plain_language": "Continue a paused or saved training run using its saved progress and learning state.",
+      "good_stuff": "Restoration of weights and the accompanying training state before further optimizer updates. Loading only learned weights and creating a fresh optimizer is a warm start, not an exact resume. A reproducible continuation also needs compatible data, configuration, and execution behavior.",
+      "related_terms": [
+        "checkpoint",
+        "training-state",
+        "training-run"
+      ],
+      "source_ids": [
+        "accelerate-checkpoint"
+      ],
+      "definition_scope": "standard",
+      "display_order": 78
+    },
+    {
+      "id": "rank",
+      "term": "LoRA rank",
+      "section_id": "adaptation",
+      "aliases": [
+        "rank",
+        "network dimension",
+        "network dim"
+      ],
+      "plain_language": "A setting that controls the size and flexibility of a LoRA’s learned changes. Higher rank gives more capacity, not automatically better results.",
+      "good_stuff": "The inner dimension r of the low-rank factors in ΔW = sBA. It bounds the rank of an individual update matrix and contributes r(d_in+d_out) parameters for that adapted linear layer. It is not a count of concepts, images, or generation steps.",
+      "related_terms": [
+        "lora",
+        "alpha",
+        "target-modules"
+      ],
+      "source_ids": [
+        "lora-paper",
+        "peft-lora"
+      ],
+      "definition_scope": "standard",
+      "display_order": 79
+    },
+    {
+      "id": "alpha",
+      "term": "LoRA alpha",
+      "section_id": "adaptation",
+      "aliases": [
+        "alpha",
+        "network alpha"
+      ],
+      "plain_language": "A built-in scaling setting for a LoRA’s learned changes. It is separate from both learning rate and the strength slider used when generating.",
+      "good_stuff": "A scaling hyperparameter applied to the low-rank update. Standard LoRA commonly uses ΔW = (α/r)BA, while rank-stabilized LoRA uses α/√r. Alpha affects the parameterization during training and must be interpreted with the implementation; it is not universally interchangeable with learning rate or inference strength.",
+      "related_terms": [
+        "rank",
+        "learning-rate",
+        "lora-strength"
+      ],
+      "source_ids": [
+        "peft-lora"
+      ],
+      "definition_scope": "standard",
+      "display_order": 80
+    },
+    {
+      "id": "target-modules",
+      "term": "Target modules",
+      "section_id": "adaptation",
+      "aliases": [
+        "trainable modules",
+        "target layers"
+      ],
+      "plain_language": "The parts of the model you allow the adapter to change—for example, selected attention or other internal layers.",
+      "good_stuff": "The named layers or parameter groups selected for adaptation. Two LoRAs with the same rank can have very different capacities and sizes if they target different modules. Valid targets and their names are architecture- and implementation-specific.",
+      "related_terms": [
+        "architecture",
+        "rank",
+        "text-encoder-training"
+      ],
+      "source_ids": [
+        "peft-lora"
+      ],
+      "definition_scope": "standard",
+      "display_order": 81
+    },
+    {
+      "id": "text-encoder-training",
+      "term": "Text encoder training",
+      "section_id": "adaptation",
+      "aliases": [],
+      "plain_language": "Allowing the component that interprets text to learn as well, instead of changing only the image or video generator.",
+      "good_stuff": "Optimization of some or all text-encoder parameters, directly or through adapters. This changes the conditioning representations supplied downstream and increases the adaptation’s scope. Precomputed text embeddings become stale when the encoder changes, so ordinary fixed embedding caches are incompatible with that training.",
+      "related_terms": [
+        "text-encoder",
+        "caching",
+        "target-modules"
+      ],
+      "source_ids": [
+        "dreambooth-training",
+        "lora-training"
+      ],
+      "definition_scope": "standard",
+      "display_order": 82
+    },
+    {
+      "id": "regularization",
+      "term": "Regularization",
+      "section_id": "adaptation",
+      "aliases": [],
+      "plain_language": "Ways of encouraging the model to learn reusable patterns rather than fitting every quirk of its training examples.",
+      "good_stuff": "Constraints, penalties, or training procedures that bias learning toward solutions expected to generalize. Examples include parameter penalties, dropout, and stopping rules. Regularization changes the effective learning problem; too much can underfit, and no regularizer repairs every dataset or labeling problem.",
+      "related_terms": [
+        "overfitting",
+        "weight-decay",
+        "dropout"
+      ],
+      "source_ids": [
+        "regularization",
+        "learning-curves"
+      ],
+      "definition_scope": "standard",
+      "display_order": 83
+    },
+    {
+      "id": "weight-decay",
+      "term": "Weight decay",
+      "section_id": "adaptation",
+      "aliases": [],
+      "plain_language": "A training pressure that discourages the trainable weights from growing unchecked.",
+      "good_stuff": "A parameter-shrinkage term in an optimizer update. In AdamW, decay is applied separately from the adaptive gradient update; it is not generally equivalent to adding an L2 penalty under Adam. For LoRA, decay acts on the selected trainable factors or parameters, not automatically on the frozen base weights.",
+      "related_terms": [
+        "regularization",
+        "optimizer",
+        "lora"
+      ],
+      "source_ids": [
+        "adamw"
+      ],
+      "definition_scope": "standard",
+      "display_order": 84
+    },
+    {
+      "id": "dropout",
+      "term": "Dropout",
+      "section_id": "adaptation",
+      "aliases": [
+        "LoRA dropout",
+        "network dropout"
+      ],
+      "plain_language": "Temporarily switching off selected internal signals during training so the model cannot always rely on the same ones.",
+      "good_stuff": "Stochastic suppression of activations or other designated components during training, commonly with compensating scaling to preserve expected magnitude. Standard activation dropout is disabled during inference. LoRA dropout and caption dropout operate at different locations and are not the same control.",
+      "related_terms": [
+        "regularization",
+        "caption-dropout",
+        "lora"
+      ],
+      "source_ids": [
+        "dropout",
+        "peft-lora"
+      ],
+      "definition_scope": "standard",
+      "display_order": 85
+    },
+    {
+      "id": "prior-preservation",
+      "term": "Prior preservation",
+      "section_id": "adaptation",
+      "aliases": [
+        "class prior preservation"
+      ],
+      "plain_language": "Helping the model remember the broader category while learning your particular subject—for example, keeping “dog” broader than just your dog.",
+      "good_stuff": "An auxiliary training objective used in DreamBooth-style personalization to preserve class-level behavior while fitting an instance. It commonly uses class examples, often generated by the pretrained model, with a weighted preservation loss. It is one regularization approach, not a requirement of all LoRA training.",
+      "related_terms": [
+        "regularization-images",
+        "class-word",
+        "catastrophic-forgetting"
+      ],
+      "source_ids": [
+        "dreambooth-paper",
+        "dreambooth-training"
+      ],
+      "definition_scope": "standard",
+      "display_order": 86
+    },
+    {
+      "id": "regularization-images",
+      "term": "Regularization images",
+      "section_id": "adaptation",
+      "aliases": [
+        "class images",
+        "prior images"
+      ],
+      "plain_language": "Extra training images of the general category, used to help prevent the model from treating your specific subject as the whole category.",
+      "good_stuff": "Class-level examples included in an auxiliary preservation objective or similar training scheme. They contribute to parameter updates and therefore are not validation images. Their prompts, sampling ratio, and loss weight determine how they influence adaptation.",
+      "related_terms": [
+        "prior-preservation",
+        "validation-data",
+        "dataset-balance"
+      ],
+      "source_ids": [
+        "dreambooth-training"
+      ],
+      "definition_scope": "standard",
+      "display_order": 87
+    },
+    {
+      "id": "dreambooth",
+      "term": "DreamBooth",
+      "section_id": "adaptation",
+      "aliases": [],
+      "plain_language": "A subject-personalization method that teaches a model a particular subject using examples and a distinctive identifier.",
+      "good_stuff": "A subject-driven fine-tuning approach introduced with identifier-based conditioning and a class-specific prior-preservation objective. DreamBooth describes a personalization setup; LoRA describes a parameterization of weight updates. A trainer can combine them, so “DreamBooth” and “LoRA” are not mutually exclusive choices.",
+      "related_terms": [
+        "lora",
+        "trigger-word",
+        "prior-preservation"
+      ],
+      "source_ids": [
+        "dreambooth-paper",
+        "dreambooth-training",
+        "peft-concepts"
+      ],
+      "definition_scope": "standard",
+      "display_order": 88
+    },
+    {
+      "id": "textual-inversion",
+      "term": "Textual inversion",
+      "section_id": "adaptation",
+      "aliases": [],
+      "plain_language": "Teaching a new text representation for a concept while leaving the generator’s existing weights unchanged.",
+      "good_stuff": "Optimization of one or more token embeddings so that a frozen text-to-image system can express a target concept. The learned artifact is an embedding representation compatible with a particular text-conditioning setup, not a LoRA weight update or a complete model.",
+      "related_terms": [
+        "embedding",
+        "trigger-word",
+        "lora"
+      ],
+      "source_ids": [
+        "textual-inversion"
+      ],
+      "definition_scope": "standard",
+      "display_order": 89
+    },
+    {
+      "id": "lycoris",
+      "term": "LyCORIS",
+      "section_id": "adaptation",
+      "aliases": [
+        "LoHa",
+        "LoKr"
+      ],
+      "plain_language": "A family of adapter implementations that includes alternatives to standard LoRA. Different members represent learned changes in different ways.",
+      "good_stuff": "A project and collection of parameter-efficient adaptation methods, rather than one model architecture or one algorithm. Its methods include LoHa, based on Hadamard-product constructions, and LoKr, based on Kronecker-product constructions. Training and loading require support for the specific method and configuration.",
+      "related_terms": [
+        "lora",
+        "dora",
+        "compatibility"
+      ],
+      "source_ids": [
+        "lycoris"
+      ],
+      "definition_scope": "standard",
+      "display_order": 90
+    },
+    {
+      "id": "dora",
+      "term": "DoRA",
+      "section_id": "adaptation",
+      "aliases": [
+        "weight-decomposed low-rank adaptation"
+      ],
+      "plain_language": "A LoRA-related method that learns changes to weight direction and weight magnitude separately.",
+      "good_stuff": "Weight-Decomposed Low-Rank Adaptation decomposes pretrained weights into magnitude and direction, then uses low-rank adaptation for the directional component while learning magnitude separately. Its parameters and loading requirements differ from ordinary LoRA; the acronym is not an alias for a higher-rank LoRA.",
+      "related_terms": [
+        "lora",
+        "rank",
+        "compatibility"
+      ],
+      "source_ids": [
+        "dora"
+      ],
+      "definition_scope": "standard",
+      "display_order": 91
+    },
+    {
+      "id": "sft",
+      "term": "Supervised fine-tuning",
+      "section_id": "adaptation",
+      "aliases": [
+        "SFT"
+      ],
+      "plain_language": "Further training a model using examples that provide a target or a way to calculate one.",
+      "good_stuff": "Fine-tuning against explicit supervision from paired data or constructed targets. In diffusion training, noise or velocity targets can be constructed from media and random variables rather than labeled manually. SFT describes a learning setup, not whether the update is full-weight or parameter-efficient.",
+      "related_terms": [
+        "fine-tuning",
+        "prediction-target",
+        "lora"
+      ],
+      "source_ids": [
+        "ddpm",
+        "text2image-training"
+      ],
+      "definition_scope": "standard",
+      "display_order": 92
+    },
+    {
+      "id": "distillation",
+      "term": "Distillation",
+      "section_id": "adaptation",
+      "aliases": [],
+      "plain_language": "Training one model to reproduce useful behavior from another, often to make generation faster or easier to run.",
+      "good_stuff": "Transfer of behavior from a teacher model or sampling procedure into a student objective. Diffusion distillation can reduce the required sampling steps without reducing parameter count. Distilled models may require particular schedules or guidance conventions; more steps are not automatically beneficial.",
+      "related_terms": [
+        "sampling-steps",
+        "guidance-distillation",
+        "model-variant"
+      ],
+      "source_ids": [
+        "distillation"
+      ],
+      "definition_scope": "standard",
+      "display_order": 93
+    },
+    {
+      "id": "generalization",
+      "term": "Generalization",
+      "section_id": "evaluation",
+      "aliases": [],
+      "plain_language": "Using what was learned in situations the model did not practice—for example, showing your subject in a new pose or setting.",
+      "good_stuff": "Performance beyond the specific training observations, relative to a stated target distribution or set of intended uses. For concept learning, relevant dimensions include identity fidelity, controllable incidental attributes, prompt adherence, and unseen combinations. Generalization is not a single universal property measured by training loss.",
+      "related_terms": [
+        "overfitting",
+        "validation",
+        "likeness"
+      ],
+      "source_ids": [
+        "generalization",
+        "dreambooth-paper"
+      ],
+      "definition_scope": "standard",
+      "display_order": 94
+    },
+    {
+      "id": "overfitting",
+      "term": "Overfitting",
+      "section_id": "evaluation",
+      "aliases": [],
+      "plain_language": "Learning the training examples so specifically that the model becomes less useful on new requests or examples.",
+      "good_stuff": "Fitting idiosyncrasies of the training observations beyond what transfers to the target evaluation distribution. A widening training–validation gap is one indicator, not the definition. In concept training, repeated poses or backgrounds and weaker flexibility can be symptoms, but poor conditioning can produce similar failures.",
+      "related_terms": [
+        "generalization",
+        "regularization",
+        "memorization"
+      ],
+      "source_ids": [
+        "learning-curves",
+        "generalization"
+      ],
+      "definition_scope": "standard",
+      "display_order": 95
+    },
+    {
+      "id": "underfitting",
+      "term": "Underfitting",
+      "section_id": "evaluation",
+      "aliases": [],
+      "plain_language": "Not learning enough of the pattern you intended to teach, even from the training examples.",
+      "good_stuff": "Failure to adequately model the relevant structure in the training task, potentially due to insufficient capacity, inadequate optimization, unsuitable supervision, or excessive constraints. It is not synonymous with “too few epochs,” and merely training longer does not address every cause.",
+      "related_terms": [
+        "overfitting",
+        "rank",
+        "regularization"
+      ],
+      "source_ids": [
+        "learning-curves"
+      ],
+      "definition_scope": "standard",
+      "display_order": 96
+    },
+    {
+      "id": "memorization",
+      "term": "Memorization",
+      "section_id": "evaluation",
+      "aliases": [],
+      "plain_language": "Remembering particular training examples closely enough to reproduce them, instead of only learning a reusable pattern.",
+      "good_stuff": "Retention of sample-specific information that can enable exact or near reproduction of training observations. Memorization and generalization can coexist; resemblance alone does not prove copying. Duplicates and repeated exposure are relevant when assessing this risk in a generative dataset.",
+      "related_terms": [
+        "overfitting",
+        "duplicates",
+        "generalization"
+      ],
+      "source_ids": [
+        "memorization"
+      ],
+      "definition_scope": "standard",
+      "display_order": 97
+    },
+    {
+      "id": "catastrophic-forgetting",
+      "term": "Catastrophic forgetting",
+      "section_id": "evaluation",
+      "aliases": [],
+      "plain_language": "Losing useful existing abilities while learning the new concept.",
+      "good_stuff": "Degradation of previously acquired behavior during adaptation to another task or distribution. With a frozen base and a removable LoRA, the original weights remain intact, but the active adapted model can still interfere with earlier capabilities. Removing the adapter and preserving its effects are different goals.",
+      "related_terms": [
+        "prior-preservation",
+        "lora-strength",
+        "generalization"
+      ],
+      "source_ids": [
+        "dreambooth-paper",
+        "lora-paper"
+      ],
+      "definition_scope": "standard",
+      "display_order": 98
+    },
+    {
+      "id": "entanglement",
+      "term": "Entanglement",
+      "section_id": "evaluation",
+      "aliases": [
+        "concept entanglement"
+      ],
+      "plain_language": "Learning two things as though they belong together—for example, making your subject’s identity inseparable from the coat in the photos.",
+      "good_stuff": "Operationally in Concept Studio, unwanted coupling between intended concept attributes and incidental attributes, so changing one tends to change or summon the other. This describes observable controllability, not proof of a particular arrangement of internal neurons or a mathematically identified latent factorization.",
+      "related_terms": [
+        "disentanglement",
+        "concept-boundary",
+        "concept-leakage"
+      ],
+      "source_ids": [],
+      "definition_scope": "concept_studio",
+      "display_order": 99
+    },
+    {
+      "id": "disentanglement",
+      "term": "Disentanglement",
+      "section_id": "evaluation",
+      "aliases": [
+        "concept disentanglement"
+      ],
+      "plain_language": "Being able to change one aspect of a result without unintentionally changing the others—for example, changing an outfit while preserving identity.",
+      "good_stuff": "Operational separation of intended factors of variation. In representation learning the term can refer to factorized latent structure; here the practical test is independent control across prompts and conditions. Captioning and data design can encourage separation, but they do not establish causal identifiability or guarantee it.",
+      "related_terms": [
+        "entanglement",
+        "concept-captioning",
+        "generalization"
+      ],
+      "source_ids": [
+        "disentanglement"
+      ],
+      "definition_scope": "standard",
+      "display_order": 100
+    },
+    {
+      "id": "concept-leakage",
+      "term": "Concept leakage",
+      "section_id": "evaluation",
+      "aliases": [
+        "attribute leakage",
+        "attribute bleed",
+        "concept bleed"
+      ],
+      "plain_language": "A learned feature appearing where you did not intend it—for example, one character’s traits spilling into another character.",
+      "good_stuff": "Concept Studio’s term for unintended expression or transfer of concept-associated attributes, including cross-subject attribute bleed or appearance without the intended identifier. It names an observable failure mode, not a unique cause. It is different from data leakage between training and evaluation sets.",
+      "related_terms": [
+        "entanglement",
+        "data-leakage",
+        "subject-mapping"
+      ],
+      "source_ids": [],
+      "definition_scope": "concept_studio",
+      "display_order": 101
+    },
+    {
+      "id": "data-leakage",
+      "term": "Data leakage",
+      "section_id": "evaluation",
+      "aliases": [],
+      "plain_language": "Information from your evaluation examples sneaking into training or model selection, making the results look better than they really are.",
+      "good_stuff": "Use of information that would not legitimately be available under the intended evaluation protocol. Examples include fitting preprocessing on held-out data or placing near-duplicate frames across splits. Repeatedly tuning on a test set also compromises its role as an independent final estimate.",
+      "related_terms": [
+        "duplicates",
+        "validation-data",
+        "test-data"
+      ],
+      "source_ids": [
+        "data-leakage",
+        "validation"
+      ],
+      "definition_scope": "standard",
+      "display_order": 102
+    },
+    {
+      "id": "validation",
+      "term": "Validation",
+      "section_id": "evaluation",
+      "aliases": [],
+      "plain_language": "Checking progress on evidence that is not used directly to update the model, so you can choose settings or a checkpoint.",
+      "good_stuff": "Evaluation used during development for model selection, hyperparameter tuning, or stopping decisions. It can include held-out objective measurements and a fixed generation suite. A trainer’s “validation image” may only mean a preview; it does not automatically imply a held-out quantitative test.",
+      "related_terms": [
+        "validation-data",
+        "validation-loss",
+        "preview"
+      ],
+      "source_ids": [
+        "validation",
+        "learning-curves"
+      ],
+      "definition_scope": "standard",
+      "display_order": 103
+    },
+    {
+      "id": "validation-data",
+      "term": "Validation data",
+      "section_id": "evaluation",
+      "aliases": [
+        "validation set",
+        "held-out data"
+      ],
+      "plain_language": "Examples kept out of weight updates and used to check whether learning transfers beyond the training examples.",
+      "good_stuff": "A held-out dataset used for development-time evaluation rather than gradient updates. Its split should respect dependencies such as shared source clips, crops, or photo sessions. It is distinct from regularization data, which participates in training, and test data, reserved for final assessment.",
+      "related_terms": [
+        "dataset",
+        "data-leakage",
+        "regularization-images"
+      ],
+      "source_ids": [
+        "validation",
+        "data-leakage"
+      ],
+      "definition_scope": "standard",
+      "display_order": 104
+    },
+    {
+      "id": "validation-loss",
+      "term": "Validation loss",
+      "section_id": "evaluation",
+      "aliases": [],
+      "plain_language": "The model’s error score on held-out examples. It helps check whether improvements extend beyond the examples used to train.",
+      "good_stuff": "An estimate of the chosen objective on validation data without parameter updates. Diffusion estimates depend on sampled noise and timesteps, so averaging or controlled draws improves comparability. It remains an objective-specific metric, not a direct measure of likeness, aesthetics, or temporal coherence.",
+      "related_terms": [
+        "loss",
+        "validation-data",
+        "generalization"
+      ],
+      "source_ids": [
+        "validation",
+        "ddpm"
+      ],
+      "definition_scope": "standard",
+      "display_order": 105
+    },
+    {
+      "id": "test-data",
+      "term": "Test data",
+      "section_id": "evaluation",
+      "aliases": [
+        "test set",
+        "test suite"
+      ],
+      "plain_language": "Examples or evaluation cases reserved for a final check, after you have finished choosing settings and checkpoints.",
+      "good_stuff": "An evaluation split or suite excluded from both parameter fitting and development-time model selection. Once its outcomes repeatedly guide changes, it is functioning as validation data rather than an untouched test. Independence must be defined at the appropriate source or subject grouping level.",
+      "related_terms": [
+        "validation-data",
+        "data-leakage",
+        "ablation"
+      ],
+      "source_ids": [
+        "validation"
+      ],
+      "definition_scope": "standard",
+      "display_order": 106
+    },
+    {
+      "id": "early-stopping",
+      "term": "Early stopping",
+      "section_id": "evaluation",
+      "aliases": [],
+      "plain_language": "Stopping training when a chosen progress check has stopped improving, rather than always running to the planned limit.",
+      "good_stuff": "A stopping rule based on a monitored metric, often with a minimum improvement and patience interval. The best observed checkpoint can precede the stopping step. Its usefulness depends on the metric and evaluation noise; a noisy loss bump alone does not establish overfitting.",
+      "related_terms": [
+        "validation-loss",
+        "checkpoint",
+        "regularization"
+      ],
+      "source_ids": [
+        "early-stopping"
+      ],
+      "definition_scope": "standard",
+      "display_order": 107
+    },
+    {
+      "id": "preview",
+      "term": "Preview sample",
+      "section_id": "evaluation",
+      "aliases": [
+        "validation image",
+        "training preview",
+        "sample preview"
+      ],
+      "plain_language": "An image or video generated during training so you can inspect what the current checkpoint has learned.",
+      "good_stuff": "An inference output produced with a saved or current parameter state and specified generation settings. Fixed prompts, seeds, and pipeline settings support checkpoint comparisons. Previews are qualitative evidence and may use training-related prompts; they are not automatically held-out validation measurements.",
+      "related_terms": [
+        "checkpoint",
+        "comparison-grid",
+        "validation"
+      ],
+      "source_ids": [
+        "text2image-training",
+        "reproducibility"
+      ],
+      "definition_scope": "standard",
+      "display_order": 108
+    },
+    {
+      "id": "comparison-grid",
+      "term": "Comparison grid",
+      "section_id": "evaluation",
+      "aliases": [
+        "sample grid",
+        "contact sheet"
+      ],
+      "plain_language": "Results arranged side by side so you can compare checkpoints, captions, or generation settings.",
+      "good_stuff": "A controlled visual comparison in which rows or columns represent specified experimental changes. Record the configuration of every cell and keep non-tested settings matched where possible. Using several prompts and seeds reduces the chance that one unusually favorable output determines the conclusion.",
+      "related_terms": [
+        "preview",
+        "ablation",
+        "reproducibility"
+      ],
+      "source_ids": [],
+      "definition_scope": "concept_studio",
+      "display_order": 109
+    },
+    {
+      "id": "ablation",
+      "term": "Ablation / controlled comparison",
+      "section_id": "evaluation",
+      "aliases": [
+        "ablation study",
+        "baseline"
+      ],
+      "plain_language": "Testing a feature by changing or removing it while keeping the rest of the experiment as similar as possible.",
+      "good_stuff": "An experimental comparison intended to isolate a component’s contribution. For concept captioning versus trigger-only captions, match source data, splits, training budget, and evaluation protocol, and repeat across appropriate random seeds. Differences are evidence about that tested setup, not a universal ranking of methods.",
+      "related_terms": [
+        "trigger-only-captioning",
+        "comparison-grid",
+        "reproducibility"
+      ],
+      "source_ids": [],
+      "definition_scope": "concept_studio",
+      "display_order": 110
+    },
+    {
+      "id": "prompt-adherence",
+      "term": "Prompt adherence",
+      "section_id": "evaluation",
+      "aliases": [
+        "prompt following",
+        "prompt fidelity"
+      ],
+      "plain_language": "How well the result follows what you asked for, including subjects, actions, relationships, and visual details.",
+      "good_stuff": "Agreement between a generated output and its requested semantic or structural conditions. It should be distinguished from aesthetics and likeness: an attractive, recognizable portrait can still have the wrong pose or setting. Evaluate explicit requirements rather than treating guidance strength as a direct adherence score.",
+      "related_terms": [
+        "prompt",
+        "cfg",
+        "likeness"
+      ],
+      "source_ids": [
+        "vbench",
+        "clip"
+      ],
+      "definition_scope": "standard",
+      "display_order": 111
+    },
+    {
+      "id": "reproducibility",
+      "term": "Reproducibility",
+      "section_id": "evaluation",
+      "aliases": [],
+      "plain_language": "Being able to repeat a result or experiment from recorded inputs and settings. A seed helps, but it is not the whole recipe.",
+      "good_stuff": "Repeatability under a specified execution setup. Relevant records include model and data versions, captions, preprocessing, seeds, settings, software, and hardware. Identical seeds alone do not guarantee identical outputs across devices, libraries, numerical precision, or nondeterministic operations.",
+      "related_terms": [
+        "seed",
+        "training-state",
+        "metadata"
+      ],
+      "source_ids": [
+        "reproducibility"
+      ],
+      "definition_scope": "standard",
+      "display_order": 112
+    },
+    {
+      "id": "prompt",
+      "term": "Prompt",
+      "section_id": "generation-controls",
+      "aliases": [],
+      "plain_language": "The text you give the model to describe the result you want it to create.",
+      "good_stuff": "Text supplied as generation-time conditioning, typically tokenized and encoded before reaching the generative network. A prompt requests an output; a training caption describes an observed example. Prompt interpretation depends on the model, encoder, active adapters, and other conditioning.",
+      "related_terms": [
+        "caption",
+        "negative-prompt",
+        "text-encoder"
+      ],
+      "source_ids": [
+        "flux",
+        "img2img"
+      ],
+      "definition_scope": "standard",
+      "display_order": 113
+    },
+    {
+      "id": "negative-prompt",
+      "term": "Negative prompt",
+      "section_id": "generation-controls",
+      "aliases": [],
+      "plain_language": "Text describing things to steer away from, when the selected model supports that kind of guidance.",
+      "good_stuff": "In common classifier-free-guidance implementations, text that replaces the null/unconditional condition in the reference prediction. Guidance then emphasizes the difference between positive and negative predictions. It is not a list of guaranteed exclusions, and some architectures or distilled pipelines do not use it.",
+      "related_terms": [
+        "cfg",
+        "prompt",
+        "guidance-distillation"
+      ],
+      "source_ids": [
+        "cfg",
+        "flux"
+      ],
+      "definition_scope": "standard",
+      "display_order": 114
+    },
+    {
+      "id": "cfg",
+      "term": "Guidance scale / CFG",
+      "section_id": "generation-controls",
+      "aliases": [
+        "CFG",
+        "classifier-free guidance",
+        "guidance scale"
+      ],
+      "plain_language": "How strongly generation is pushed toward what the prompt suggests. Turning it up can help, but too much can distort the result.",
+      "good_stuff": "Classifier-free guidance commonly combines predictions as f_guided = f_ref + s(f_cond − f_ref). Here s=1 is the ordinary conditional prediction, and f_ref is null- or negative-conditioned. Increasing s extrapolates the conditional difference; it does not guarantee better prompt adherence. Some interfaces instead expose guidance-distilled conditioning, which is a different mechanism.",
+      "related_terms": [
+        "negative-prompt",
+        "guidance-distillation",
+        "lora-strength"
+      ],
+      "source_ids": [
+        "cfg",
+        "flux"
+      ],
+      "definition_scope": "standard",
+      "display_order": 115
+    },
+    {
+      "id": "guidance-distillation",
+      "term": "Guidance distillation",
+      "section_id": "generation-controls",
+      "aliases": [
+        "distilled guidance",
+        "embedded guidance"
+      ],
+      "plain_language": "Teaching a model to reproduce guided generation more directly, so its guidance control may work differently from ordinary CFG.",
+      "good_stuff": "Distillation of guided teacher behavior into a student, potentially conditioned on a requested guidance value. An embedded guidance input can influence one forward prediction rather than combining conditional and unconditional predictions at runtime. Whether negative prompts or separate “true CFG” are supported depends on the pipeline.",
+      "related_terms": [
+        "cfg",
+        "distillation",
+        "sampling-steps"
+      ],
+      "source_ids": [
+        "flux",
+        "distillation"
+      ],
+      "definition_scope": "standard",
+      "display_order": 116
+    },
+    {
+      "id": "lora-strength",
+      "term": "LoRA strength",
+      "section_id": "generation-controls",
+      "aliases": [
+        "adapter strength",
+        "LoRA weight",
+        "LoRA scale"
+      ],
+      "plain_language": "How much an attached LoRA influences generation. This does not change how the LoRA was trained.",
+      "good_stuff": "An inference-time multiplier on an adapter’s contribution. For an additive LoRA, W_effective = W₀ + λΔW; λ=0 removes that contribution and λ=1 conventionally applies its stored scale. Generated images are nonlinear functions of these weights, so half strength does not mean “half the likeness.”",
+      "related_terms": [
+        "alpha",
+        "cfg",
+        "adapter-merging"
+      ],
+      "source_ids": [
+        "lora-loading",
+        "lora-paper"
+      ],
+      "definition_scope": "standard",
+      "display_order": 117
+    },
+    {
+      "id": "seed",
+      "term": "Seed",
+      "section_id": "generation-controls",
+      "aliases": [
+        "random seed"
+      ],
+      "plain_language": "A number used to start the random choices in a run. Keeping it fixed helps you compare changes more fairly.",
+      "good_stuff": "An initializer for a pseudorandom number generator. It influences initial noise and potentially later stochastic draws, but does not uniquely specify an output without the rest of the pipeline and execution state. Changing shape, batch layout, implementation, or hardware can break apparent seed equivalence.",
+      "related_terms": [
+        "noise",
+        "reproducibility",
+        "comparison-grid"
+      ],
+      "source_ids": [
+        "reproducibility"
+      ],
+      "definition_scope": "standard",
+      "display_order": 118
+    },
+    {
+      "id": "noise",
+      "term": "Noise",
+      "section_id": "generation-controls",
+      "aliases": [],
+      "plain_language": "Random variation used to create training problems and to provide starting points for generation.",
+      "good_stuff": "A random tensor, commonly drawn from a Gaussian distribution, with a role defined by the model’s training and sampling formulation. Noise may initialize a sample, corrupt an example during training or editing, or be injected during stochastic sampling. It is not necessarily visible sensor grain in a photograph.",
+      "related_terms": [
+        "noise-level",
+        "seed",
+        "diffusion-model"
+      ],
+      "source_ids": [
+        "ddpm",
+        "edm"
+      ],
+      "definition_scope": "standard",
+      "display_order": 119
+    },
+    {
+      "id": "sampling",
+      "term": "Sampling",
+      "section_id": "generation-controls",
+      "aliases": [],
+      "plain_language": "The process that turns a trained model’s predictions and random starting point into a new image or video.",
+      "good_stuff": "Drawing an approximate sample from a learned generative distribution. In diffusion and flow pipelines, this usually involves a sequence of model evaluations and numerical updates under a specified schedule and conditioning. It changes the generated representation, not the learned model parameters.",
+      "related_terms": [
+        "sampler",
+        "sampling-steps",
+        "noise-schedule"
+      ],
+      "source_ids": [
+        "flow",
+        "edm"
+      ],
+      "definition_scope": "standard",
+      "display_order": 120
+    },
+    {
+      "id": "sampling-steps",
+      "term": "Sampling steps",
+      "section_id": "generation-controls",
+      "aliases": [
+        "inference steps",
+        "generation steps",
+        "denoising steps"
+      ],
+      "plain_language": "How many stages the generator uses to build the result. More steps take longer and do not always improve it.",
+      "good_stuff": "The number of scheduled integration or denoising stages used for generation. This is distinct from optimizer updates and from the training-time timestep grid. One stage can require more than one model evaluation, and distilled models may be designed for a restricted step regime.",
+      "related_terms": [
+        "training-step",
+        "timestep",
+        "distillation"
+      ],
+      "source_ids": [
+        "schedulers",
+        "distillation"
+      ],
+      "definition_scope": "standard",
+      "display_order": 121
+    },
+    {
+      "id": "sampler",
+      "term": "Sampler",
+      "section_id": "generation-controls",
+      "aliases": [],
+      "plain_language": "The method used to turn the model’s predictions into the next stage of the result. It can change detail, texture, stability, and speed.",
+      "good_stuff": "A numerical update algorithm for traversing a model’s generative process, such as Euler, Heun, or a compatible multistep solver. Some samplers inject additional randomness. The sampler must match the model’s formulation; its visual effects depend on the model, schedule, guidance, and step budget rather than a universal artistic style.",
+      "related_terms": [
+        "noise-schedule",
+        "ode",
+        "stochastic-sampling"
+      ],
+      "source_ids": [
+        "edm",
+        "schedulers"
+      ],
+      "definition_scope": "standard",
+      "display_order": 122
+    },
+    {
+      "id": "noise-schedule",
+      "term": "Noise schedule",
+      "section_id": "generation-controls",
+      "aliases": [
+        "sampling schedule",
+        "sigma schedule"
+      ],
+      "plain_language": "The sequence of noise levels the generator works through. Changing it changes where the generation process spends its steps.",
+      "good_stuff": "The mapping between process time and noise or signal coefficients, and, at inference, the discrete levels selected along that path. The schedule determines where evaluations occur; the sampler determines how predictions update the state. A training noise path and an inference discretization are related but not identical objects.",
+      "related_terms": [
+        "sampler",
+        "karras-schedule",
+        "learning-rate-schedule"
+      ],
+      "source_ids": [
+        "schedulers",
+        "edm"
+      ],
+      "definition_scope": "standard",
+      "display_order": 123
+    },
+    {
+      "id": "scheduler",
+      "term": "Scheduler",
+      "section_id": "generation-controls",
+      "aliases": [],
+      "plain_language": "An ambiguous name used by other tools. Check whether it means the noise schedule for generation or the learning rate schedule for training.",
+      "good_stuff": "A software abstraction whose meaning depends on the library. Diffusion libraries may package the numerical update rule and timestep construction together as one scheduler, while training libraries use schedulers for learning-rate changes. Concept Studio names these concerns separately rather than presenting an unqualified scheduler control.",
+      "related_terms": [
+        "sampler",
+        "noise-schedule",
+        "learning-rate-schedule"
+      ],
+      "source_ids": [
+        "schedulers",
+        "optimizers"
+      ],
+      "definition_scope": "concept_studio",
+      "display_order": 124
+    },
+    {
+      "id": "karras-schedule",
+      "term": "Karras noise schedule",
+      "section_id": "generation-controls",
+      "aliases": [
+        "Karras",
+        "Karras sigmas"
+      ],
+      "plain_language": "A particular way of spacing noise levels during generation. It can change the result’s detail and texture, but it is not a fixed style.",
+      "good_stuff": "A power-law discretization of positive noise levels: σᵢ = [σ_max^(1/ρ) + i/(N−1)(σ_min^(1/ρ) − σ_max^(1/ρ))]^ρ for i=0…N−1. A terminal zero may be appended. “Karras” specifies this spacing choice, not the solver itself; only compatible model/sampler combinations should use it.",
+      "related_terms": [
+        "noise-schedule",
+        "sampler",
+        "noise-level"
+      ],
+      "source_ids": [
+        "edm-code"
+      ],
+      "definition_scope": "standard",
+      "display_order": 125
+    },
+    {
+      "id": "timestep-shift",
+      "term": "Timestep shift",
+      "section_id": "generation-controls",
+      "aliases": [
+        "shift",
+        "flow shift",
+        "sampling shift"
+      ],
+      "plain_language": "A setting that redistributes the stages used along the noise path. It can change the balance of structure and detail, depending on the model.",
+      "good_stuff": "A remapping of time or noise levels used by some flow pipelines. One convention is t′ = st/[1+(s−1)t], for s>0. Other parameterizations and resolution-dependent shifts exist. Training-time shifting and inference-time shifting need not be the same setting or have identical effects.",
+      "related_terms": [
+        "noise-schedule",
+        "timestep-sampling",
+        "flow-matching"
+      ],
+      "source_ids": [
+        "flow-scheduler"
+      ],
+      "definition_scope": "standard",
+      "display_order": 126
+    },
+    {
+      "id": "ode",
+      "term": "Ordinary differential equation",
+      "section_id": "generation-controls",
+      "aliases": [
+        "ODE"
+      ],
+      "plain_language": "The mathematical description of a continuous path the generator can follow from noise to a result. The sampler approximates that path in steps.",
+      "good_stuff": "An equation specifying a state’s derivative, such as dz/dt = vθ(z,t,c). A numerical solver approximates its solution at finitely many points. Given a fixed initial state and field, the ideal initial-value problem is deterministic under suitable conditions; random initial noise still produces different generated samples.",
+      "related_terms": [
+        "flow-matching",
+        "sampler",
+        "stochastic-sampling"
+      ],
+      "source_ids": [
+        "flow",
+        "score-sde"
+      ],
+      "definition_scope": "standard",
+      "display_order": 127
+    },
+    {
+      "id": "stochastic-sampling",
+      "term": "Stochastic sampling",
+      "section_id": "generation-controls",
+      "aliases": [
+        "ancestral sampling",
+        "SDE",
+        "stochastic differential equation"
+      ],
+      "plain_language": "Generation that adds fresh randomness during the process, rather than only choosing a random starting point.",
+      "good_stuff": "Sampling with random transitions or noise increments in addition to deterministic updates. An SDE formulation can take the form dz = f(z,t)dt + g(t)dW_t, where W_t is a Wiener process. Ancestral samplers are a related discrete construction. “Stochastic” does not mean uncontrolled or impossible to reproduce.",
+      "related_terms": [
+        "ode",
+        "seed",
+        "sampler"
+      ],
+      "source_ids": [
+        "score-sde",
+        "edm"
+      ],
+      "definition_scope": "standard",
+      "display_order": 128
+    },
+    {
+      "id": "denoising-strength",
+      "term": "Denoising strength",
+      "section_id": "generation-controls",
+      "aliases": [
+        "denoise strength",
+        "edit strength"
+      ],
+      "plain_language": "How much freedom an editing process has to change its starting image. Lower usually preserves more; higher permits larger changes.",
+      "good_stuff": "In conventional image-to-image diffusion, a control over the starting noise/time level and resulting portion of the generation trajectory. Its exact mapping to a numeric slider is pipeline-specific. It is not the same as CFG, adapter strength, or the weight of an independent reference image.",
+      "related_terms": [
+        "image-to-image",
+        "reference-strength",
+        "cfg"
+      ],
+      "source_ids": [
+        "img2img",
+        "sdedit"
+      ],
+      "definition_scope": "standard",
+      "display_order": 129
+    },
+    {
+      "id": "reference-conditioning",
+      "term": "Reference conditioning",
+      "section_id": "generation-controls",
+      "aliases": [],
+      "plain_language": "Using an image or other example to guide a new result without first training a new LoRA on it.",
+      "good_stuff": "Generation conditioned on representations derived from supplied reference media. Implementations can use image embeddings, clean reference latents, attention, or other conditioning paths. It is distinct from initializing an editable sample from that image, and its influence does not by itself update model weights.",
+      "related_terms": [
+        "reference-strength",
+        "image-encoder",
+        "image-to-image"
+      ],
+      "source_ids": [
+        "ip-adapter",
+        "flux"
+      ],
+      "definition_scope": "standard",
+      "display_order": 130
+    },
+    {
+      "id": "reference-strength",
+      "term": "Reference strength",
+      "section_id": "generation-controls",
+      "aliases": [
+        "reference weight",
+        "conditioning strength"
+      ],
+      "plain_language": "How strongly a reference should influence generation, where the selected method provides such a control.",
+      "good_stuff": "An implementation-specific scale on reference-derived conditioning or its contribution. It may affect identity, composition, texture, or several attributes at once. Its units are not standardized and it should not be interpreted as a probability of likeness or as a substitute for denoising strength.",
+      "related_terms": [
+        "reference-conditioning",
+        "denoising-strength",
+        "lora-strength"
+      ],
+      "source_ids": [
+        "ip-adapter"
+      ],
+      "definition_scope": "standard",
+      "display_order": 131
+    },
+    {
+      "id": "controlnet",
+      "term": "ControlNet / structural conditioning",
+      "section_id": "generation-controls",
+      "aliases": [
+        "ControlNet",
+        "structural conditioning"
+      ],
+      "plain_language": "Guiding generation with a structure such as a pose, depth map, or edges, rather than relying only on words.",
+      "good_stuff": "ControlNet is a particular architecture for adding spatial conditioning to a pretrained diffusion network. Structural conditioning is the broader category and can be implemented in other ways. A pose or edge condition constrains structure; it does not automatically specify the subject’s identity.",
+      "related_terms": [
+        "conditioning",
+        "reference-conditioning",
+        "likeness"
+      ],
+      "source_ids": [
+        "controlnet"
+      ],
+      "definition_scope": "standard",
+      "display_order": 132
+    },
+    {
+      "id": "text-to-image",
+      "term": "Text-to-image",
+      "section_id": "generation-controls",
+      "aliases": [
+        "T2I",
+        "txt2img"
+      ],
+      "plain_language": "Creating a new image from a text prompt, without requiring a starting image.",
+      "good_stuff": "Conditional image generation with text as the primary user-supplied content specification. Sampling normally starts from a noise prior rather than an encoded source image. Additional conditions or adapters can be used without changing the fact that the output modality is an image.",
+      "related_terms": [
+        "prompt",
+        "image-to-image",
+        "generation"
+      ],
+      "source_ids": [
+        "pipelines",
+        "ldm"
+      ],
+      "definition_scope": "standard",
+      "display_order": 133
+    },
+    {
+      "id": "image-to-image",
+      "term": "Image-to-image",
+      "section_id": "generation-controls",
+      "aliases": [
+        "I2I",
+        "img2img"
+      ],
+      "plain_language": "Creating a new image using an existing image as an input, often together with a prompt describing the changes.",
+      "good_stuff": "A broad image-conditioned image-generation task. Conventional diffusion img2img noises an encoded source and denoises from an intermediate point. Other editing architectures use source-image conditioning without that exact initialization scheme, so the task name alone does not specify the algorithm.",
+      "related_terms": [
+        "denoising-strength",
+        "reference-conditioning",
+        "inpainting"
+      ],
+      "source_ids": [
+        "img2img"
+      ],
+      "definition_scope": "standard",
+      "display_order": 134
+    },
+    {
+      "id": "text-to-video",
+      "term": "Text-to-video",
+      "section_id": "generation-controls",
+      "aliases": [
+        "T2V",
+        "txt2vid"
+      ],
+      "plain_language": "Creating a video from a text description of the scene, action, and desired appearance.",
+      "good_stuff": "Video generation with text as the primary content condition, without requiring source frames. The model must generate temporal evolution as well as frame appearance. Motion, duration, frame rate, and optional audio support depend on the model and pipeline.",
+      "related_terms": [
+        "image-to-video",
+        "temporal-consistency",
+        "frame-rate"
+      ],
+      "source_ids": [
+        "video-generation"
+      ],
+      "definition_scope": "standard",
+      "display_order": 135
+    },
+    {
+      "id": "image-to-video",
+      "term": "Image-to-video",
+      "section_id": "generation-controls",
+      "aliases": [
+        "I2V",
+        "img2vid"
+      ],
+      "plain_language": "Creating a video using an image to establish the subject or scene, often as the starting frame.",
+      "good_stuff": "Image-conditioned video generation. The input may serve as a first-frame constraint, a latent condition, or another visual reference, depending on the architecture. It does not necessarily lock every frame’s identity or guarantee exact reproduction of the input pixels.",
+      "related_terms": [
+        "text-to-video",
+        "reference-conditioning",
+        "temporal-consistency"
+      ],
+      "source_ids": [
+        "video-generation",
+        "ltx"
+      ],
+      "definition_scope": "standard",
+      "display_order": 136
+    },
+    {
+      "id": "video-to-video",
+      "term": "Video-to-video",
+      "section_id": "generation-controls",
+      "aliases": [
+        "V2V",
+        "vid2vid"
+      ],
+      "plain_language": "Creating a new version of a video using an existing clip as input—for example, changing its appearance while retaining some motion.",
+      "good_stuff": "Video-conditioned video synthesis or editing, potentially using source latents, structural controls, or learned representations. Preservation of timing, motion, geometry, and identity depends on the conditioning method and edit configuration; the task label does not guarantee frame-by-frame correspondence.",
+      "related_terms": [
+        "image-to-image",
+        "denoising-strength",
+        "temporal-consistency"
+      ],
+      "source_ids": [
+        "ltx"
+      ],
+      "definition_scope": "standard",
+      "display_order": 137
+    },
+    {
+      "id": "mask",
+      "term": "Mask",
+      "section_id": "generation-controls",
+      "aliases": [
+        "edit mask",
+        "loss mask"
+      ],
+      "plain_language": "A map marking which parts of an image or frame an operation should affect.",
+      "good_stuff": "A spatial or spatiotemporal array indicating region membership or continuous weights. In editing, it commonly distinguishes replaceable from preserved regions; in training, it can instead weight a loss. White/black meaning and treatment of soft edges are implementation-specific.",
+      "related_terms": [
+        "inpainting",
+        "loss-weighting",
+        "subject-mapping"
+      ],
+      "source_ids": [
+        "inpainting"
+      ],
+      "definition_scope": "standard",
+      "display_order": 138
+    },
+    {
+      "id": "inpainting",
+      "term": "Inpainting",
+      "section_id": "generation-controls",
+      "aliases": [],
+      "plain_language": "Generating or replacing content inside a selected region of an image or video frame.",
+      "good_stuff": "Conditional synthesis over masked regions using surrounding content and possibly text or other inputs. Exact preservation outside the mask depends on the pipeline and compositing procedure; an inpainting call alone does not guarantee every unmasked pixel is unchanged.",
+      "related_terms": [
+        "mask",
+        "outpainting",
+        "image-to-image"
+      ],
+      "source_ids": [
+        "inpainting"
+      ],
+      "definition_scope": "standard",
+      "display_order": 139
+    },
+    {
+      "id": "outpainting",
+      "term": "Outpainting",
+      "section_id": "generation-controls",
+      "aliases": [],
+      "plain_language": "Extending a picture beyond its existing edges by generating the missing surroundings.",
+      "good_stuff": "Spatial expansion of an image’s canvas with generated content outside the original support, commonly implemented by padding and masked conditional synthesis. The new region is inferred, not recovered from hidden original pixels.",
+      "related_terms": [
+        "inpainting",
+        "mask",
+        "aspect-ratio"
+      ],
+      "source_ids": [
+        "inpainting"
+      ],
+      "definition_scope": "standard",
+      "display_order": 140
+    },
+    {
+      "id": "upscaling",
+      "term": "Upscaling",
+      "section_id": "generation-controls",
+      "aliases": [
+        "super-resolution"
+      ],
+      "plain_language": "Making an image or video larger. Some methods only resize it; others invent additional plausible detail.",
+      "good_stuff": "Increasing spatial resolution using interpolation, a learned super-resolution model, or a generative refinement process. Generative detail is an estimate, not new evidence about the original scene. Distinguish the output pixel count from recovery of true source information.",
+      "related_terms": [
+        "image-resampling",
+        "resolution",
+        "re-denoising"
+      ],
+      "source_ids": [
+        "img2img",
+        "image-processing"
+      ],
+      "definition_scope": "standard",
+      "display_order": 141
+    },
+    {
+      "id": "resampling",
+      "term": "Resampling",
+      "section_id": "generation-controls",
+      "aliases": [],
+      "plain_language": "A word with several meanings: resizing an image, changing video timing, selecting training examples again, or running another generation pass.",
+      "good_stuff": "An overloaded term whose object and operation must be specified. This glossary separates spatial image resampling, temporal resampling, dataset resampling, and re-denoising. They operate on different things and should not share one unexplained control label.",
+      "related_terms": [
+        "image-resampling",
+        "temporal-resampling",
+        "dataset-resampling",
+        "re-denoising"
+      ],
+      "source_ids": [],
+      "definition_scope": "concept_studio",
+      "display_order": 142
+    },
+    {
+      "id": "image-resampling",
+      "term": "Image resampling",
+      "section_id": "generation-controls",
+      "aliases": [
+        "spatial resampling",
+        "resize interpolation"
+      ],
+      "plain_language": "Calculating pixels on a new grid—for example, when resizing or rotating an image.",
+      "good_stuff": "Evaluation of a reconstructed spatial signal at new pixel locations, using an interpolation or reconstruction filter such as bilinear, bicubic, or Lanczos. Downsampling also requires attention to aliasing. This is not a second diffusion sampling pass or a learned super-resolution method.",
+      "related_terms": [
+        "resampling",
+        "upscaling",
+        "preprocessing"
+      ],
+      "source_ids": [
+        "image-processing"
+      ],
+      "definition_scope": "standard",
+      "display_order": 143
+    },
+    {
+      "id": "temporal-resampling",
+      "term": "Temporal resampling",
+      "section_id": "generation-controls",
+      "aliases": [
+        "video resampling",
+        "frame-rate conversion"
+      ],
+      "plain_language": "Changing which moments are represented in a video—for example, converting it to a different frame rate.",
+      "good_stuff": "Remapping a sequence to new temporal sample times, using frame selection, duplication, interpolation, or related processing. Retiming existing frames changes playback speed; synthesizing intermediate frames can preserve duration. These operations are not equivalent and can change apparent motion.",
+      "related_terms": [
+        "frame-rate",
+        "frame-interpolation",
+        "temporal-consistency"
+      ],
+      "source_ids": [
+        "video-processing"
+      ],
+      "definition_scope": "standard",
+      "display_order": 144
+    },
+    {
+      "id": "dataset-resampling",
+      "term": "Dataset resampling",
+      "section_id": "generation-controls",
+      "aliases": [
+        "sampling weight",
+        "dataset weight",
+        "weighted sampling"
+      ],
+      "plain_language": "Changing how training examples are selected or repeated, so some examples are seen more or less often.",
+      "good_stuff": "Construction of a sampling distribution over dataset examples or groups, potentially with replacement or nonuniform weights. This changes effective exposure without necessarily creating new source observations. It is distinct from resizing images and from sampling a generated image.",
+      "related_terms": [
+        "repeats",
+        "dataset-balance",
+        "sampling"
+      ],
+      "source_ids": [
+        "dataloader"
+      ],
+      "definition_scope": "standard",
+      "display_order": 145
+    },
+    {
+      "id": "re-denoising",
+      "term": "Re-denoising / refinement pass",
+      "section_id": "generation-controls",
+      "aliases": [
+        "refinement pass",
+        "second pass",
+        "diffusion resampling"
+      ],
+      "plain_language": "Running an existing result through another generation pass to revise or refine it, often after resizing it.",
+      "good_stuff": "A subsequent generative stage that initializes or conditions on an earlier output, often adding noise before further denoising. It may use different resolution or settings. It is not generally equivalent to extending the original sampler trajectory by the same number of steps.",
+      "related_terms": [
+        "image-to-image",
+        "denoising-strength",
+        "upscaling"
+      ],
+      "source_ids": [
+        "img2img",
+        "sdedit"
+      ],
+      "definition_scope": "standard",
+      "display_order": 146
+    },
+    {
+      "id": "frame",
+      "term": "Frame",
+      "section_id": "video",
+      "aliases": [],
+      "plain_language": "One image in a video sequence. A video model needs the frames to work together, not just look good individually.",
+      "good_stuff": "A spatial image associated with a presentation time in a temporal sequence. A decoded video frame is distinct from a compressed latent time slice or a video Transformer token. Encoders may represent several frames jointly rather than treating each as an independent image.",
+      "related_terms": [
+        "frame-rate",
+        "temporal-consistency",
+        "vae"
+      ],
+      "source_ids": [
+        "video-processing",
+        "ltx"
+      ],
+      "definition_scope": "standard",
+      "display_order": 147
+    },
+    {
+      "id": "frame-rate",
+      "term": "Frame rate",
+      "section_id": "video",
+      "aliases": [
+        "FPS",
+        "frames per second"
+      ],
+      "plain_language": "How many frames are shown each second. Changing it can change playback speed unless the sequence is also resampled.",
+      "good_stuff": "The temporal presentation rate, usually in frames per second (FPS). For constant-rate playback, N frames occupy approximately N/FPS seconds. Source FPS, training sampling rate, model conditioning, and export FPS are separate concerns; changing an output file’s rate does not create additional motion evidence.",
+      "related_terms": [
+        "clip-length",
+        "temporal-resampling",
+        "frame-interpolation"
+      ],
+      "source_ids": [
+        "video-processing",
+        "video-generation"
+      ],
+      "definition_scope": "standard",
+      "display_order": 148
+    },
+    {
+      "id": "clip-length",
+      "term": "Clip length",
+      "section_id": "video",
+      "aliases": [
+        "duration",
+        "frame count",
+        "video length"
+      ],
+      "plain_language": "How much video an example or generation contains, measured in seconds or frames.",
+      "good_stuff": "The temporal extent of a sequence, which should identify both frame count and timing. Model constraints can require particular frame-count patterns because of temporal compression or patching. A longer clip generally increases computation, and a frame count alone does not determine playback duration.",
+      "related_terms": [
+        "frame-rate",
+        "temporal-bucketing",
+        "vae"
+      ],
+      "source_ids": [
+        "video-dataset",
+        "ltx"
+      ],
+      "definition_scope": "standard",
+      "display_order": 149
+    },
+    {
+      "id": "temporal-consistency",
+      "term": "Temporal consistency",
+      "section_id": "video",
+      "aliases": [],
+      "plain_language": "Things remaining coherent as the video progresses: faces, objects, lighting, and scene structure should change only in ways that make sense.",
+      "good_stuff": "Consistency of identity, appearance, geometry, and scene state over time, allowing motion and visibility changes. It does not mean minimizing frame differences: a frozen scene can fail the requested action. Distinguish it from motion quality and prompt adherence.",
+      "related_terms": [
+        "flicker",
+        "temporal-drift",
+        "motion"
+      ],
+      "source_ids": [
+        "vbench"
+      ],
+      "definition_scope": "standard",
+      "display_order": 150
+    },
+    {
+      "id": "flicker",
+      "term": "Flicker",
+      "section_id": "video",
+      "aliases": [
+        "temporal flicker",
+        "temporal flickering"
+      ],
+      "plain_language": "Unwanted rapid changes between frames, such as textures, brightness, or small details repeatedly jumping or shimmering.",
+      "good_stuff": "Spurious temporal variation, often at short time scales, not explained by intended motion, occlusion, or lighting changes. It can occur even when the overall subject identity remains stable. Flicker is a temporal artifact, not merely blur or low spatial resolution.",
+      "related_terms": [
+        "temporal-consistency",
+        "temporal-drift",
+        "frame-interpolation"
+      ],
+      "source_ids": [
+        "vbench"
+      ],
+      "definition_scope": "standard",
+      "display_order": 151
+    },
+    {
+      "id": "temporal-drift",
+      "term": "Temporal drift",
+      "section_id": "video",
+      "aliases": [
+        "identity drift"
+      ],
+      "plain_language": "A subject or scene gradually changing into something else over the course of a clip, without that change being intended.",
+      "good_stuff": "Accumulating inconsistency in identity, shape, texture, or scene state over time. Unlike rapid flicker, drift can be locally smooth while becoming substantially wrong across a longer interval. It may occur in jointly generated clips as well as sequential generation; it does not imply one specific architecture.",
+      "related_terms": [
+        "temporal-consistency",
+        "likeness",
+        "flicker"
+      ],
+      "source_ids": [
+        "framepack"
+      ],
+      "definition_scope": "standard",
+      "display_order": 152
+    },
+    {
+      "id": "motion",
+      "term": "Subject motion",
+      "section_id": "video",
+      "aliases": [
+        "motion",
+        "action"
+      ],
+      "plain_language": "How a person or object moves or changes over time, such as walking, turning, speaking, or opening a door.",
+      "good_stuff": "Temporal change attributable to the subject’s action, articulation, or physical movement rather than solely to viewpoint changes. In captioning, distinguish an observed action from a guessed intention. Motion amount, smoothness, and correctness are separate qualities.",
+      "related_terms": [
+        "camera-motion",
+        "temporal-consistency",
+        "concept-captioning"
+      ],
+      "source_ids": [
+        "vbench"
+      ],
+      "definition_scope": "standard",
+      "display_order": 153
+    },
+    {
+      "id": "camera-motion",
+      "term": "Camera motion",
+      "section_id": "video",
+      "aliases": [],
+      "plain_language": "A change in viewpoint, such as panning, tilting, moving closer, or tracking a subject.",
+      "good_stuff": "Temporal variation in viewpoint or imaging parameters that changes how the scene is projected. Translation, rotation, and zoom can produce different visual effects. Caption apparent camera movement separately from subject action; a static subject can still occupy changing image positions because the viewpoint changes.",
+      "related_terms": [
+        "motion",
+        "caption",
+        "temporal-consistency"
+      ],
+      "source_ids": [],
+      "definition_scope": "concept_studio",
+      "display_order": 154
+    },
+    {
+      "id": "frame-interpolation",
+      "term": "Frame interpolation",
+      "section_id": "video",
+      "aliases": [],
+      "plain_language": "Creating estimated frames between existing ones to make motion appear smoother or produce slow motion.",
+      "good_stuff": "Synthesis of images at intermediate temporal positions from surrounding frames, potentially using estimated motion or learned correspondence. The inserted frames are predictions, not recovered observations. Interpolation can introduce artifacts around occlusions or fast motion and does not guarantee preservation of identity.",
+      "related_terms": [
+        "temporal-resampling",
+        "frame-rate",
+        "flicker"
+      ],
+      "source_ids": [
+        "video-processing"
+      ],
+      "definition_scope": "standard",
+      "display_order": 155
+    },
+    {
+      "id": "temporal-bucketing",
+      "term": "Temporal bucketing",
+      "section_id": "video",
+      "aliases": [],
+      "plain_language": "Grouping training clips with compatible lengths so they can be processed together efficiently.",
+      "good_stuff": "Assignment of video examples to discrete frame-count or temporal-shape groups, often combined with spatial buckets. Length constraints can reflect the model’s temporal compression and patching. Cropping, padding, or frame selection changes which parts of an action are actually observed during training.",
+      "related_terms": [
+        "bucketing",
+        "clip-length",
+        "training-example"
+      ],
+      "source_ids": [
+        "video-dataset"
+      ],
+      "definition_scope": "standard",
+      "display_order": 156
+    },
+    {
+      "id": "gpu-memory",
+      "term": "GPU memory / VRAM",
+      "section_id": "compute",
+      "aliases": [
+        "VRAM",
+        "video RAM",
+        "GPU memory"
+      ],
+      "plain_language": "The working memory used by the graphics processor while running a model. Model files are not the only things that need space there.",
+      "good_stuff": "Device-accessible memory occupied by weights, activations, intermediate buffers, and—during training—gradients and optimizer state. On a discrete GPU this is typically dedicated VRAM. Peak requirements depend on execution and tensor shapes, so a model’s file size does not directly equal its training memory requirement.",
+      "related_terms": [
+        "unified-memory",
+        "out-of-memory",
+        "gradient-checkpointing"
+      ],
+      "source_ids": [
+        "memory",
+        "qlora"
+      ],
+      "definition_scope": "standard",
+      "display_order": 157
+    },
+    {
+      "id": "unified-memory",
+      "term": "Unified memory",
+      "section_id": "compute",
+      "aliases": [
+        "shared memory"
+      ],
+      "plain_language": "Memory shared by the CPU and GPU, as on Apple silicon Macs. It still has to accommodate the operating system and other running work.",
+      "good_stuff": "A memory architecture in which CPU and GPU access a shared physical memory pool rather than separate dedicated system and graphics-memory pools. Shared capacity does not mean all installed memory is available to one model; working-set limits, other allocations, and runtime behavior still matter.",
+      "related_terms": [
+        "gpu-memory",
+        "out-of-memory",
+        "offloading"
+      ],
+      "source_ids": [
+        "apple-memory"
+      ],
+      "definition_scope": "standard",
+      "display_order": 158
+    },
+    {
+      "id": "out-of-memory",
+      "term": "Out of memory",
+      "section_id": "compute",
+      "aliases": [
+        "OOM"
+      ],
+      "plain_language": "The run needs more working memory than it can allocate. This is usually about active computation, not free disk space.",
+      "good_stuff": "Failure to allocate a required tensor or buffer within available device or system memory and runtime limits. Reducing the relevant peak—through smaller micro-batches, lower spatial/temporal dimensions, checkpointing, quantization, or offloading—may help, but the appropriate remedy depends on what occupies memory.",
+      "related_terms": [
+        "gpu-memory",
+        "micro-batch",
+        "gradient-checkpointing"
+      ],
+      "source_ids": [
+        "memory",
+        "qlora"
+      ],
+      "definition_scope": "standard",
+      "display_order": 159
+    },
+    {
+      "id": "precision",
+      "term": "Numerical precision",
+      "section_id": "compute",
+      "aliases": [
+        "precision",
+        "dtype",
+        "FP32",
+        "FP16",
+        "BF16"
+      ],
+      "plain_language": "The number format used to store and calculate model values. Smaller formats can save memory but represent numbers less finely.",
+      "good_stuff": "The representable range and resolution of numerical formats used for weights or computations, such as FP32, FP16, and BF16. Equal bit widths do not imply equal range or precision. Different parts of a run can use different formats, including higher-precision optimizer state or reductions.",
+      "related_terms": [
+        "mixed-precision",
+        "quantization",
+        "model-weights"
+      ],
+      "source_ids": [
+        "mixed-precision"
+      ],
+      "definition_scope": "standard",
+      "display_order": 160
+    },
+    {
+      "id": "mixed-precision",
+      "term": "Mixed precision",
+      "section_id": "compute",
+      "aliases": [
+        "AMP"
+      ],
+      "plain_language": "Using different number formats for different parts of a run to save memory and computation while keeping sensitive operations more stable.",
+      "good_stuff": "Execution that selects numerical formats by operation or state type rather than using one format throughout. Automatic mixed precision may combine lower-precision arithmetic with higher-precision operations and, where appropriate, loss scaling. The model file’s dtype alone does not describe the entire training computation.",
+      "related_terms": [
+        "precision",
+        "quantization",
+        "optimizer"
+      ],
+      "source_ids": [
+        "mixed-precision"
+      ],
+      "definition_scope": "standard",
+      "display_order": 161
+    },
+    {
+      "id": "quantization",
+      "term": "Quantization",
+      "section_id": "compute",
+      "aliases": [],
+      "plain_language": "Representing model values with fewer available levels to reduce storage or memory use, sometimes with a trade-off in accuracy or speed.",
+      "good_stuff": "Approximation of tensors using a lower-resolution numerical representation, commonly with scales and sometimes zero points or other metadata. Weight-only and activation quantization are different choices. Hardware and kernels determine speed benefits; a smaller representation does not guarantee faster execution.",
+      "related_terms": [
+        "precision",
+        "qlora",
+        "compatibility"
+      ],
+      "source_ids": [
+        "quantization"
+      ],
+      "definition_scope": "standard",
+      "display_order": 162
+    },
+    {
+      "id": "qlora",
+      "term": "QLoRA",
+      "section_id": "compute",
+      "aliases": [
+        "quantized LoRA training"
+      ],
+      "plain_language": "Training a LoRA while keeping the base model in a quantized, lower-memory form.",
+      "good_stuff": "Low-rank adaptation through a frozen quantized base, with adapter parameters typically trained in a higher-precision representation. The quantization scheme, compute dtype, optimizer state, and supported kernels are separate configuration choices. QLoRA is not simply quantizing a finished LoRA file.",
+      "related_terms": [
+        "lora",
+        "quantization",
+        "mixed-precision"
+      ],
+      "source_ids": [
+        "qlora"
+      ],
+      "definition_scope": "standard",
+      "display_order": 163
+    },
+    {
+      "id": "gradient-checkpointing",
+      "term": "Gradient checkpointing",
+      "section_id": "compute",
+      "aliases": [
+        "activation checkpointing",
+        "recomputation"
+      ],
+      "plain_language": "Saving training memory by recalculating some intermediate results instead of keeping all of them. It is not a saved model checkpoint.",
+      "good_stuff": "Activation checkpointing retains selected intermediate tensors and recomputes others during backpropagation. It trades additional computation for lower activation memory. This use of “checkpoint” concerns the computation graph, not an on-disk snapshot for resuming a training run.",
+      "related_terms": [
+        "checkpoint",
+        "gradient",
+        "gpu-memory"
+      ],
+      "source_ids": [
+        "activation-checkpoint"
+      ],
+      "definition_scope": "standard",
+      "display_order": 164
+    },
+    {
+      "id": "caching",
+      "term": "Caching",
+      "section_id": "compute",
+      "aliases": [
+        "latent caching",
+        "text embedding caching"
+      ],
+      "plain_language": "Calculating something once and reusing it, such as an image’s latents or a caption’s text embeddings.",
+      "good_stuff": "Storage and reuse of derived representations. A cache is valid only for the inputs, preprocessing, encoder weights, and stochastic choices it represents. Caching one crop or caption variant can remove intended variation; training a cached encoder invalidates its previously computed outputs.",
+      "related_terms": [
+        "latents",
+        "text-encoder-training",
+        "preprocessing"
+      ],
+      "source_ids": [
+        "advanced-training",
+        "text2image-training"
+      ],
+      "definition_scope": "standard",
+      "display_order": 165
+    },
+    {
+      "id": "offloading",
+      "term": "Offloading",
+      "section_id": "compute",
+      "aliases": [],
+      "plain_language": "Moving model parts or working data out of GPU memory until they are needed, usually to reduce the amount that must fit at once.",
+      "good_stuff": "Placement or transfer of weights and other state between execution devices or storage tiers to reduce peak device residency. It can trade memory for transfer overhead and latency. Support and trade-offs differ between training and inference and between dedicated- and shared-memory hardware.",
+      "related_terms": [
+        "gpu-memory",
+        "unified-memory",
+        "out-of-memory"
+      ],
+      "source_ids": [
+        "memory"
+      ],
+      "definition_scope": "standard",
+      "display_order": 166
+    },
+    {
+      "id": "adapter-merging",
+      "term": "Adapter merging",
+      "section_id": "artifacts",
+      "aliases": [
+        "LoRA merge",
+        "fusion",
+        "fuse LoRA"
+      ],
+      "plain_language": "Combining an adapter’s learned changes with model weights, or combining compatible adapters into a new artifact.",
+      "good_stuff": "For ordinary additive LoRAs on aligned weights, updates can be fused as W = W₀ + Σᵢ λᵢΔWᵢ. Merging methods and supported adapter types vary. Fusion does not make unrelated architectures compatible, and preserving originals retains independent strength control and avoids reliance on numerically exact reversal.",
+      "related_terms": [
+        "lora-strength",
+        "model-variant",
+        "compatibility"
+      ],
+      "source_ids": [
+        "peft-loading",
+        "lora-paper"
+      ],
+      "definition_scope": "standard",
+      "display_order": 167
+    },
+    {
+      "id": "compatibility",
+      "term": "Model compatibility",
+      "section_id": "artifacts",
+      "aliases": [
+        "adapter compatibility"
+      ],
+      "plain_language": "Whether a model, adapter, and supporting components are designed to work together—not merely whether their files can be opened.",
+      "good_stuff": "Agreement on architecture, tensor shapes, module naming, conditioning representations, and required configurations. An adapter that loads successfully into a related variant may still behave differently from its training base. Record the intended base revision and necessary encoders, VAE, and adapter format.",
+      "related_terms": [
+        "base-model",
+        "architecture",
+        "export"
+      ],
+      "source_ids": [
+        "peft-concepts",
+        "lora-loading"
+      ],
+      "definition_scope": "standard",
+      "display_order": 168
+    },
+    {
+      "id": "export",
+      "term": "Export",
+      "section_id": "artifacts",
+      "aliases": [
+        "adapter export"
+      ],
+      "plain_language": "Packaging a trained result so it can be used elsewhere. Exporting a LoRA does not normally include the entire base model.",
+      "good_stuff": "Serialization of selected weights and the metadata or configuration required by a target format. A useful adapter export identifies its base, type, target modules, rank/scaling information, and trigger convention where applicable. An inference export is not necessarily a resumable training checkpoint.",
+      "related_terms": [
+        "safetensors",
+        "compatibility",
+        "checkpoint"
+      ],
+      "source_ids": [
+        "lora-loading",
+        "safetensors"
+      ],
+      "definition_scope": "standard",
+      "display_order": 169
+    },
+    {
+      "id": "safetensors",
+      "term": "Safetensors",
+      "section_id": "artifacts",
+      "aliases": [
+        ".safetensors"
+      ],
+      "plain_language": "A common file format for model and adapter tensors. The file extension does not tell you which model the contents belong to.",
+      "good_stuff": "A tensor-serialization format designed to avoid executable pickle payloads and support efficient loading. It can store tensor data and string metadata, but the format itself does not guarantee model compatibility, provenance, output quality, or the safety of unrelated code shipped alongside it.",
+      "related_terms": [
+        "export",
+        "compatibility",
+        "metadata"
+      ],
+      "source_ids": [
+        "safetensors"
+      ],
+      "definition_scope": "standard",
+      "display_order": 170
+    },
+    {
+      "id": "data-source",
+      "term": "Data source",
+      "section_id": "supporting",
+      "aliases": [],
+      "plain_language": "Where your images, clips, or captions come from, such as a folder, photo library, or dataset repository.",
+      "good_stuff": "The location or system from which source examples and associated information are obtained. The source is distinct from the prepared training dataset: import, selection, editing, and preprocessing can produce a specific dataset version from the same source.",
+      "related_terms": [
+        "connector",
+        "import",
+        "dataset"
+      ],
+      "source_ids": [
+        "image-dataset"
+      ],
+      "definition_scope": "concept_studio",
+      "display_order": 171
+    },
+    {
+      "id": "connector",
+      "term": "Connector",
+      "section_id": "supporting",
+      "aliases": [],
+      "plain_language": "An integration that lets the app read from an outside source, such as a photo library or dataset service.",
+      "good_stuff": "A software interface to a source system’s access and retrieval mechanisms. Connecting a source, selecting data, importing it, and preparing it for training are separate operations. This definition describes the role, not a claim that Concept Studio supports a particular service.",
+      "related_terms": [
+        "data-source",
+        "import",
+        "metadata"
+      ],
+      "source_ids": [],
+      "definition_scope": "concept_studio",
+      "display_order": 172
+    },
+    {
+      "id": "import",
+      "term": "Import / ingestion",
+      "section_id": "supporting",
+      "aliases": [
+        "ingestion",
+        "data import"
+      ],
+      "plain_language": "Bringing selected media and its associated information into the project so it can be reviewed and prepared.",
+      "good_stuff": "Acquisition or registration of source assets and metadata in a project’s dataset workflow. Depending on implementation, it can copy assets or retain references to them. Import does not necessarily imply uploading to a cloud service, preprocessing every asset, or starting training.",
+      "related_terms": [
+        "data-source",
+        "preprocessing",
+        "dataset"
+      ],
+      "source_ids": [
+        "image-dataset"
+      ],
+      "definition_scope": "concept_studio",
+      "display_order": 173
+    },
+    {
+      "id": "preprocessing",
+      "term": "Preprocessing",
+      "section_id": "supporting",
+      "aliases": [],
+      "plain_language": "Preparing examples for the model, such as selecting clips, fixing orientation, cropping, resizing, and converting them into the required form.",
+      "good_stuff": "Transformations applied before the model consumes an example, whether performed ahead of time or on demand. Deterministic preparation and stochastic augmentation have different roles. Changes that alter visible content must remain aligned with captions, concept assignments, and other conditioning.",
+      "related_terms": [
+        "augmentation",
+        "normalization",
+        "caching"
+      ],
+      "source_ids": [
+        "transforms"
+      ],
+      "definition_scope": "standard",
+      "display_order": 174
+    },
+    {
+      "id": "normalization",
+      "term": "Normalization",
+      "section_id": "supporting",
+      "aliases": [],
+      "plain_language": "Putting numerical inputs into the scale a model expects. The app can handle this without making it a creative decision.",
+      "good_stuff": "In this ML context, a numerical transformation such as x′=(x−μ)/σ or mapping pixel values into a required range. It is not regularization, database normalization, or a general name for all preprocessing. Required constants and conventions depend on the specific encoder or model.",
+      "related_terms": [
+        "preprocessing",
+        "regularization",
+        "text-encoder"
+      ],
+      "source_ids": [
+        "normalization"
+      ],
+      "definition_scope": "standard",
+      "display_order": 175
+    },
+    {
+      "id": "schema",
+      "term": "Schema",
+      "section_id": "supporting",
+      "aliases": [],
+      "plain_language": "The rules for how a file or record is organized—for example, which field holds the caption and which identifies the image.",
+      "good_stuff": "A specification of data structure, field types, required values, and relevant constraints. An import or export schema enables consistent interpretation of records. This is distinct from a neural network architecture and from the learned weights stored in a model file.",
+      "related_terms": [
+        "metadata",
+        "import",
+        "export"
+      ],
+      "source_ids": [
+        "schema"
+      ],
+      "definition_scope": "standard",
+      "display_order": 176
+    },
+    {
+      "id": "metadata",
+      "term": "Metadata",
+      "section_id": "supporting",
+      "aliases": [],
+      "plain_language": "Information about an example or model rather than the media or weights themselves—for example, its source, settings, or concept assignment.",
+      "good_stuff": "Structured contextual information associated with an asset, dataset, run, or model artifact. Useful fields can include identifiers, captions, crop/clip selections, hashes, base revisions, and configuration. Metadata only affects training or generation when the consuming software actually uses it.",
+      "related_terms": [
+        "schema",
+        "reproducibility",
+        "export"
+      ],
+      "source_ids": [
+        "schema",
+        "safetensors"
+      ],
+      "definition_scope": "standard",
+      "display_order": 177
+    }
+  ],
+  "sources": [
+    {
+      "id": "optimization",
+      "title": "PyTorch — Optimizing Model Parameters",
+      "url": "https://docs.pytorch.org/tutorials/beginner/basics/optimization_tutorial.html",
+      "accessed": "2026-10-11",
+      "display_number": 1
+    },
+    {
+      "id": "ldm",
+      "title": "Rombach et al. — High-Resolution Image Synthesis with Latent Diffusion Models",
+      "url": "https://arxiv.org/abs/2112.10752",
+      "accessed": "2026-10-11",
+      "display_number": 2
+    },
+    {
+      "id": "peft-concepts",
+      "title": "Hugging Face PEFT — LoRA conceptual guide",
+      "url": "https://huggingface.co/docs/peft/main/en/conceptual_guides/lora",
+      "accessed": "2026-10-11",
+      "display_number": 3
+    },
+    {
+      "id": "dit",
+      "title": "Peebles and Xie — Scalable Diffusion Models with Transformers",
+      "url": "https://arxiv.org/abs/2212.09748",
+      "accessed": "2026-10-11",
+      "display_number": 4
+    },
+    {
+      "id": "autograd",
+      "title": "PyTorch — Automatic Differentiation with torch.autograd",
+      "url": "https://docs.pytorch.org/tutorials/beginner/basics/autogradqs_tutorial.html",
+      "accessed": "2026-10-11",
+      "display_number": 5
+    },
+    {
+      "id": "dreambooth-paper",
+      "title": "Ruiz et al. — DreamBooth: Fine Tuning Text-to-Image Diffusion Models for Subject-Driven Generation",
+      "url": "https://arxiv.org/abs/2208.12242",
+      "accessed": "2026-10-11",
+      "display_number": 6
+    },
+    {
+      "id": "lora-paper",
+      "title": "Hu et al. — LoRA: Low-Rank Adaptation of Large Language Models",
+      "url": "https://arxiv.org/html/2106.09685",
+      "accessed": "2026-10-11",
+      "display_number": 7
+    },
+    {
+      "id": "lora-training",
+      "title": "Hugging Face Diffusers — LoRA training",
+      "url": "https://huggingface.co/docs/diffusers/en/training/lora",
+      "accessed": "2026-10-11",
+      "display_number": 8
+    },
+    {
+      "id": "text2image-training",
+      "title": "Hugging Face Diffusers — Text-to-image training",
+      "url": "https://huggingface.co/docs/diffusers/en/training/text2image",
+      "accessed": "2026-10-11",
+      "display_number": 9
+    },
+    {
+      "id": "lora-loading",
+      "title": "Hugging Face Diffusers — LoRA loaders",
+      "url": "https://huggingface.co/docs/diffusers/en/api/loaders/lora",
+      "accessed": "2026-10-11",
+      "display_number": 10
+    },
+    {
+      "id": "ip-adapter",
+      "title": "Ye et al. — IP-Adapter: Text Compatible Image Prompt Adapter for Text-to-Image Diffusion Models",
+      "url": "https://arxiv.org/abs/2308.06721",
+      "accessed": "2026-10-11",
+      "display_number": 11
+    },
+    {
+      "id": "schedulers",
+      "title": "Hugging Face Diffusers — Schedulers",
+      "url": "https://huggingface.co/docs/diffusers/en/using-diffusers/schedulers",
+      "accessed": "2026-10-11",
+      "display_number": 12
+    },
+    {
+      "id": "pipelines",
+      "title": "Hugging Face Diffusers — Pipelines overview",
+      "url": "https://huggingface.co/docs/diffusers/en/api/pipelines/overview",
+      "accessed": "2026-10-11",
+      "display_number": 13
+    },
+    {
+      "id": "checkpoint",
+      "title": "PyTorch — Saving and Loading Models",
+      "url": "https://docs.pytorch.org/tutorials/beginner/saving_loading_models.html",
+      "accessed": "2026-10-11",
+      "display_number": 14
+    },
+    {
+      "id": "image-dataset",
+      "title": "Hugging Face Datasets — Load image data",
+      "url": "https://huggingface.co/docs/datasets/en/image_load",
+      "accessed": "2026-10-11",
+      "display_number": 15
+    },
+    {
+      "id": "advanced-training",
+      "title": "kohya-ss — Musubi Tuner advanced configuration",
+      "url": "https://github.com/kohya-ss/musubi-tuner/blob/main/docs/advanced_config.md",
+      "accessed": "2026-10-11",
+      "display_number": 16
+    },
+    {
+      "id": "video-dataset",
+      "title": "kohya-ss — Musubi Tuner dataset configuration",
+      "url": "https://github.com/kohya-ss/musubi-tuner/blob/main/docs/dataset_config.md",
+      "accessed": "2026-10-11",
+      "display_number": 17
+    },
+    {
+      "id": "tokenization",
+      "title": "Hugging Face Transformers — Tokenization algorithms",
+      "url": "https://huggingface.co/docs/transformers/en/tokenizer_summary",
+      "accessed": "2026-10-11",
+      "display_number": 18
+    },
+    {
+      "id": "dreambooth-training",
+      "title": "Hugging Face Diffusers — DreamBooth training",
+      "url": "https://huggingface.co/docs/diffusers/en/training/dreambooth",
+      "accessed": "2026-10-11",
+      "display_number": 19
+    },
+    {
+      "id": "generalization",
+      "title": "Google Machine Learning Crash Course — Generalization",
+      "url": "https://developers.google.com/machine-learning/crash-course/overfitting/generalization",
+      "accessed": "2026-10-11",
+      "display_number": 20
+    },
+    {
+      "id": "dataloader",
+      "title": "PyTorch — torch.utils.data",
+      "url": "https://docs.pytorch.org/docs/2.14/data.html",
+      "accessed": "2026-10-11",
+      "display_number": 21
+    },
+    {
+      "id": "memorization",
+      "title": "Carlini et al. — Extracting Training Data from Diffusion Models",
+      "url": "https://arxiv.org/abs/2301.13188",
+      "accessed": "2026-10-11",
+      "display_number": 22
+    },
+    {
+      "id": "data-leakage",
+      "title": "scikit-learn — Common pitfalls and recommended practices",
+      "url": "https://scikit-learn.org/stable/common_pitfalls.html",
+      "accessed": "2026-10-11",
+      "display_number": 23
+    },
+    {
+      "id": "transforms",
+      "title": "Torchvision — Transforming images, videos, boxes and more",
+      "url": "https://docs.pytorch.org/vision/stable/transforms.html",
+      "accessed": "2026-10-11",
+      "display_number": 24
+    },
+    {
+      "id": "image-processing",
+      "title": "Pillow — Image module",
+      "url": "https://pillow.readthedocs.io/en/stable/reference/Image.html",
+      "accessed": "2026-10-11",
+      "display_number": 25
+    },
+    {
+      "id": "sd-config",
+      "title": "kohya-ss — sd-scripts dataset configuration",
+      "url": "https://github.com/kohya-ss/sd-scripts/blob/main/docs/config_README-en.md",
+      "accessed": "2026-10-11",
+      "display_number": 26
+    },
+    {
+      "id": "cfg",
+      "title": "Ho and Salimans — Classifier-Free Diffusion Guidance",
+      "url": "https://arxiv.org/html/2207.12598",
+      "accessed": "2026-10-11",
+      "display_number": 27
+    },
+    {
+      "id": "truncation",
+      "title": "Hugging Face Transformers — Padding and truncation",
+      "url": "https://huggingface.co/docs/transformers/main/en/pad_truncation",
+      "accessed": "2026-10-11",
+      "display_number": 28
+    },
+    {
+      "id": "captioning-model",
+      "title": "Hugging Face Transformers — Image captioning",
+      "url": "https://huggingface.co/docs/transformers/en/tasks/image_captioning",
+      "accessed": "2026-10-11",
+      "display_number": 29
+    },
+    {
+      "id": "clip",
+      "title": "Radford et al. — Learning Transferable Visual Models From Natural Language Supervision",
+      "url": "https://arxiv.org/abs/2103.00020",
+      "accessed": "2026-10-11",
+      "display_number": 30
+    },
+    {
+      "id": "ddpm",
+      "title": "Ho et al. — Denoising Diffusion Probabilistic Models",
+      "url": "https://arxiv.org/abs/2006.11239",
+      "accessed": "2026-10-11",
+      "display_number": 31
+    },
+    {
+      "id": "flow",
+      "title": "Lipman et al. — Flow Matching for Generative Modeling",
+      "url": "https://arxiv.org/html/2210.02747",
+      "accessed": "2026-10-11",
+      "display_number": 32
+    },
+    {
+      "id": "rectified-flow",
+      "title": "Liu et al. — Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow",
+      "url": "https://arxiv.org/abs/2209.03003",
+      "accessed": "2026-10-11",
+      "display_number": 33
+    },
+    {
+      "id": "sd3",
+      "title": "Esser et al. — Scaling Rectified Flow Transformers for High-Resolution Image Synthesis",
+      "url": "https://arxiv.org/html/2403.03206",
+      "accessed": "2026-10-11",
+      "display_number": 34
+    },
+    {
+      "id": "ddim",
+      "title": "Hugging Face Diffusers — DDIMScheduler",
+      "url": "https://huggingface.co/docs/diffusers/en/api/schedulers/ddim",
+      "accessed": "2026-10-11",
+      "display_number": 35
+    },
+    {
+      "id": "score-sde",
+      "title": "Song et al. — Score-Based Generative Modeling through Stochastic Differential Equations",
+      "url": "https://arxiv.org/abs/2011.13456",
+      "accessed": "2026-10-11",
+      "display_number": 36
+    },
+    {
+      "id": "autoencoder",
+      "title": "Hugging Face Diffusers — AutoencoderKL",
+      "url": "https://huggingface.co/docs/diffusers/en/api/models/autoencoderkl",
+      "accessed": "2026-10-11",
+      "display_number": 37
+    },
+    {
+      "id": "vae",
+      "title": "Kingma and Welling — Auto-Encoding Variational Bayes",
+      "url": "https://arxiv.org/abs/1312.6114",
+      "accessed": "2026-10-11",
+      "display_number": 38
+    },
+    {
+      "id": "ltx",
+      "title": "Hugging Face Diffusers — LTX-Video",
+      "url": "https://huggingface.co/docs/diffusers/en/api/pipelines/ltx_video",
+      "accessed": "2026-10-11",
+      "display_number": 39
+    },
+    {
+      "id": "flux",
+      "title": "Hugging Face Diffusers — FLUX pipelines",
+      "url": "https://huggingface.co/docs/diffusers/en/api/pipelines/flux",
+      "accessed": "2026-10-11",
+      "display_number": 40
+    },
+    {
+      "id": "attention",
+      "title": "Vaswani et al. — Attention Is All You Need",
+      "url": "https://arxiv.org/abs/1706.03762",
+      "accessed": "2026-10-11",
+      "display_number": 41
+    },
+    {
+      "id": "textual-inversion",
+      "title": "Gal et al. — An Image is Worth One Word: Personalizing Text-to-Image Generation using Textual Inversion",
+      "url": "https://arxiv.org/abs/2208.01618",
+      "accessed": "2026-10-11",
+      "display_number": 42
+    },
+    {
+      "id": "controlnet",
+      "title": "Zhang et al. — Adding Conditional Control to Text-to-Image Diffusion Models",
+      "url": "https://arxiv.org/abs/2302.05543",
+      "accessed": "2026-10-11",
+      "display_number": 43
+    },
+    {
+      "id": "accelerate-checkpoint",
+      "title": "Hugging Face Accelerate — Checkpointing",
+      "url": "https://huggingface.co/docs/accelerate/en/usage_guides/checkpoint",
+      "accessed": "2026-10-11",
+      "display_number": 44
+    },
+    {
+      "id": "hyperparameter-search",
+      "title": "scikit-learn — Tuning the hyper-parameters of an estimator",
+      "url": "https://scikit-learn.org/stable/modules/grid_search.html",
+      "accessed": "2026-10-11",
+      "display_number": 45
+    },
+    {
+      "id": "accumulation",
+      "title": "Hugging Face Accelerate — Performing gradient accumulation",
+      "url": "https://huggingface.co/docs/accelerate/en/usage_guides/gradient_accumulation",
+      "accessed": "2026-10-11",
+      "display_number": 46
+    },
+    {
+      "id": "gradient-sync",
+      "title": "Hugging Face Accelerate — Gradient synchronization",
+      "url": "https://huggingface.co/docs/accelerate/en/concept_guides/gradient_synchronization",
+      "accessed": "2026-10-11",
+      "display_number": 47
+    },
+    {
+      "id": "optimizers",
+      "title": "PyTorch — torch.optim",
+      "url": "https://docs.pytorch.org/docs/2.14/optim.html",
+      "accessed": "2026-10-11",
+      "display_number": 48
+    },
+    {
+      "id": "adamw",
+      "title": "Loshchilov and Hutter — Decoupled Weight Decay Regularization",
+      "url": "https://arxiv.org/abs/1711.05101",
+      "accessed": "2026-10-11",
+      "display_number": 49
+    },
+    {
+      "id": "learning-curves",
+      "title": "scikit-learn — Validation curves and learning curves",
+      "url": "https://scikit-learn.org/stable/modules/learning_curve.html",
+      "accessed": "2026-10-11",
+      "display_number": 50
+    },
+    {
+      "id": "flow-scheduler",
+      "title": "Hugging Face Diffusers — FlowMatchEulerDiscreteScheduler",
+      "url": "https://huggingface.co/docs/diffusers/en/api/schedulers/flow_match_euler_discrete",
+      "accessed": "2026-10-11",
+      "display_number": 51
+    },
+    {
+      "id": "edm",
+      "title": "Karras et al. — Elucidating the Design Space of Diffusion-Based Generative Models",
+      "url": "https://arxiv.org/abs/2206.00364",
+      "accessed": "2026-10-11",
+      "display_number": 52
+    },
+    {
+      "id": "min-snr",
+      "title": "Hang et al. — Efficient Diffusion Training via Min-SNR Weighting Strategy",
+      "url": "https://arxiv.org/abs/2303.09556",
+      "accessed": "2026-10-11",
+      "display_number": 53
+    },
+    {
+      "id": "reproducibility",
+      "title": "Hugging Face Diffusers — Reproducibility",
+      "url": "https://huggingface.co/docs/diffusers/en/using-diffusers/reusing_seeds",
+      "accessed": "2026-10-11",
+      "display_number": 54
+    },
+    {
+      "id": "peft-lora",
+      "title": "Hugging Face PEFT — LoRA configuration and variants",
+      "url": "https://huggingface.co/docs/peft/v0.21.0/package_reference/lora",
+      "accessed": "2026-10-11",
+      "display_number": 55
+    },
+    {
+      "id": "regularization",
+      "title": "Google Machine Learning Crash Course — L2 regularization",
+      "url": "https://developers.google.com/machine-learning/crash-course/overfitting/regularization",
+      "accessed": "2026-10-11",
+      "display_number": 56
+    },
+    {
+      "id": "dropout",
+      "title": "PyTorch — Dropout",
+      "url": "https://docs.pytorch.org/docs/2.14/generated/torch.nn.Dropout.html",
+      "accessed": "2026-10-11",
+      "display_number": 57
+    },
+    {
+      "id": "lycoris",
+      "title": "KohakuBlueleaf — LyCORIS project documentation",
+      "url": "https://github.com/KohakuBlueleaf/LyCORIS",
+      "accessed": "2026-10-11",
+      "display_number": 58
+    },
+    {
+      "id": "dora",
+      "title": "Liu et al. — DoRA: Weight-Decomposed Low-Rank Adaptation",
+      "url": "https://arxiv.org/abs/2402.09353",
+      "accessed": "2026-10-11",
+      "display_number": 59
+    },
+    {
+      "id": "distillation",
+      "title": "Salimans and Ho — Progressive Distillation for Fast Sampling of Diffusion Models",
+      "url": "https://arxiv.org/abs/2202.00512",
+      "accessed": "2026-10-11",
+      "display_number": 60
+    },
+    {
+      "id": "disentanglement",
+      "title": "Locatello et al. — Challenging Common Assumptions in the Unsupervised Learning of Disentangled Representations",
+      "url": "https://arxiv.org/abs/1811.12359",
+      "accessed": "2026-10-11",
+      "display_number": 61
+    },
+    {
+      "id": "validation",
+      "title": "scikit-learn — Cross-validation: evaluating estimator performance",
+      "url": "https://scikit-learn.org/stable/modules/cross_validation.html",
+      "accessed": "2026-10-11",
+      "display_number": 62
+    },
+    {
+      "id": "early-stopping",
+      "title": "Keras — EarlyStopping",
+      "url": "https://keras.io/api/callbacks/early_stopping/",
+      "accessed": "2026-10-11",
+      "display_number": 63
+    },
+    {
+      "id": "vbench",
+      "title": "Huang et al. — VBench: Comprehensive Benchmark Suite for Video Generative Models",
+      "url": "https://arxiv.org/abs/2311.17982",
+      "accessed": "2026-10-11",
+      "display_number": 64
+    },
+    {
+      "id": "img2img",
+      "title": "Hugging Face Diffusers — Image-to-image",
+      "url": "https://huggingface.co/docs/diffusers/en/using-diffusers/img2img",
+      "accessed": "2026-10-11",
+      "display_number": 65
+    },
+    {
+      "id": "edm-code",
+      "title": "NVIDIA Research — EDM reference sampler implementation",
+      "url": "https://github.com/NVlabs/edm/blob/main/generate.py",
+      "accessed": "2026-10-11",
+      "display_number": 66
+    },
+    {
+      "id": "sdedit",
+      "title": "Meng et al. — SDEdit: Guided Image Synthesis and Editing with Stochastic Differential Equations",
+      "url": "https://arxiv.org/abs/2108.01073",
+      "accessed": "2026-10-11",
+      "display_number": 67
+    },
+    {
+      "id": "video-generation",
+      "title": "Hugging Face Diffusers — Video generation",
+      "url": "https://huggingface.co/docs/diffusers/en/using-diffusers/text-img2vid",
+      "accessed": "2026-10-11",
+      "display_number": 68
+    },
+    {
+      "id": "inpainting",
+      "title": "Hugging Face Diffusers — Inpainting",
+      "url": "https://huggingface.co/docs/diffusers/en/using-diffusers/inpaint",
+      "accessed": "2026-10-11",
+      "display_number": 69
+    },
+    {
+      "id": "video-processing",
+      "title": "FFmpeg — Filters documentation",
+      "url": "https://ffmpeg.org/ffmpeg-filters.html",
+      "accessed": "2026-10-11",
+      "display_number": 70
+    },
+    {
+      "id": "framepack",
+      "title": "Zhang et al. — Frame Context Packing and Drift Prevention in Next-Frame-Prediction Video Diffusion Models",
+      "url": "https://arxiv.org/abs/2504.12626",
+      "accessed": "2026-10-11",
+      "display_number": 71
+    },
+    {
+      "id": "memory",
+      "title": "Hugging Face Diffusers — Reduce memory usage",
+      "url": "https://huggingface.co/docs/diffusers/en/optimization/memory",
+      "accessed": "2026-10-11",
+      "display_number": 72
+    },
+    {
+      "id": "qlora",
+      "title": "Hugging Face — LoRA Fine-Tuning FLUX.1-dev on Consumer Hardware",
+      "url": "https://huggingface.co/blog/flux-qlora",
+      "accessed": "2026-10-11",
+      "display_number": 73
+    },
+    {
+      "id": "apple-memory",
+      "title": "Apple Developer — Explore the new system architecture of Apple silicon Macs",
+      "url": "https://developer.apple.com/videos/play/wwdc2020/10686/",
+      "accessed": "2026-10-11",
+      "display_number": 74
+    },
+    {
+      "id": "mixed-precision",
+      "title": "PyTorch — Automatic Mixed Precision",
+      "url": "https://docs.pytorch.org/docs/2.14/amp.html",
+      "accessed": "2026-10-11",
+      "display_number": 75
+    },
+    {
+      "id": "quantization",
+      "title": "Hugging Face Diffusers — Quantization overview",
+      "url": "https://huggingface.co/docs/diffusers/en/quantization/overview",
+      "accessed": "2026-10-11",
+      "display_number": 76
+    },
+    {
+      "id": "activation-checkpoint",
+      "title": "PyTorch — torch.utils.checkpoint",
+      "url": "https://docs.pytorch.org/docs/2.14/checkpoint.html",
+      "accessed": "2026-10-11",
+      "display_number": 77
+    },
+    {
+      "id": "peft-loading",
+      "title": "Hugging Face Diffusers — PEFT adapter loading and merging",
+      "url": "https://huggingface.co/docs/diffusers/en/api/loaders/peft",
+      "accessed": "2026-10-11",
+      "display_number": 78
+    },
+    {
+      "id": "safetensors",
+      "title": "Hugging Face — Safetensors documentation",
+      "url": "https://huggingface.co/docs/safetensors/en/index",
+      "accessed": "2026-10-11",
+      "display_number": 79
+    },
+    {
+      "id": "normalization",
+      "title": "Torchvision — Normalize",
+      "url": "https://docs.pytorch.org/vision/stable/generated/torchvision.transforms.Normalize.html",
+      "accessed": "2026-10-11",
+      "display_number": 80
+    },
+    {
+      "id": "schema",
+      "title": "JSON Schema — What is a schema?",
+      "url": "https://json-schema.org/understanding-json-schema/about",
+      "accessed": "2026-10-11",
+      "display_number": 81
+    }
+  ]
+}

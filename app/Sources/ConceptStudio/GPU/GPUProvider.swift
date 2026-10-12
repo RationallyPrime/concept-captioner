@@ -20,7 +20,13 @@ struct GPUOffer: Identifiable, Decodable {
     var dataCenters: [Location]?
 
     func isAvailable(in dataCenter: String) -> Bool {
-        dataCenters?.contains { $0.id == dataCenter && $0.availability != "NONE" } == true
+        dataCenters?.contains { $0.id == dataCenter && Self.availableLevels.contains($0.availability) } == true
+    }
+
+    static let availableLevels: Set<String> = ["LOW", "MEDIUM", "HIGH"]
+
+    var hasAvailableLocation: Bool {
+        dataCenters?.contains { Self.availableLevels.contains($0.availability) } == true
     }
 
     var summary: String {
@@ -119,7 +125,7 @@ struct PodCreation {
     let image: String
     /// Lowest host CUDA version the image's wheels run on, as `major.minor`.
     let minCudaVersion: String
-    let volume: GPUVolume
+    let volume: GPUVolume?
     /// The environment the container boots with. Credentials are never literal here: the
     /// workspace stores them as account secrets first and passes `PodSecrets.reference` values.
     let env: [String: String]
@@ -167,6 +173,7 @@ protocol GPUProvider: Sendable {
     /// Every pod on the account this app created (named `ConceptStudio…`), any status. Throws when
     /// the account cannot be listed or one of this app's pods cannot be read.
     func list() async throws -> [RentedPod]
+    func start(id: String) async throws
     func stop(id: String) async throws
     func terminate(id: String) async throws
     /// The HTTPS URL that reaches `port` on the pod.
@@ -218,7 +225,7 @@ struct RunPodProvider: GPUProvider {
         guard [1, 2, 4].contains(request.count), request.count <= request.offer.maxCount.secure else {
             throw StudioError.message("Choose 1, 2 or 4 GPUs available for this computer.")
         }
-        let payload: JSONObject = [
+        var payload: JSONObject = [
             "name": .string(request.name), "image": .string(request.image), "cloud": .string("SECURE"),
             "gpu": .object([
                 "id": .string(request.offer.id),
@@ -227,15 +234,23 @@ struct RunPodProvider: GPUProvider {
                 "minRamPerGpu": .int(60),
             ]),
             "disk": .int(50),
-            "dataCenterIds": .array([.string(request.volume.dataCenter)]),
-            "mounts": .object(["network": .array([.object([
-                "volumeId": .string(request.volume.id), "path": .string("/workspace"),
-            ])])]),
             "ports": .array([.string("\(PodPort.agent)/http"), .string("\(PodPort.inference)/http")]),
             "env": .object(JSONObject(
                 request.env.sorted { $0.key < $1.key }.map { ($0.key, JSONValue.string($0.value)) }
             )),
         ]
+        if let volume = request.volume {
+            payload["dataCenterIds"] = .array([.string(volume.dataCenter)])
+            payload["mounts"] = .object(["network": .array([.object([
+                "volumeId": .string(volume.id), "path": .string("/workspace"),
+            ])])])
+        } else {
+            // A pod volume survives stop/restart; a container disk does not. It cannot
+            // follow a replacement pod, and is deleted only when this pod is removed.
+            payload["mounts"] = .object(["persistent": .object([
+                "size": .int(300), "path": .string("/workspace"),
+            ])])
+        }
         return try await JSONDecoder().decode(RentedPod.self, from: call("pods", method: "POST", body: payload))
     }
 
@@ -264,6 +279,10 @@ struct RunPodProvider: GPUProvider {
             cursor = next
         }
         return entries
+    }
+
+    func start(id: String) async throws {
+        _ = try await call("pods/\(id)/action", method: "POST", body: ["action": .string("start")])
     }
 
     func stop(id: String) async throws {
@@ -339,15 +358,23 @@ struct RunPodProvider: GPUProvider {
         }
         let response = try await transport.send(request)
         guard (200 ..< 300).contains(response.status) else {
+            let problem = try? JSONValue(parsing: response.body).objectValue
+            let detail = problem?["detail"]?.stringValue
+                ?? problem?["message"]?.stringValue ?? problem?["error"]?.stringValue
+            let violations = problem?["errors"]?.arrayValue?.compactMap(\.stringValue) ?? []
+            let explanation = ([detail].compactMap(\.self) + violations)
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: "\n")
+            if !explanation.isEmpty {
+                throw StudioError.message("RunPod (\(response.status)): " + explanation)
+            }
             switch response.status {
             case 401, 403: throw StudioError.message("RunPod could not accept your key. Check it in Settings.")
-            case 409, 429,
-                 503: throw StudioError
-                .message("This computer is not available now. Refresh the list or choose another.")
-            default: throw StudioError
-                .message(
-                    "RunPod could not complete this action (\(response.status)). Check your account and try again."
-                )
+            case 402: throw StudioError.message("RunPod reports insufficient account balance. Add funds in RunPod.")
+            case 409, 429, 503:
+                throw StudioError.message("This computer is not available now. Refresh the list or choose another.")
+            default:
+                throw StudioError.message("RunPod could not complete this action (\(response.status)). "
+                    + "Check your account and try again.")
             }
         }
         return response.body
@@ -390,6 +417,10 @@ actor DemoGPUProvider: GPUProvider {
 
     func list() -> [RentedPod] {
         pod.status == "TERMINATED" ? [] : [pod]
+    }
+
+    func start(id: String) {
+        pod = RentedPod(id: id, status: "RUNNING", cost: 1.5, gpu: pod.gpu, name: pod.name)
     }
 
     func stop(id: String) {

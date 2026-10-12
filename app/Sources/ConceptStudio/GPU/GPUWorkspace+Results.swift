@@ -228,7 +228,8 @@ extension GPUWorkspace {
         if pod == nil, let adopted = running.first {
             saved = SavedPod(
                 pod: adopted, started: Date(), hourlyRate: adopted.cost, budget: budget, trainer: trainer,
-                runID: "", outputRepo: outputRepo, idleMinutes: idleMinutes, volumeID: adopted.volumeID ?? ""
+                runID: "", outputRepo: outputRepo, idleMinutes: idleMinutes,
+                volumeID: adopted.volumeID ?? "pod:" + adopted.id
             )
             pod = adopted
             restoreAgentToken(podID: adopted.id)
@@ -346,7 +347,9 @@ extension GPUWorkspace {
         }
         guard let agent, hasRunningPod, resultIsOnThisPod(result) else {
             throw StudioError.message(
-                "Rent a computer on the storage that holds run \(result.runID), then retrieve it."
+                result.volumeID.hasPrefix("pod:")
+                    ? "Start the original computer for run \(result.runID), then retrieve its outputs."
+                    : "Rent a computer on the storage that holds run \(result.runID), then retrieve it."
             )
         }
         if result.destination == .hub, canPushToHub, !result.outputRepo.isEmpty {

@@ -60,6 +60,26 @@ struct MappingView: View {
                         session.proposeMappings(useModel: true)
                     }
                 }.disabled(session.busy)
+                if !session.validMappingSuggestionIDs.isEmpty || session.canUndoMappingChange {
+                    HStack(spacing: 10) {
+                        if !session.validMappingSuggestionIDs.isEmpty {
+                            Button("Accept all \(session.validMappingSuggestionIDs.count) suggestions") {
+                                session.acceptMappingSuggestions()
+                                load()
+                            }
+                            .help(
+                                "Accept valid suggestions for unconfirmed samples. "
+                                    + "Review them individually first if needed."
+                            )
+                        }
+                        if session.canUndoMappingChange {
+                            Button("Undo last mapping change", systemImage: "arrow.uturn.backward") {
+                                session.undoMappingChange()
+                                load()
+                            }
+                        }
+                    }.disabled(session.busy || session.editing)
+                }
                 Text(session.demoMode ? "The demo model uses prepared assignments. "
                     + "Reference-face comparison runs on this Mac." :
                     "Mac suggestions stay on this device. "
@@ -120,6 +140,9 @@ struct MappingView: View {
         .onChange(of: session.selectedImageID) { _, _ in load() }
         .onChange(of: session.selectedImageID.flatMap { session.mappingProposals[$0] }) { _, _ in
             // A suggestion that arrives while this photo is open fills it, unless the person already edited it.
+            if !edited { load() }
+        }
+        .onChange(of: session.selectedImageID.flatMap { session.analyses[$0]?.faces.count }) { _, _ in
             if !edited { load() }
         }
     }
@@ -214,10 +237,10 @@ struct MappingView: View {
         VStack(spacing: 0) {
             Divider()
             HStack(spacing: 12) {
-                Button("Confirm and next", systemImage: "checkmark") { confirm(image) }
+                Button(confirmTitle(for: image), systemImage: "checkmark") { confirm(image) }
                     .buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
                     .keyboardShortcut(.return, modifiers: .command)
-                    .help("Confirm this sample and open the next unconfirmed one (⌘↩)")
+                    .help("Save this sample's mapping and open the next unconfirmed one (⌘↩)")
                     .disabled((enabled.isEmpty && session.project?.job.wholeTargetMapping.isEmpty != false)
                         || enabled.contains { (locators[$0] ?? "").isBlank } || session.busy)
                 Text("⌘↩").font(.callout).foregroundStyle(StudioStyle.supportingText)
@@ -247,14 +270,15 @@ struct MappingView: View {
         }
     }
 
+    private func confirmTitle(for image: ProjectImage) -> String {
+        session.project?.job.mapping(for: image.id) == nil
+            && session.validMappingSuggestionIDs.contains(image.id)
+            ? "Accept suggestion and next" : "Confirm and next"
+    }
+
     private func unconfirm(_ image: ProjectImage) {
-        do {
-            try session.project?.job.setMapping(nil, for: image.id)
-            session.saveProject()
-            load()
-        } catch {
-            session.errorMessage = StudioSession.describe(error)
-        }
+        session.unconfirmMapping(id: image.id)
+        load()
     }
 
     private func selectVisiblePhoto() {
@@ -268,9 +292,25 @@ struct MappingView: View {
         guard let id = session.selectedImageID else { return }
         let confirmed = session.project?.job.mapping(for: id)
         let suggestion = confirmed == nil ? session.mappingProposals[id] : nil
-        locators = Dictionary(uniqueKeysWithValues: (confirmed ?? suggestion ?? [:]).map { ($0.key, $0.value) })
-        enabled = Set(locators.keys).intersection(locatorConcepts.map(\.trigger))
+        let selected = confirmed ?? suggestion ?? [:]
+        let faceCount = session.analyses[id]?.faces.count
+        locators = Dictionary(uniqueKeysWithValues: locatorConcepts.compactMap { concept in
+            MappingLocatorDefaults.singleFaceClassNoun(for: concept, faceCount: faceCount)
+                .map { (concept.trigger, $0) }
+        })
+        for (trigger, locator) in selected {
+            locators[trigger] = locator
+        }
+        enabled = Set(selected.keys).intersection(locatorConcepts.map(\.trigger))
         edited = false
+    }
+}
+
+enum MappingLocatorDefaults {
+    static func singleFaceClassNoun(for concept: Concept, faceCount: Int?) -> String? {
+        guard concept.targetConcept.isPersonIdentity, faceCount == 1 else { return nil }
+        let noun = concept.classNoun.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return noun.hasPrefix("the ") ? noun : "the \(noun)"
     }
 }
 

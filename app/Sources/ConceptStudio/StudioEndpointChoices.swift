@@ -37,34 +37,12 @@ enum ProviderChoices {
     static func defaultModel(for kind: String) -> String {
         all.first { $0.kind == kind }?.defaultModel ?? ""
     }
-
-    /// The model to show after switching provider from `old` to `new`. A model the user typed is
-    /// kept; the new provider's default is offered only when the field is empty or still holds the
-    /// previous provider's default (`previousDefault`, which may differ from the table, e.g. the
-    /// model a rented computer serves).
-    static func model(
-        afterSwitchingFrom old: String,
-        to new: String,
-        current: String,
-        previousDefault: String? = nil,
-        newDefault: String? = nil
-    ) -> String {
-        let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
-        let untouched = trimmed.isEmpty || trimmed == (previousDefault ?? defaultModel(for: old))
-        return untouched ? (newDefault ?? defaultModel(for: new)) : current
-    }
 }
 
 @MainActor
 extension StudioSession {
     static let defaultPodImageName =
         "ghcr.io/rationallyprime/concept-captioner-pod-{trainer}:v0.2.3-clean-20261011"
-
-    func normalizePodImageChoice() {
-        if podImageName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            podImageName = Self.defaultPodImageName
-        }
-    }
 
     var vllmTargetURL: String {
         requestBaseURL.isEmpty ? customBaseURL : requestBaseURL
@@ -82,7 +60,6 @@ extension StudioSession {
         criticModel = modelName
         customBaseURL = preferences.string(forKey: "vllmBaseURL") ?? ""
         podImageName = preferences.string(forKey: "podImage") ?? ""
-        normalizePodImageChoice()
         volumeID = preferences.string(forKey: "volumeID") ?? ""
         requestBaseURL = ""
         criticRequestBaseURL = ""
@@ -98,20 +75,22 @@ extension StudioSession {
     /// Call when the captioning provider changes from `old` to `new` (views: `.onChange(of:)`).
     /// A model the user typed is kept. With ChatGPT sign-in, OpenAI models come from the account.
     func providerChanged(from old: String, to new: String) {
-        guard !(new == "openai" && openAIUsesChatGPT) else { return }
-        modelName = ProviderChoices.model(
-            afterSwitchingFrom: old, to: new, current: modelName,
-            previousDefault: defaultModel(for: old), newDefault: defaultModel(for: new)
-        )
+        guard old != new else { return }
+        if new == "openai", openAIUsesChatGPT {
+            modelName = chatGPT.availableModels.first?.slug ?? ""
+            return
+        }
+        modelName = defaultModel(for: new)
     }
 
     /// Call when the reviewer's provider changes, like `providerChanged(from:to:)`.
     func criticProviderChanged(from old: String, to new: String) {
-        guard !(new == "openai" && openAIUsesChatGPT) else { return }
-        criticModel = ProviderChoices.model(
-            afterSwitchingFrom: old, to: new, current: criticModel,
-            previousDefault: defaultModel(for: old), newDefault: defaultModel(for: new)
-        )
+        guard old != new else { return }
+        if new == "openai", openAIUsesChatGPT {
+            criticModel = chatGPT.availableModels.first?.slug ?? ""
+            return
+        }
+        criticModel = defaultModel(for: new)
     }
 
     func applyJobChoices(_ job: Job) {
@@ -255,7 +234,6 @@ extension StudioSession {
     }
 
     func configureGPU() {
-        normalizePodImageChoice()
         updateTrainingProjectDefaults()
         guard !demoMode else { return }
         do {

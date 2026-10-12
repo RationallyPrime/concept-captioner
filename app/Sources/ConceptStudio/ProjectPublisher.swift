@@ -5,6 +5,7 @@ enum ProjectPublisher {
     static func operations(
         for project: StudioProject, previousRows: [MetadataRow] = [], remotePaths: Set<String> = []
     ) async throws -> [CommitOperation] {
+        try project.job.requireConcepts()
         let sink = try SidecarSink(directory: project.imagesDirectory)
         var operations: [CommitOperation] = [.addFile(path: "concept-captioner/job.yaml", url: project.jobURL)]
         var rows: [MetadataRow] = []

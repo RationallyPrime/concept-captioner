@@ -36,7 +36,7 @@ demo so an iCloud Photos download cannot be triggered there.
    returns to Training. Generated results explains that the demo has no real trained weights
    or generated comparisons. Stop everything stops the simulation.
 
-Close the project to return to Welcome. Open or create a project to leave demo mode.
+Close the project to return to Welcome and leave demo mode; account controls become available again.
 
 The full training explanation is on Images in both demo and real projects; its disclosure
 remembers whether you left it open. Welcome gives a short orientation rather than repeating
@@ -44,11 +44,16 @@ that text. **Definitions** on each screen explains terms used there: hover over 
 select it, or focus its button with the keyboard. Space or Return opens the definition;
 Escape closes it. Settings, Advanced training, media/concept editors, saved runs and
 generation use the same definitions. **Help → ConceptStudio Help** (⌘?) opens the searchable
-catalog and full introduction at any time, including before opening a project.
+catalog and full introduction at any time, including before opening a project. The supplied
+177-entry glossary retains both **Plain language** and **Show me the good stuff** readings,
+searchable aliases, sections, related terms and primary sources. Separate entries describe
+ConceptStudio operations. Educational entries do not imply an implemented setting or a
+supported model. Disclosure rows open from their labels or trailing space as well as the arrow.
 
 ## A real project
 
-Create a project in a folder you choose. Images and clips are copied to `images/`; `job.yaml` and caption
+Create a project in a folder you choose. It begins without a concept: define the first one
+on Concepts before captioning, publishing or training. Images and clips are copied to `images/`; `job.yaml` and caption
 `.txt` / response `.json` sidecars use ConceptCore's shared CLI formats. Final captions have
 `source: human` in the response record. Reference images live in `references/`. No keys go into
 these files. Recent project folders and custom skill folders use security-scoped bookmarks.
@@ -56,7 +61,11 @@ these files. Recent project folders and custom skill folders use security-scoped
 Settings offers **Log in with ChatGPT**, **Connect OpenRouter** and manual account keys. For key-based access, one gateway key
 is enough: OpenRouter, Vercel AI Gateway or Pydantic AI Gateway. Direct model providers,
 a Hugging Face write token and a RunPod key are also available. Secrets are saved in the Mac
-Keychain. The captioning connection test uses the model selected on Captioning and consumes
+Keychain. Saving a key checks it through a read-only account/model request, with no generated
+caption. Hugging Face and RunPod have their own publishing/training section. Captioning reads
+provider model lists, filters declared media capabilities, and retains **Other model…** for
+custom names. Changing provider selects its default; Gemini accepts either bare model IDs or
+Google’s `models/` prefix. The captioning connection test uses the model selected on Captioning and consumes
 that account's allowance. The app remembers choices in the shared job and local preferences.
 The advanced vLLM URL is the host allowed to receive your saved server key. A downloaded
 project can name a different captioner or reviewer URL; that request receives no saved key.
@@ -107,7 +116,12 @@ verification step. See [OpenRouter's authorization documentation](https://openro
 ### Prepare and train
 
 Use folder, selected-file, Apple Photos or Hub imagefolder import. HEIC and TIFF images are
-normalized to oriented PNG training targets. Inspect duplicate candidates; Include in training
+normalized to oriented PNG training targets. Matching `.txt` captions and optional `.json`
+response records beside selected files are imported with the image, including when its name
+changes to avoid a collision or its format is normalized. Text-only captions show **Imported**;
+human-final records remain protected. Captioning can protect imported captions in bulk before
+a rerun. Dataset advice identifies its evenly selected sample of up to 48 examples; it does
+not exclude the other examples from training. Inspect duplicate candidates; Include in training
 controls which samples are captioned and published. Undo curation restores the previous
 selection or approved edit during the current session. Excluded media remains in the project,
 outside the training set.
@@ -115,7 +129,10 @@ outside the training set.
 Define one concept and press **Confirm concept and continue** (⌘↩). Person and object/character
 concepts can use reference images and need confirmed locators. Style and motion are assigned
 to the whole image or clip automatically, so their journey skips Mapping.
-On-device face matches and model proposals remain suggestions until confirmed. Parquet-only
+For a person concept with exactly one detected face, checking the concept supplies its class
+noun as the locator; multi-person scenes retain explicit descriptions. On-device face matches
+and model proposals remain suggestions until confirmed. Accept a model proposal per sample or
+accept all eligible suggestions together, with Undo. Existing confirmations are preserved. Parquet-only
 Hub datasets are not supported by the Swift app.
 
 Inspect and crop shows the actual crop before approval. Approval replaces the training target
@@ -150,7 +167,24 @@ and verifies the authenticated vLLM model endpoint. The app binds the in-memory 
 that user-selected endpoint; it is never copied into `job.yaml`. Caption and publish before
 starting training on a one-GPU computer. ConceptStudio automatically selects the included
 training image for the chosen trainer. A custom training image is optional in Advanced
-Settings; clearing the override and saving restores the included image.
+Settings; clearing and saving leaves the field blank (**Automatic**) and uses the current default
+for the selected trainer when renting.
+
+The GPU list filters stock to the selected network volume’s data center. **No saved storage**
+uses a 300 GB persistent disk on that computer instead: Stop preserves it, but Remove deletes
+it. Storage charges continue while stopped. Start the same stopped computer to retrieve
+uncollected results; the app refuses removal while those results remain unsettled or unsaved.
+A network volume can instead follow replacement computers in its own data center. RunPod’s
+reported refusal text is shown when a rental fails.
+
+Training steps have a number field. For H3, Advanced exposes checkpoint cadence and retention,
+saved precision and image resolution buckets. The current Circlestone adapter requires
+guidance preservation loss to remain off; the app explains that constraint and rejects
+incompatible imports. Guidance controls apply only to an explicit recipe without that adapter. A new H3
+selection starts with 300-step checkpoints, 40 retained, float32 saves, 768/1024 buckets and
+guidance loss off (target 3.5). Imported recipes and saved-run repeats retain their actual
+settings. The earlier v1 recipe enabled guidance loss; v2 and the successful v3 run disabled
+it. Generation guidance is a different control.
 
 FLUX and LTX offers use GPUs with at least 32 GB of memory. H3's BF16 recipe uses a 96 GB
 GPU as its known reference; the app checks the connected computer's actual GPU inventory
@@ -248,11 +282,16 @@ Developers can build the preview from the repository root:
 ```sh
 scripts/build-app.sh debug
 # app/dist/ConceptStudio.app
-scripts/build-app.sh release
+CONCEPTSTUDIO_SIGNING_IDENTITY='Developer ID Application: Your Name (TEAMID)' scripts/build-app.sh release
 ```
 
-The script copies the executable and both SwiftPM resource bundles, writes the app Info.plist,
-and does not launch or sign it. Tests use Swift Testing; `swift test` and `swiftlint lint --strict`
+The script copies the executable and SwiftPM resource bundles and writes the app Info.plist.
+Debug builds remain unsigned unless a signing identity is supplied. Release builds require the
+named Developer ID Application identity in Keychain, sign with the declared sandbox entitlements,
+hardened runtime and timestamp, then verify the signature. Reusing the same identity gives
+releases a stable code identity; this does not restore permissions already lost by a differently
+signed development build. The script does not launch the app. Tests use Swift Testing;
+`swift test` and `swiftlint lint --strict`
 run from `app/`. `swiftformat Sources Tests --lint` checks formatting.
 
 The native UI conventions are in [DESIGN.md](../DESIGN.md). To inspect actual SwiftUI content
@@ -271,11 +310,14 @@ rendering does not establish live keyboard, VoiceOver, titlebar or native vibran
 use the actual app for the human walkthrough. Ordinary `swift test` skips the render pass.
 
 `app/ConceptStudio.entitlements` declares the sandbox, user-selected read/write access,
-security-scoped bookmarks, network-client access and Photos access. Network-server permission
+security-scoped bookmarks and network-client access. The bundle declares its Photos usage
+description; signed Photos-picker access still needs native verification. Network-server permission
 allows the temporary ChatGPT and OpenRouter sign-in callbacks, bound only to `127.0.0.1`; it is closed when
-sign-in finishes, is cancelled or times out. Distribution still needs
-a Developer ID signing identity, hardened-runtime signing with those entitlements, a zipped
-app or disk image submitted through `xcrun notarytool`, and a stapled notarization ticket.
-Those steps need the owner's Apple developer account and have not been performed. Verify
+sign-in finishes, is cancelled or times out. Distribution still needs a Developer ID certificate,
+the release signing command above, a zipped app or disk image submitted through `xcrun notarytool`,
+and a stapled notarization ticket. Only an Apple Development identity was present during the
+2026-10-12 source check, so no Developer ID signing or notarization was performed. See
+[Apple's distribution signing procedure](https://developer.apple.com/documentation/xcode/creating-distribution-signed-code-for-the-mac/).
+Verify
 Keychain, Photos permission and bookmark persistence in the signed sandboxed build before
 public distribution; compile-time compatibility does not establish that runtime evidence.

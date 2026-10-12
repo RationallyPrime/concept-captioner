@@ -70,6 +70,97 @@ struct MappingWorkflowTests {
         ) == .confirmedNoMatch)
     }
 
+    @Test func acceptingSuggestionsIsExplicitUndoableAndLeavesExistingMappingsAlone() async throws {
+        var project = try await makeDemoProject()
+        defer { try? FileManager.default.removeItem(at: project.directory) }
+        let images = project.images
+        project.job = try Job(concepts: [Concept(trigger: "PERSON8")])
+        try project.job.setMapping(["PERSON8": "the person already confirmed"], for: images[2].id)
+        try project.save()
+        let defaults = IsolatedDefaults()
+        defer { defaults.remove() }
+        let session = StudioSession(preferences: defaults.defaults, secrets: MemorySecretStore())
+        session.project = project
+        session.mappingProposals = [
+            images[0].id: ["PERSON8": "the person by the window"],
+            images[1].id: ["PERSON8": "the person beside the gate"],
+            images[2].id: ["PERSON8": "a different person"],
+            "not-in-project.png": ["PERSON8": "the person"],
+        ]
+
+        #expect(session.validMappingSuggestionIDs == [images[0].id, images[1].id])
+        session.acceptMappingSuggestions()
+        #expect(session.project?.job.mapping(for: images[0].id)?["PERSON8"] == "the person by the window")
+        #expect(session.project?.job.mapping(for: images[1].id)?["PERSON8"] == "the person beside the gate")
+        #expect(session.project?.job.mapping(for: images[2].id)?["PERSON8"] == "the person already confirmed")
+        #expect(session.canUndoMappingChange)
+        #expect(session.mappingProposals[images[0].id] != nil)
+
+        session.undoMappingChange()
+        #expect(session.project?.job.mapping(for: images[0].id) == nil)
+        #expect(session.project?.job.mapping(for: images[1].id) == nil)
+        #expect(session.project?.job.mapping(for: images[2].id)?["PERSON8"] == "the person already confirmed")
+        #expect(!session.canUndoMappingChange)
+    }
+
+    @Test func manualConfirmationClearsTheSuggestionBeforeUnconfirming() async throws {
+        var project = try await makeDemoProject()
+        defer { try? FileManager.default.removeItem(at: project.directory) }
+        let image = try #require(project.images.first)
+        let defaults = IsolatedDefaults()
+        defer { defaults.remove() }
+        let session = StudioSession(preferences: defaults.defaults, secrets: MemorySecretStore())
+        session.project = project
+        session.receiveMappingSuggestions(
+            [image.id: ["NORA7": "the suggested person"]], sampleIDs: [image.id]
+        )
+
+        session.confirmMapping(id: image.id, mapping: ["NORA7": "the person I selected"])
+        #expect(session.mappingProposals[image.id] == nil)
+        session.unconfirmMapping(id: image.id)
+        session.acceptMappingSuggestions()
+
+        #expect(session.project?.job.mapping(for: image.id) == nil)
+        #expect(session.canUndoMappingChange)
+        session.undoMappingChange()
+        #expect(session.project?.job.mapping(for: image.id)?["NORA7"] == "the person I selected")
+        #expect(session.mappingProposals[image.id] == nil)
+    }
+
+    @Test func aSingleFaceAllowsClassNounButMultipleFacesDoNot() throws {
+        let woman = try Concept(trigger: "WOMAN8", classNoun: "woman")
+        let object = try Concept(trigger: "MUG8", classNoun: "mug", targetConcept: .object)
+        #expect(MappingLocatorDefaults.singleFaceClassNoun(for: woman, faceCount: 1) == "the woman")
+        #expect(MappingLocatorDefaults.singleFaceClassNoun(for: woman, faceCount: 2) == nil)
+        #expect(MappingLocatorDefaults.singleFaceClassNoun(for: woman, faceCount: nil) == nil)
+        #expect(MappingLocatorDefaults.singleFaceClassNoun(for: object, faceCount: 1) == nil)
+    }
+
+    @Test func mediaCurationInvalidatesMappingUndo() async throws {
+        let project = try await makeDemoProject()
+        defer { try? FileManager.default.removeItem(at: project.directory) }
+        let defaults = IsolatedDefaults()
+        defer { defaults.remove() }
+        let session = StudioSession(preferences: defaults.defaults, secrets: MemorySecretStore())
+        session.project = project
+        let image = try #require(project.images.first)
+
+        session.confirmMapping(id: image.id, mapping: ["NORA7": "the person beside the window"])
+        #expect(session.canUndoMappingChange)
+        session.includeMedia(image.id, included: false)
+        #expect(!session.canUndoMappingChange)
+        session.includeMedia(image.id, included: true)
+        #expect(!session.canUndoMappingChange)
+
+        session.confirmMapping(id: image.id, mapping: ["NORA7": "the person by the garden gate"])
+        #expect(session.canUndoMappingChange)
+        session.undoMediaCuration()
+        #expect(!session.canUndoMappingChange)
+        let analysis = session.analysisTask
+        session.stopImageAnalysis()
+        await analysis?.value
+    }
+
     @Test(arguments: [TargetConcept.style, .motion])
     func approvingWholeTargetConceptKeepsAutomaticAssignment(_ category: TargetConcept) async throws {
         var project = try await makeDemoProject()

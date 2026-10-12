@@ -8,11 +8,11 @@ import UniformTypeIdentifiers
 
 /// Records every request and answers with one fixed piece of dataset advice.
 private actor AdviceRecorder {
-    private(set) var requests: [(output: String, images: [UserContent])] = []
+    private(set) var requests: [(instructions: String, output: String, images: [UserContent])] = []
 
-    func record(_ output: String, _ messages: [ChatMessage]) {
+    func record(_ instructions: String, _ output: String, _ messages: [ChatMessage]) {
         let images = messages.flatMap(\.content).filter { if case .image = $0 { true } else { false } }
-        requests.append((output, images))
+        requests.append((instructions, output, images))
     }
 }
 
@@ -27,7 +27,7 @@ private struct AdviceClient: ModelClient {
         settings: RequestSettings,
         onPartialText: (@Sendable (String) async -> Void)? = nil
     ) async throws -> ModelReply {
-        await recorder.record(output.name, messages)
+        await recorder.record(instructions, output.name, messages)
         return ModelReply(
             text: #"{"summary":"Vary the backgrounds.","suggestions":["Add outdoor photos."]}"#,
             servedModel: requestedModel
@@ -129,6 +129,7 @@ struct ProjectContractTests {
         session.createProject(at: first)
         await session.task?.value
         #expect(session.repoID.isEmpty)
+        try session.saveConcept(Concept(trigger: "FIRST1"), replacing: nil)
         session.repoID = "owner/first-dataset"
         session.privateDataset = false
         session.trainingOutputRepo = "owner/first-lora"
@@ -207,6 +208,7 @@ struct ProjectContractTests {
             if folderExists {
                 #expect(recents.entries == [entry])
                 #expect(error.localizedDescription.contains("Access to"))
+                #expect(error.localizedDescription.contains("app is rebuilt or signed differently"))
                 #expect(error.localizedDescription.contains("Open project"))
                 #expect(!error.localizedDescription.contains("removed from recent projects"))
             } else {
@@ -234,6 +236,22 @@ struct ProjectContractTests {
             #expect(!error.localizedDescription.contains("grant access"))
         }
         #expect(recents.entries == original)
+    }
+
+    @Test func anEmptyConceptDraftCanBeOpenedButCannotStartCaptioningOrPublishing() async throws {
+        let directory = try newProject()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let project = try StudioProject.create(at: directory)
+        #expect(project.job.concepts.isEmpty)
+        #expect(throws: ConfigurationError("Add a concept before captioning or training.")) {
+            try Runner(job: project.job, captioner: ResolvedEndpoint(client: DemoModelClient()))
+        }
+        #expect(throws: ConfigurationError("Add a concept before captioning or training.")) {
+            try project.job.requireConcepts()
+        }
+        await #expect(throws: ConfigurationError("Add a concept before captioning or training.")) {
+            try await ProjectPublisher.operations(for: project)
+        }
     }
 
     @Test func startupRecoveryUsesInjectedPreferencesAndSecrets() throws {
@@ -369,23 +387,14 @@ struct ProjectContractTests {
 @Suite("provider vocabulary, money and photo names")
 @MainActor
 struct StudioVocabularyTests {
-    @Test func switchingProviderKeepsATypedModel() {
-        #expect(ProviderChoices
-            .model(afterSwitchingFrom: "openrouter", to: "google", current: "") == "gemini-3.8-flash")
-        #expect(ProviderChoices.model(
-            afterSwitchingFrom: "openrouter", to: "google", current: "google/gemini-3.8-flash"
-        ) == "gemini-3.8-flash")
-        #expect(ProviderChoices.model(
-            afterSwitchingFrom: "openrouter", to: "google", current: "my-org/custom-model"
-        ) == "my-org/custom-model")
+    @Test func switchingProviderResetsThePreviousModelChoice() {
         let session = makeTestSession()
         session.endpointKind = "anthropic"
-        session.modelName = "claude-sonnet-4-6"
+        session.modelName = "my-custom-model"
         session.providerChanged(from: "anthropic", to: "vllm")
-        #expect(session.modelName == "Qwen/Qwen3-VL-8B-Instruct")
-        session.modelName = "my-local-model"
+        #expect(session.modelName == session.defaultModel(for: "vllm"))
         session.providerChanged(from: "vllm", to: "openrouter")
-        #expect(session.modelName == "my-local-model")
+        #expect(session.modelName == session.defaultModel(for: "openrouter"))
         #expect(ProviderChoices.kinds.allSatisfy { !ProviderChoices.defaultModel(for: $0).isEmpty })
         #expect(ProviderChoices.title("openai") == "OpenAI")
     }
@@ -439,14 +448,23 @@ struct StudioVocabularyTests {
 
 @Suite("dataset advice and on-device analysis")
 struct DatasetAdviceTests {
+    @Test func sampledAdviceProgressNamesTheWholeSetAndSamplingRule() {
+        #expect(StudioAssistant.critiqueProgress(done: 12, total: 69)
+            == "Reviewing the training data… preparing sampled review: 12 of 48 samples prepared; "
+            + "48 of 69 chosen evenly")
+        #expect(StudioAssistant.critiqueProgress(done: 8, total: 8)
+            == "Reviewing the training data… 8 of 8 samples")
+    }
+
     @Test func adviceSamplesBatchesThumbnailsAndMerges() async throws {
         var project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
+        project.job = try Job(concepts: [Concept(trigger: "SUBJECT8")])
         let original = try Data(contentsOf: project.images[0].url)
-        for index in 0 ..< 27 {
+        for index in 0 ..< 47 {
             _ = try project.importData(original, name: "copy-\(index).png")
         }
-        #expect(project.images.count == 30)
+        #expect(project.images.count == 50)
         let recorder = AdviceRecorder()
         let assistant = StudioAssistant(
             endpoint: ResolvedEndpoint(client: AdviceClient(recorder: recorder)),
@@ -456,9 +474,14 @@ struct DatasetAdviceTests {
         #expect(advice.contains("Vary the backgrounds."))
         #expect(advice.contains("• Add outdoor photos."))
         let requests = await recorder.requests
-        // 30 photos: batches of 12, 12 and 6, then one text-only merge.
-        #expect(requests.map(\.images.count) == [12, 12, 6, 0])
+        // 50 photos: 48 chosen evenly in batches of 12, then one text-only merge.
+        #expect(requests.map(\.images.count) == [12, 12, 12, 12, 0])
         #expect(requests.allSatisfy { $0.output == "DatasetAdvice" })
+        #expect(requests.dropLast().allSatisfy {
+            $0.instructions.contains("configured diffusion LoRA concept category")
+        })
+        #expect(requests.last?.instructions.contains("Merge them into one review") == true)
+        #expect(advice.contains("Sampled review: 48 of 50 samples, chosen evenly across the set."))
         for case let .image(data, mediaType) in requests.flatMap(\.images) {
             #expect(mediaType == "image/jpeg")
             let source = try #require(CGImageSourceCreateWithData(data as CFData, nil))
@@ -466,6 +489,23 @@ struct DatasetAdviceTests {
             let width = try #require(properties[kCGImagePropertyPixelWidth] as? Int)
             #expect(width <= StudioAssistant.critiqueThumbnailPixels)
         }
+    }
+
+    @Test func datasetAdviceCanStartBeforeAConceptIsDefined() async throws {
+        var project = try await makeDemoProject()
+        defer { try? FileManager.default.removeItem(at: project.directory) }
+        project.job = try Job(concepts: [])
+        let recorder = AdviceRecorder()
+        let assistant = StudioAssistant(
+            endpoint: ResolvedEndpoint(client: AdviceClient(recorder: recorder)),
+            demo: false
+        )
+
+        let advice = try await assistant.critique(project, warnings: [:])
+        #expect(advice.contains("Vary the backgrounds."))
+        let requests = await recorder.requests
+        #expect(requests.first?.instructions.contains("There is no concept configured yet") == true)
+        #expect(requests.first?.instructions.contains("general dataset quality") == true)
     }
 
     @Test func largeSetsAreSampledEvenly() {

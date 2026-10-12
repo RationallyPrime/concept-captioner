@@ -789,6 +789,7 @@ def build_native_config(cfg: dict[str, Any], run_dir: Path) -> dict[str, Any]:
                 quality, rules["read_initialization"](run_dir, cfg["initialization"], cfg["rank"])
             )
         quality = deep_merge(quality, extra)
+        rules["validate_guidance"](quality)
         process = document["config"]["process"][0]
         process.pop("dataset", None)
         process.pop("trigger_word", None)
@@ -805,6 +806,8 @@ def build_native_config(cfg: dict[str, Any], run_dir: Path) -> dict[str, Any]:
         )
         process["network"] = deep_merge(process["network"], quality["network"])
         process["network"].update(linear=cfg["rank"], linear_alpha=cfg["alpha"])
+        process["save"] = deep_merge(process["save"], quality["save"])
+        process["save"]["save_every"] = cfg["save_every"]
         process["train"] = deep_merge(process["train"], quality["train"])
         process["train"].update(
             steps=cfg["steps"],

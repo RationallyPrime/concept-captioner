@@ -9,7 +9,7 @@ struct ConceptStudioApp: App {
 
     var body: some Scene {
         Window("ConceptStudio", id: "studio") {
-            StudioRootView(session: session).onAppear {
+            StudioRootView(session: session).disclosureGroupStyle(StudioDisclosureStyle()).onAppear {
                 delegate.session = session
                 session.restoreStartupComputer()
             }
@@ -54,9 +54,9 @@ struct ConceptStudioApp: App {
                     .keyboardShortcut("?", modifiers: .command)
             }
         }
-        Settings { StudioSettingsView(session: session) }
+        Settings { StudioSettingsView(session: session).disclosureGroupStyle(StudioDisclosureStyle()) }
         Window("ConceptStudio Help", id: "help") {
-            StudioHelpView()
+            StudioHelpView().disclosureGroupStyle(StudioDisclosureStyle())
         }
         .defaultSize(width: 780, height: 720)
     }
@@ -69,7 +69,8 @@ extension StudioSession {
     }
 
     var journeySteps: [StudioStep] {
-        StudioStep.allCases.filter { $0 != .mapping || project?.job.requiresLocatorMapping != false }
+        if project?.job.concepts.isEmpty == true { return [.images, .concepts] }
+        return StudioStep.allCases.filter { $0 != .mapping || project?.job.requiresLocatorMapping != false }
     }
 
     var previousStep: StudioStep? {

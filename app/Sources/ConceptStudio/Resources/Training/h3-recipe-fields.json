@@ -47,7 +47,8 @@
     "force_first_sample",
     "audio_loss_multiplier",
     "ema_config",
-    "do_differential_guidance"
+    "do_differential_guidance",
+    "guidance_loss_target"
   ],
   "train.optimizer_params": [
     "weight_decay",
@@ -100,5 +101,10 @@
   ],
   "asset_fields.assistant_lora_path": [
     "model.assistant_lora_path"
+  ],
+  "save": [
+    "save_every",
+    "max_step_saves_to_keep",
+    "dtype"
   ]
 }

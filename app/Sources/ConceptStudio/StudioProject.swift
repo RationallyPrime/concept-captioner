@@ -61,9 +61,8 @@ struct ProjectImage: Identifiable {
     var status: SampleStatus?
     var notes: [String] = []
     var isFinal = false
-    /// The caption came from a Hub dataset without a response record of its own. It is kept as a
-    /// model caption (`source: model`), so a re-caption with overwrite may replace it unless the
-    /// user protects it as final.
+    /// The caption came from a dataset without a response record of its own. It is kept as a model
+    /// caption (`source: model`), so overwrite may replace it unless the user protects it as final.
     var isImported = false
 
     static let importedCaptioner = "imported"
@@ -71,6 +70,75 @@ struct ProjectImage: Identifiable {
     static func isImported(_ record: ResponseRecord?) -> Bool {
         guard let record else { return false }
         return !record.isHumanFinal && record.captioner.requested == importedCaptioner
+    }
+
+    static func isImported(_ record: ResponseRecord?, caption: String) -> Bool {
+        if let record { return isImported(record) }
+        return !caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var captionState: CaptionState {
+        if isFinal { return .final }
+        guard !caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return status.map(CaptionState.outcome) ?? .ready
+        }
+        if isImported || status == nil {
+            if let status, status != .written { return .importedOutcome(status) }
+            return .imported
+        }
+        if let status, status != .written { return .outcome(status) }
+        return .captioned
+    }
+}
+
+enum CaptionState: Equatable {
+    case ready, captioned, imported, final
+    case outcome(SampleStatus), importedOutcome(SampleStatus)
+
+    var label: String {
+        switch self {
+        case .ready: "Ready"
+        case .captioned: "Captioned"
+        case .imported: "Imported"
+        case .final: "Final · protected"
+        case let .outcome(status):
+            Self.statusLabel(status)
+        case let .importedOutcome(status): Self.statusLabel(status) + " · Imported"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .ready: "circle"
+        case .captioned: "checkmark.circle"
+        case .imported: "tray.and.arrow.down"
+        case .final: "lock.fill"
+        case let .outcome(status):
+            Self.statusSymbol(status)
+        case let .importedOutcome(status): Self.statusSymbol(status)
+        }
+    }
+
+    private static func statusLabel(_ status: SampleStatus) -> String {
+        switch status {
+        case .written: "Written"
+        case .skipped: "Skipped"
+        case .needsMapping: "Needs mapping"
+        case .unusable: "Unusable"
+        case .rejected: "Rejected"
+        case .failed: "Failed"
+        }
+    }
+
+    private static func statusSymbol(_ status: SampleStatus) -> String {
+        switch status {
+        case .written: "checkmark.circle"
+        case .skipped: "arrow.right.circle"
+        case .needsMapping: "person.crop.rectangle"
+        case .unusable: "exclamationmark.triangle"
+        case .rejected: "hand.raised"
+        case .failed: "exclamationmark.circle"
+        }
     }
 }
 
@@ -106,7 +174,7 @@ struct StudioProject {
         try FileManager.default.createDirectory(at: images, withIntermediateDirectories: true)
         let project = try StudioProject(
             directory: directory,
-            job: Job(profile: "flux-image", concepts: [Concept(trigger: "NORA7")]),
+            job: Job(profile: "flux-image", concepts: []),
             images: []
         )
         guard !FileManager.default.fileExists(atPath: project.jobURL.path) else {
@@ -130,7 +198,7 @@ struct StudioProject {
                 caption: caption,
                 status: record?.status,
                 isFinal: record?.isHumanFinal ?? false,
-                isImported: ProjectImage.isImported(record)
+                isImported: ProjectImage.isImported(record, caption: caption)
             ))
         }
         var project = StudioProject(directory: directory, job: job, images: images)
@@ -156,7 +224,8 @@ struct StudioProject {
                 )) ?? ""
                 project.excludedImages.append(ProjectImage(
                     url: url, caption: caption, status: record?.status,
-                    isFinal: record?.isHumanFinal ?? false, isImported: ProjectImage.isImported(record)
+                    isFinal: record?.isHumanFinal ?? false,
+                    isImported: ProjectImage.isImported(record, caption: caption)
                 ))
             }
         }
@@ -248,75 +317,6 @@ struct StudioProject {
         let profiles = skill.profiles()
         if !profiles.contains(job.profile), let first = profiles.first { job.profile = first }
         try save()
-    }
-
-    // MARK: Images
-
-    mutating func importFiles(_ files: [URL]) throws {
-        for source in files {
-            try Task.checkCancellation()
-            let suffix = source.pathExtension.lowercased().withDot
-            guard Sources.mediaSuffixes.contains(suffix) || MediaEditor.convertibleImageSuffixes.contains(suffix) else {
-                continue
-            }
-            if Sources.isVideo(suffix) {
-                _ = try importVideo(source, name: source.lastPathComponent)
-            } else {
-                _ = try importData(Data(contentsOf: source), name: source.lastPathComponent)
-            }
-        }
-        try save()
-    }
-
-    mutating func importData(_ data: Data, name: String) throws -> String {
-        let imported = try MediaEditor.normalizedImport(data, name: URL(fileURLWithPath: name).lastPathComponent)
-        let target = availableTarget(for: imported.name)
-        try AtomicFile.write(imported.data, to: target)
-        images.append(ProjectImage(url: target))
-        try job.setMapping(job.mappingIncludingWholeTargets(nil), for: target.lastPathComponent)
-        try save()
-        return target.lastPathComponent
-    }
-
-    mutating func importVideo(_ source: URL, name: String) throws -> String {
-        guard Sources.isVideo(Sources.suffix(of: name)) else {
-            throw StudioError.message("Import this clip as an MP4, MOV or M4V file.")
-        }
-        let target = availableTarget(for: URL(fileURLWithPath: name).lastPathComponent)
-        try Task.checkCancellation()
-        try FileManager.default.copyItem(at: source, to: target)
-        let previousJob = job
-        do {
-            try Task.checkCancellation()
-            try job.setMapping(job.mappingIncludingWholeTargets(nil), for: target.lastPathComponent)
-            images.append(ProjectImage(url: target))
-            try save()
-        } catch {
-            images.removeAll { $0.url == target }
-            job = previousJob
-            try? FileManager.default.removeItem(at: target)
-            throw error
-        }
-        return target.lastPathComponent
-    }
-
-    /// A target in images/ whose stem no existing photo uses (sidecars are named by stem):
-    /// `name.ext`, then `name-2.ext`, `name-3.ext`, ...
-    func availableTarget(for fileName: String) -> URL {
-        let file = URL(fileURLWithPath: fileName)
-        let stem = file.deletingPathExtension().lastPathComponent
-        let suffix = file.pathExtension
-        let taken = Set(allMedia.map { $0.url.deletingPathExtension().lastPathComponent.lowercased() })
-        var candidate = stem
-        var counter = 1
-        while taken.contains(candidate.lowercased())
-            || FileManager.default.fileExists(atPath: imagesDirectory.appendingPathComponent(
-                suffix.isEmpty ? candidate : "\(candidate).\(suffix)"
-            ).path) {
-            counter += 1
-            candidate = "\(stem)-\(counter)"
-        }
-        return imagesDirectory.appendingPathComponent(suffix.isEmpty ? candidate : "\(candidate).\(suffix)")
     }
 
     func referenceURL(for trigger: String) -> URL {

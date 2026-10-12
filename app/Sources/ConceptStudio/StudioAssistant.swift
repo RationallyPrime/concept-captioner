@@ -95,6 +95,14 @@ struct StudioAssistant {
     /// background and obvious quality problems.
     static let critiqueThumbnailPixels = 512
 
+    static func critiqueProgress(done: Int, total: Int) -> String {
+        if total > critiquePhotoLimit {
+            return "Reviewing the training data… preparing sampled review: \(done) of \(critiquePhotoLimit) "
+                + "samples prepared; \(critiquePhotoLimit) of \(total) chosen evenly"
+        }
+        return "Reviewing the training data… \(done) of \(total) samples"
+    }
+
     let endpoint: ResolvedEndpoint
     let demo: Bool
 
@@ -118,6 +126,14 @@ struct StudioAssistant {
             name: "dataset advice", endpoint: endpoint, schemaName: "DatasetAdvice", schema: DatasetAdvice.schema
         )
         let concepts = project.job.concepts.map(\.jsonValue)
+        let reviewInstructions = concepts.isEmpty
+            ? "There is no concept configured yet. Inspect these training samples for general dataset quality: "
+            + "variety, useful framing, consistent image or clip quality, and obvious corrupt or duplicate inputs. "
+            + "Do not infer the intended subject or judge concept coverage."
+            : "Inspect these training samples for the configured diffusion LoRA concept category. "
+            + "For identity, assess variety of presentation and visibility; for objects and characters, "
+            + "viewpoints and context; for style, variety of subject matter within the intended style; "
+            + "for motion, require actual temporal evidence. Sparse frames cannot establish motion or sound."
         var reviews: [DatasetAdvice] = []
         var done = 0
         for batch in stride(from: 0, to: sampled.count, by: Self.critiqueBatchSize).map({
@@ -136,11 +152,9 @@ struct StudioAssistant {
                 content += try await Self.adviceContent(image.url)
             }
             let reply = try await stage.run(
-                instructions: "Inspect these training samples for the configured diffusion LoRA concept category. "
-                    + "For identity, assess variety of presentation and visibility; for objects and characters, "
-                    + "viewpoints and context; for style, variety of subject matter within the intended style; "
-                    + "for motion, require actual temporal evidence. Sparse frames cannot establish motion or sound. "
-                    + "Do not score aesthetics or judge a style dataset by face visibility. summary is "
+                instructions: reviewInstructions
+                    + " Do not score aesthetics or judge a style dataset by face visibility. "
+                    + "summary is "
                     + "two or three sentences; suggestions are at most five specific actions, naming samples where "
                     + "useful. Do not infer biography.",
                 messages: [.user(content)]
@@ -165,7 +179,7 @@ struct StudioAssistant {
             ).output
         }
         let note = sampled.count < project.images.count
-            ? "\n\nReviewed \(sampled.count) of \(project.images.count) samples, chosen evenly across the set."
+            ? "\n\nSampled review: \(sampled.count) of \(project.images.count) samples, chosen evenly across the set."
             : ""
         return advice.text + note
     }

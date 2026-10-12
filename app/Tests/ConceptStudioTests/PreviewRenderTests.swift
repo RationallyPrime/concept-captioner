@@ -41,7 +41,9 @@ struct PreviewRenderTests {
         let suite = "ConceptStudio.previews." + UUID().uuidString
         let preferences = try #require(UserDefaults(suiteName: suite))
         defer { preferences.removePersistentDomain(forName: suite) }
-        let session = StudioSession(preferences: preferences)
+        let demoDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(suite, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: demoDirectory) }
+        let session = StudioSession(preferences: preferences, demoDirectory: demoDirectory)
         session.recentPaths = []
         session.demoMode = true
         session.gpu = GPUWorkspace(demoMode: true, preferences: preferences)
@@ -58,8 +60,7 @@ struct PreviewRenderTests {
         await session.task?.value
         #expect(session.errorMessage == nil)
         #expect(session.demoMode)
-        let projectDirectory = try #require(session.project?.directory)
-        defer { try? FileManager.default.removeItem(at: projectDirectory) }
+        _ = try #require(session.project?.directory)
         session.gpu = GPUWorkspace(demoMode: true, preferences: preferences)
         await prewarmThumbnails(session.project?.images.map(\.url) ?? [])
         for step in StudioStep.allCases {
@@ -91,12 +92,8 @@ struct PreviewRenderTests {
             try await captureStates(of: step, session: session, output: output, filter: filter, captures: &captures)
         }
         try await captureAuxiliaryScreens(session: session, output: output, filter: filter, captures: &captures)
-        try await capture(
-            "help", view: StudioHelpView(), output: output, filter: filter, captures: &captures,
-            renderSizes: [
-                ("minimum", CGSize(width: 640, height: 480)),
-                ("default", CGSize(width: 780, height: 720)),
-            ]
+        try await captureNewHelpAndTraining(
+            preferences: preferences, output: output, filter: filter, captures: &captures
         )
         await session.gpu.stopEverything()
         #expect(!session.gpu.hasRunningPod)
@@ -187,7 +184,7 @@ struct PreviewRenderTests {
         try await capture(
             "glossary-definition", view: StudioDefinitionView(term: .conceptBoundary),
             output: output, filter: filter, captures: &captures,
-            renderSizes: [("popover-content", CGSize(width: 340, height: 190))]
+            renderSizes: [("popover-content", CGSize(width: 430, height: 440))]
         )
         try await capture(
             "concept-editor", view: ConceptEditor(session: session, existing: session.project?.job.concepts.first),
@@ -236,6 +233,46 @@ struct PreviewRenderTests {
                 renderSizes: [("section", CGSize(width: 760, height: 240))]
             )
         }
+    }
+
+    private func captureNewHelpAndTraining(
+        preferences: UserDefaults, output: URL, filter: Set<String>, captures: inout [[String: String]]
+    ) async throws {
+        preferences.set(GlossaryReadingLevel.plain.rawValue, forKey: "studio.glossaryReadingLevel")
+        try await capture(
+            "help", view: StudioHelpView().defaultAppStorage(preferences),
+            output: output, filter: filter, captures: &captures,
+            renderSizes: [
+                ("minimum", CGSize(width: 640, height: 480)),
+                ("default", CGSize(width: 780, height: 720)),
+            ]
+        )
+        preferences.set(GlossaryReadingLevel.technical.rawValue, forKey: "studio.glossaryReadingLevel")
+        try await capture(
+            "help-technical", view: StudioHelpView().defaultAppStorage(preferences),
+            output: output, filter: filter, captures: &captures,
+            renderSizes: [
+                ("minimum", CGSize(width: 640, height: 480)),
+                ("default", CGSize(width: 780, height: 720)),
+            ]
+        )
+        try await capture(
+            "glossary-technical", view: StudioDefinitionView(term: .alpha).defaultAppStorage(preferences),
+            output: output, filter: filter, captures: &captures,
+            renderSizes: [("popover-content", CGSize(width: 430, height: 440))]
+        )
+        preferences.set(GlossaryReadingLevel.plain.rawValue, forKey: "studio.glossaryReadingLevel")
+        let workspace = GPUWorkspace(demoMode: true, preferences: preferences)
+        workspace.chooseTrainingModel(GPUWorkspace.h3BaseModel)
+        workspace.profile = "h3-still"
+        try await capture(
+            "advanced-training", view: ScrollView { AdvancedTrainingControls(workspace: workspace).padding(24) },
+            output: output, filter: filter, captures: &captures,
+            renderSizes: [
+                ("minimum", CGSize(width: 720, height: 600)),
+                ("default", CGSize(width: 950, height: 750)),
+            ]
+        )
     }
 
     private func prewarmThumbnails(_ urls: [URL]) async {
@@ -321,6 +358,7 @@ struct PreviewRenderTests {
         ] {
             for (sizeName, size) in renderSizes ?? sizes {
                 let content = view
+                    .disclosureGroupStyle(StudioDisclosureStyle())
                     .environment(\.colorScheme, scheme)
                     .environment(\.controlActiveState, .key)
                     .environment(\.locale, Locale(identifier: "en_US"))

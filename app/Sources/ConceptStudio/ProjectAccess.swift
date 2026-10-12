@@ -141,6 +141,7 @@ struct RecentProjects {
             }
             throw StudioError.message(
                 "Access to \(target.lastPathComponent) could not be restored. "
+                    + "macOS may ask again after the app is rebuilt or signed differently. "
                     + "Choose Open project and select the folder again to grant access. "
                     + error.localizedDescription
             )

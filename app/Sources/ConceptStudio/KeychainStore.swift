@@ -49,7 +49,10 @@ struct KeychainStore: KeyStore, SecretStore {
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess, let data = result as? Data else {
-            throw StudioError.message("Your Mac could not read this saved key. Unlock your Keychain and try again.")
+            throw StudioError.message(
+                "Your Mac could not read this saved key. A rebuilt or differently signed app may need you to "
+                    + "enter and save the key again in Settings; otherwise, unlock your Keychain and try again."
+            )
         }
         return String(data: data, encoding: .utf8)
     }

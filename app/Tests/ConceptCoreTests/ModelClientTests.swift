@@ -411,6 +411,14 @@ struct GeminiClientTests {
         GeminiClient(apiKey: "gk-test", model: "gemini-3.8-flash", transport: transport)
     }
 
+    @Test func modelResourcePrefixIsNormalizedOnce() {
+        let prefixed = GeminiClient(apiKey: "gk-test", model: "models/gemini-3.8-flash")
+        let plain = GeminiClient(apiKey: "gk-test", model: "gemini-3.8-flash")
+        #expect(prefixed.requestedModel == "gemini-3.8-flash")
+        #expect(plain.requestedModel == "gemini-3.8-flash")
+        #expect(GeminiClient.normalizedModel("models/models/gemini-3.8-flash") == "models/gemini-3.8-flash")
+    }
+
     @Test func nativeMode() async throws {
         let transport = try Support.replying([
             "modelVersion": "gemini-3.8-flash-001",

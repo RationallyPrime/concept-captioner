@@ -50,7 +50,12 @@ struct ImagesView: View {
                 }
                 StudioIntroduction(preferences: session.preferences)
                 Divider()
-                StudioSection(title: "Before spending on training", subtitle: "Ask for advice on the set as a whole.") {
+                StudioSection(
+                    title: "Before spending on training",
+                    subtitle: session.project?.job.concepts.isEmpty == true
+                        ? "Get general quality advice now. Add a concept for coverage-specific feedback."
+                        : "Ask for advice on the set as a whole."
+                ) {
                     Button("Ask for dataset advice", systemImage: "sparkles") { session.datasetCritique() }
                         .disabled(session.busy || images.isEmpty)
                     Text(session.demoMode ? "Prepared demo advice; no model called." :

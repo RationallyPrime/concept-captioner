@@ -16,24 +16,27 @@ let package = Package(
             name: "ConceptCore",
             dependencies: [.product(name: "Yams", package: "Yams")],
             resources: [.copy("Resources/Skills")],
-            swiftSettings: [.swiftLanguageMode(.v6)],
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .executableTarget(
             name: "ConceptStudio",
             dependencies: ["ConceptCore", .product(name: "Yams", package: "Yams")],
-            resources: [.copy("Resources/Demo"), .process("Resources/OpenAI"), .copy("Resources/Training")],
+            resources: [
+                .copy("Resources/Demo"), .process("Resources/OpenAI"), .copy("Resources/Training"),
+                .copy("Resources/Glossary"),
+            ],
             swiftSettings: [.swiftLanguageMode(.v6)],
-            linkerSettings: [.linkedFramework("AVKit")],
+            linkerSettings: [.linkedFramework("AVKit")]
         ),
         .testTarget(
             name: "ConceptCoreTests",
             dependencies: ["ConceptCore"],
-            swiftSettings: [.swiftLanguageMode(.v6)],
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "ConceptStudioTests",
             dependencies: ["ConceptStudio"],
-            swiftSettings: [.swiftLanguageMode(.v6)],
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
-    ],
+    ]
 )

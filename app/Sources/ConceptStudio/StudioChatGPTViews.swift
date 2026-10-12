@@ -8,13 +8,9 @@ struct ChatGPTSettingsSection: View {
         .flatMap { NSImage(contentsOf: $0) }
 
     var body: some View {
-        StudioSection(
-            title: "Log in with ChatGPT",
-            subtitle: "Use an eligible ChatGPT plan to write captions with OpenAI models. No API key is needed. "
-                + "Requests count toward your plan or credits balance."
-        ) {
+        VStack(alignment: .leading, spacing: 12) {
             if session.demoMode {
-                Text("Demo stays offline. Open or create a real project to connect ChatGPT.")
+                Text("Close the demo to connect an account.")
                     .foregroundStyle(StudioStyle.supportingText)
             } else {
                 savedAccounts
@@ -33,8 +29,8 @@ struct ChatGPTSettingsSection: View {
                     .buttonStyle(.borderedProminent).tint(.black)
                     .disabled(session.busy || session.chatGPT.isBusy)
                     .help(session.chatGPT.accounts.isEmpty
-                        ? "Sign in securely in your browser."
-                        : "Add another ChatGPT account or workspace. Use Sign in again for a saved account.")
+                        ? "Signs in through your browser; saved sessions stay in this Mac’s Keychain."
+                        : "Add another ChatGPT account or workspace, or sign in again to the selected account.")
                     if session.chatGPT.isBusy {
                         ProgressView().controlSize(.small)
                         Button("Cancel") { session.chatGPT.cancelSignIn() }
@@ -48,8 +44,6 @@ struct ChatGPTSettingsSection: View {
                 } else if !session.chatGPT.message.isEmpty {
                     Text(session.chatGPT.message).fixedSize(horizontal: false, vertical: true)
                 }
-                Text("Your browser handles sign-in. Saved sessions stay in your Mac’s Keychain, outside projects.")
-                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
             }
         }
     }
@@ -97,7 +91,11 @@ struct ChatGPTCaptioningControls: View {
             Picker("Use OpenAI with", selection: $session.openAIUsesChatGPT) {
                 Text("ChatGPT plan").tag(true)
                 Text("OpenAI API credits").tag(false)
-            }.disabled(session.busy)
+            }
+            .disabled(session.busy)
+            .help(
+                "ChatGPT uses your plan or credits balance; the API choice uses separately billed OpenAI API credits."
+            )
             if session.openAIUsesChatGPT {
                 if session.demoMode {
                     Text("Demo uses fake models and stays offline.")
@@ -131,13 +129,9 @@ struct ChatGPTCaptioningControls: View {
                             + "Your thinking-effort choices are kept.")
                             .font(.callout).foregroundStyle(StudioStyle.supportingText)
                     }
-                    Text("Applies to every OpenAI request, including caption checks, comparisons and dataset advice. "
-                        + "ChatGPT’s preview does not accept an output-token cap. Manage your usage limit in ChatGPT.")
-                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
-                Text("OpenAI requests use your saved API key and separately billed API credits.")
+                Text("Save an OpenAI API key in Settings to use this route.")
                     .font(.callout).foregroundStyle(StudioStyle.supportingText)
             }
         }

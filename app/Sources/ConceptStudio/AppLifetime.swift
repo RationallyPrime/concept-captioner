@@ -46,8 +46,9 @@ struct StudioPrompt: Identifiable {
         case let .discardCaptionDrafts(warning): return warning
         case let .stopWork(work): return Self.stopMessage(work)
         case .stopWithPendingResult:
-            return "Stopping now can lose the trained model that is still on the rented computer. "
-                + "Retrieve it first, or stop anyway if you no longer need it."
+            return "The trained model has not been saved to your Mac or published. Retrieve it first, "
+                + "or stop and keep it on this computer's saved storage for later retrieval. "
+                + "Removing a computer deletes files on its pod disk."
         case let .raiseBudget(from, to, rate):
             let hours = rate.map { $0 > 0 ? " That is about \(Self.hours((to - from) / $0)) more at this price." : "" }
                 ?? ""
@@ -102,7 +103,7 @@ struct StudioPrompt: Identifiable {
         }
         let price = work.hourlyRate.map { "It costs \(StudioMoney.format($0)) per hour" } ?? "It is still billing"
         var text = "\(price) and has used about \(StudioMoney.format(work.spent)) so far. "
-            + "Stop ends GPU billing; saved network storage remains. "
+            + "Stop ends GPU billing; network storage and this computer's pod disk remain. "
             + "If the stop cannot be confirmed, ConceptStudio stays open so you can retry."
         if work.offerKeepRunning {
             text += "\n\nIf you keep it running, it keeps billing after ConceptStudio closes, and your budget "

@@ -99,5 +99,6 @@ struct PublishView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { session.preparePublishing() }
+        .onChange(of: session.providerCredentialRevision) { _, _ in session.preparePublishing() }
     }
 }

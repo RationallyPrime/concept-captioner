@@ -76,6 +76,7 @@ extension GPUWorkspace {
             let selectedTrainer = self.trainer
             let selectedModel = self.baseModel
             if self.isH3Training {
+                try Self.validateH3Guidance(settings: self.h3RecipeSettings, guidanceLoss: self.guidanceLoss)
                 let plan = try await agent.plan()
                 try await self.validateH3Computer(agent, gpus: plan.train?.gpus ?? [])
             }
@@ -108,8 +109,8 @@ extension GPUWorkspace {
                 cap: cap, baseline: baseline, containsVideo: containsVideo
             )
             let destination = self.result?.destination ?? .download
-            var startedTrainer = false
-            defer { if !startedTrainer { self.finishFailedPreparation() } }
+            var trainerStartAttempted = false
+            defer { if !trainerStartAttempted { self.finishFailedPreparation() } }
             try await self.installTrainingDataset(local, repo: repo, revision: revision, name: dataset, agent: agent)
             if let initialization {
                 params["initialization"] = try await .object(initialization.upload(to: agent))
@@ -118,8 +119,8 @@ extension GPUWorkspace {
             self.historyRunID = self.runID
             try Task.checkCancellation()
             try self.checkCurrentRunBudget()
+            trainerStartAttempted = true
             try await agent.start("trainer-\(selectedTrainer)", gpus: plan.train?.gpus ?? [], params: params)
-            startedTrainer = true
             self.persist()
             self.persistResult()
             await self.recordNewTrainingRun(
@@ -143,16 +144,26 @@ extension GPUWorkspace {
             throw StudioError.message("This imported recipe is for H3. Choose another training model to clear it "
                 + "before using a different base model.")
         }
+        guard !triggerWords.split(whereSeparator: { $0 == "," || $0.isWhitespace }).isEmpty else {
+            throw StudioError.message("Define a concept and its trigger in Concepts before starting training.")
+        }
         guard local || !repo.isEmpty, steps > 0, rank > 0, !baseModel.isEmpty,
-              Self.resolutionChoices.contains(resolution) else {
+              !trainingResolutions.isEmpty, trainingResolutions.allSatisfy(Self.resolutionChoices.contains) else {
             throw StudioError.message("Prepare your dataset and choose a model with positive training steps and rank.")
         }
         guard !containsVideo || trainer == "ltx" || isH3Training else {
             throw StudioError.message("FLUX image training does not accept video clips. Choose LTX or H3 training.")
         }
+        if isH3Training { try Self.validateH3Guidance(settings: h3RecipeSettings, guidanceLoss: guidanceLoss) }
         guard seed >= 0, learningRate.isFinite, learningRate > 0, learningRate <= 1,
               alpha > 0, batchSize > 0, accumulation > 0 else {
             throw StudioError.message("Choose positive training values and a nonnegative seed.")
+        }
+        guard !isH3Training || (checkpointEvery > 0 && checkpointRetention >= 0
+            && ["float16", "float32", "bfloat16", "fp16", "fp32", "bf16"].contains(checkpointPrecision)
+            && Self.validGuidanceTarget(guidanceTarget)) else {
+            throw StudioError.message("Choose a positive checkpoint interval, retention of zero or more, "
+                + "a supported saved precision and guidance target from 0 to 20 (or a two-value range).")
         }
         guard !resultNeedsSaving else {
             throw StudioError.message("Retrieve pending trained models or generated outputs before starting a run.")
@@ -237,7 +248,7 @@ extension GPUWorkspace {
         dataset: String, inputFacts: (profile: String, triggers: String, video: Bool)
     ) -> JSONObject {
         let words = inputFacts.triggers.split(whereSeparator: { $0 == "," || $0.isWhitespace }).map(String.init)
-        let checkpointEvery = min(250, steps)
+        let saveInterval = isH3Training ? checkpointEvery : min(250, steps)
         var params: JSONObject = [
             "run_id": .string(dataset),
             "dataset": .object(["path": .string("/workspace/datasets/\(dataset)")]),
@@ -248,7 +259,7 @@ extension GPUWorkspace {
             "resolution": trainingResolutions.count > 1
                 ? .array(trainingResolutions.map(JSONValue.int)) : .int(resolution),
             "seed": .int(seed),
-            "save_every": .int(checkpointEvery), "sample_every": .int(samplesEnabled ? checkpointEvery : 0),
+            "save_every": .int(saveInterval), "sample_every": .int(samplesEnabled ? saveInterval : 0),
         ]
         if samplesEnabled {
             params["sample_prompts"] = .array([.string(words.joined(separator: " "))])
@@ -265,6 +276,17 @@ extension GPUWorkspace {
         } else {
             var extra = nativeRecipe?.settings
                 ?? runHistory.first(where: { $0.runID == repeatSourceRunID })?.params["extra"]?.objectValue ?? [:]
+            if isH3Training {
+                var save = extra["save"]?.objectValue ?? [:]
+                save["save_every"] = .int(saveInterval)
+                save["max_step_saves_to_keep"] = .int(checkpointRetention)
+                save["dtype"] = .string(checkpointPrecision)
+                extra["save"] = .object(save)
+                var train = extra["train"]?.objectValue ?? [:]
+                train["do_guidance_loss"] = .bool(guidanceLoss)
+                train["guidance_loss_target"] = guidanceTarget
+                extra["train"] = .object(train)
+            }
             extra["training_seed"] = .int(seed)
             params["extra"] = .object(extra)
         }

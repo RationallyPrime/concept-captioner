@@ -197,6 +197,7 @@ extension StudioSession {
         guard !busy, !editing else { return }
         do {
             try project?.setIncluded(id, included)
+            invalidateMappingUndo()
             startImageAnalysis()
             message = included ? "Sample included in training." : "Sample excluded. Undo can restore it."
         } catch { errorMessage = Self.describe(error) }
@@ -207,6 +208,7 @@ extension StudioSession {
         do {
             let replaced = project?.curationUndo.last?.replacedIDs ?? []
             try project?.undoCuration()
+            invalidateMappingUndo()
             for id in replaced {
                 invalidateMediaDraft(id: id)
             }

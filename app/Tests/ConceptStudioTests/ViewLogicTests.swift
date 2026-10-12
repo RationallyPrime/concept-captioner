@@ -22,15 +22,17 @@ struct ViewLogicTests {
         }
     }
 
-    @Test func switchingProviderKeepsATypedModel() {
-        let typed = ProviderChoices.model(afterSwitchingFrom: "openrouter", to: "google", current: "my/custom-model")
-        #expect(typed == "my/custom-model")
-        let untouched = ProviderChoices.model(
-            afterSwitchingFrom: "openrouter", to: "google", current: ProviderChoices.defaultModel(for: "openrouter")
-        )
-        #expect(untouched == ProviderChoices.defaultModel(for: "google"))
-        #expect(ProviderChoices.model(afterSwitchingFrom: "google", to: "anthropic", current: "")
-            == ProviderChoices.defaultModel(for: "anthropic"))
+    @Test func switchingProviderResetsTheModelOnlyOnAProviderChange() {
+        let session = makeTestSession()
+        session.endpointKind = "openrouter"
+        session.modelName = "gpt-6.1-sol"
+        session.providerChanged(from: "openrouter", to: "google")
+        #expect(session.modelName == ProviderChoices.defaultModel(for: "google"))
+        session.modelName = "my/custom-model"
+        session.providerChanged(from: "google", to: "google")
+        #expect(session.modelName == "my/custom-model")
+        session.providerChanged(from: "google", to: "anthropic")
+        #expect(session.modelName == ProviderChoices.defaultModel(for: "anthropic"))
     }
 
     @Test func aPromptResumesOnceWithTheAnswer() async {

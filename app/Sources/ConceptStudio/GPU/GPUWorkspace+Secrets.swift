@@ -39,13 +39,15 @@ extension GPUWorkspace {
 
     /// Creates the pod. A creation that fails leaves no agent secret behind.
     func createPod(
-        _ provider: any GPUProvider, offer: GPUOffer, volume: GPUVolume, credentials: PodCredentials
+        _ provider: any GPUProvider, offer: GPUOffer, volume: GPUVolume?, credentials: PodCredentials
     ) async throws -> RentedPod {
+        let override = imageName.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             return try await provider.create(PodCreation(
                 name: PodNaming.name(project: projectFolder?.lastPathComponent ?? ""),
                 offer: offer, count: gpuCount,
-                image: imageName.replacingOccurrences(of: "{trainer}", with: trainer),
+                image: (override.isEmpty ? StudioSession.defaultPodImageName : override)
+                    .replacingOccurrences(of: "{trainer}", with: trainer),
                 minCudaVersion: Self.minimumCUDA(trainer), volume: volume, env: credentials.env
             ))
         } catch {
