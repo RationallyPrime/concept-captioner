@@ -58,11 +58,12 @@ on Concepts before captioning, publishing or training. Images and clips are copi
 `source: human` in the response record. Reference images live in `references/`. No keys go into
 these files. Recent project folders and custom skill folders use security-scoped bookmarks.
 
-Settings offers **Log in with ChatGPT**, **Connect OpenRouter** and manual account keys. For key-based access, one gateway key
-is enough: OpenRouter, Vercel AI Gateway or Pydantic AI Gateway. Direct model providers,
-a Hugging Face write token and a RunPod key are also available. Secrets are saved in the Mac
-Keychain. Saving a key checks it through a read-only account/model request, with no generated
-caption. Hugging Face and RunPod have their own publishing/training section. Captioning reads
+Settings offers **Continue with ChatGPT**, **Connect OpenRouter** and manual account keys. For
+key-based access, one gateway key is enough: OpenRouter, Vercel AI Gateway or Pydantic AI
+Gateway. Direct model providers, a Hugging Face write token and a RunPod key are also available.
+Secrets are saved in the Mac Keychain. Saving a key checks it through a read-only account/model
+request, with no generated caption. Hugging Face and RunPod have their own publishing/training
+section. Captioning reads
 provider model lists, filters declared media capabilities, and retains **Other model…** for
 custom names. Changing provider selects its default; Gemini accepts either bare model IDs or
 Google’s `models/` prefix. The captioning connection test uses the model selected on Captioning and consumes

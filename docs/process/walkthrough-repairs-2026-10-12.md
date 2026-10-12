@@ -63,8 +63,9 @@ GPU run.
 
 ## Verification record
 
-- Full local Swift run: 540 tests passed (279 app tests and 261 Core tests). The later Help/search
-  changes passed a focused 30-test run; final native UI changes compiled in the rebuilt app.
+- Initial full local Swift run before the PR #6 follow-ups: 540 tests passed (279 app tests and
+  261 Core tests). The later Help/search changes passed a focused 30-test run; final native UI
+  changes compiled in the rebuilt app.
 - Python reference: 118 tests passed. Pod scripts: 315 tests passed. The full pod-agent suite passed with one skip after its
   initializer fixture was restricted to the canonical four sections. Strict SwiftLint, SwiftFormat,
   Ruff checks/format checks and `git diff --check` passed. Release packaging without a Developer
@@ -94,18 +95,26 @@ GPU run.
   five-section initializer; the fixtures were repaired without widening the four-section contract.
   No local pass is presented as a remote result.
 
-The rebuilt preview is `app/dist/ConceptStudio.app` in the owner's primary checkout. It contains
-this branch's application changes even while source integration awaits the pull request.
+**Pre-merge preview (2026-10-12):** the rebuilt `app/dist/ConceptStudio.app` in the owner's
+primary checkout contained this branch's application changes while PR #6 awaited merge.
+
+## Merge closure (2026-10-12)
+
+[PR #6](https://github.com/RationallyPrime/concept-captioner/pull/6) merged to `main` at
+`2b4f15c`; [main CI passed](https://github.com/RationallyPrime/concept-captioner/actions/runs/38291540781).
+This closes the pre-merge status above. The final post-follow-up local Swift run is recorded
+below; the merge does not expand the separate runtime and distribution evidence.
 
 ## Runtime boundaries
 
 No new paid caption request, pod, GPU training run or family-media inspection was performed by
-this repair session. The owner/Claude’s completed H3 still-image run is recorded separately in
-the original walkthrough and has been reflected in APP-STATUS and POD-STATUS. Live acceptance
-of provider account checks, new H3 settings, pod-disk restart/retrieval, H3 clips, external
-warm-start, Resume and matched H3 generation remains distinct from offline fixtures. A stable
-Developer ID certificate and signed sandbox/Photos/bookmark/Keychain acceptance remain required
-for distribution.
+this repair session. The owner/Claude's completed H3 still-image run is recorded separately in
+the original walkthrough and reflected in APP-STATUS and POD-STATUS. The owner's confirmation
+of live ChatGPT/OpenRouter sign-in and captioning is recorded in APP-STATUS. Live acceptance
+of the new account-key checks, new H3 settings, pod-disk restart/retrieval, H3 clips, external
+warm-start, same-run Resume and matched H3 generation remains distinct from offline fixtures.
+A stable Developer ID certificate and signed sandbox/Photos/bookmark/Keychain acceptance remain
+required for distribution.
 
 ## Review follow-ups (2026-10-12)
 
