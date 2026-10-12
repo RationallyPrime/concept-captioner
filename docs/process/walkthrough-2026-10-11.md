@@ -111,3 +111,22 @@ preferences; the stale copy can write an old training image override back.
     2026-10-12) are unreachable. Offer "no saved storage" with a plain warning that checkpoints
     live only on the rented computer and the result is pushed when training finishes. Creating a
     volume from the app, in a data center that has the chosen GPU, would also help.
+
+## First real training run (2026-10-12)
+
+Diffusion-Fun / Grease: 69 samples (47 earlier captioned photos + 22 new video stills captioned with
+`gemini-flash-latest`, H3 still format), published privately as `RationallyPrime/Grease` at
+`6102d707`. MiniMax-H3 (`Comfy-Org/MiniMax-H3` + pinned training adapter), AI Toolkit image
+`v0.2.3-clean-20261011`, one RTX PRO 6000 in CA-MTL-3 with a new 300 GB network volume. 3,000 steps,
+1,024 px, rank/alpha 32 on blocks 20–49, accumulation 2, lr 1e-4, about 1.1 steps/s. The LoRA
+(179 MB) was pushed to private `RationallyPrime/grease-erla-gunnar-h3-v3`; the pod was stopped after
+72 minutes (about $3 GPU). Pod env held only RunPod secret placeholders (ticket 3 confirmed live).
+
+Recipe questions for the app seat (the built-in H3 recipe versus the owner's previous run):
+22. **Checkpoints:** saved every 250 steps keeping only the last 4; the previous run saved every 300
+    and kept 40, so earlier checkpoints were available for comparison.
+23. **Saved precision:** float16; the previous run saved float32.
+24. **Guidance loss:** off; the previous run trained with `do_guidance_loss` and target 3.5.
+25. **Resolution:** one value only (512, 768 or 1,024); the previous run used buckets 768 and 1,024.
+26. **Observation: steppers for large values.** Training steps moves in 25s with no text entry;
+    reaching 3,000 took a long hold. A number field would serve better.
