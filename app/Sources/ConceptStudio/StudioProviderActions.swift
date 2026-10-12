@@ -3,6 +3,24 @@ import Foundation
 
 @MainActor
 extension StudioSession {
+    /// Settings' key check: the saved key for `kind`, and for a custom server only against the
+    /// Settings URL. A project's server or a rented computer's caption server never stands in, so
+    /// "Works" always means this saved key was sent and accepted.
+    func checkSavedProviderKey(
+        for kind: String,
+        transport: any HTTPTransport = URLSessionTransport()
+    ) async throws -> [ProviderModelChoice] {
+        guard kind == "vllm" else { return try await refreshProviderModels(for: kind, transport: transport) }
+        let serverURL = customBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !serverURL.isEmpty else { throw ProviderModelCatalogError.missingServerURL }
+        let key = try secrets.read("vllm") ?? ""
+        let models = try await ProviderModelCatalog.list(
+            for: kind, apiKey: key, baseURL: serverURL, trustedBaseURL: serverURL, transport: transport
+        )
+        guard try (secrets.read("vllm") ?? "") == key else { throw CancellationError() }
+        return models
+    }
+
     func refreshProviderModels(
         for requestedKind: String? = nil,
         transport: any HTTPTransport = URLSessionTransport()

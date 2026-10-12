@@ -404,7 +404,7 @@ struct StudioSettingsView: View {
                 keyStatusText[name] = "Works · \(models.count) models listed"
             default:
                 let kind = name == "gateway" ? "gateway/anthropic" : name
-                let models = try await session.refreshProviderModels(for: kind)
+                let models = try await session.checkSavedProviderKey(for: kind)
                 guard generation == keyCheckGeneration else { return }
                 keyStatusText[name] = "Works · \(models.count) models listed"
             }

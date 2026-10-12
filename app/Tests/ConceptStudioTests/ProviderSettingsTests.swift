@@ -209,6 +209,32 @@ struct ProviderSettingsTests {
         #expect(session.providerModelChoices[session.providerModelCacheKey(for: "vllm")] == models)
     }
 
+    @Test @MainActor func settingsKeyCheckSendsTheSavedKeyToTheSettingsServerOnly() async throws {
+        let preferences = IsolatedDefaults()
+        defer { preferences.remove() }
+        let secrets = MemorySecretStore(["vllm": "settings-key"])
+        let session = StudioSession(preferences: preferences.defaults, secrets: secrets)
+        session.endpointKind = "vllm"
+        session.customBaseURL = "http://127.0.0.1:8000/settings/v1"
+        session.requestBaseURL = "http://127.0.0.2:8000/project/v1"
+        session.usingPodCaptioner = true
+        let wire = ProviderSettingsWire(HTTPResponse(
+            status: 200,
+            body: Data(#"{"data":[{"id":"settings-model"}]}"#.utf8)
+        ))
+
+        let models = try await session.checkSavedProviderKey(for: "vllm", transport: wire)
+        let request = try #require(await wire.requests.first)
+        #expect(request.url?.absoluteString == "http://127.0.0.1:8000/settings/v1/models")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer settings-key")
+        #expect(models.map(\.id) == ["settings-model"])
+
+        session.customBaseURL = ""
+        await #expect(throws: ProviderModelCatalogError.self) {
+            _ = try await session.checkSavedProviderKey(for: "vllm", transport: wire)
+        }
+    }
+
     @Test func accountChecksAreReadOnlyAndNeverReturnCredentialText() async throws {
         let hub = ProviderSettingsWire(HTTPResponse(status: 200, body: Data(#"{"name":"fixture-user"}"#.utf8)))
         try await ProviderCredentialValidator.checkHuggingFace(token: "fixture-token", transport: hub)
