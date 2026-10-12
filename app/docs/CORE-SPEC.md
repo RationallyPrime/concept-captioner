@@ -1834,11 +1834,13 @@ path segment of `repo.id`, `revision` and file paths is percent-encoded with
   Files with `shouldIgnore` are dropped from the commit.
 - LFS batch: `POST /datasets/{repo}.git/info/lfs/objects/batch`, headers `Accept` and
   `Content-Type` `application/vnd.git-lfs+json`, body
-  `{"operation": "upload", "transfers": ["basic", "multipart"], "objects": [{"oid": <sha256 hex>, "size"}], "hash_algo": "sha256"}`.
+  `{"operation": "upload", "transfers": ["basic"], "objects": [{"oid": <sha256 hex>, "size"}], "hash_algo": "sha256"}`.
   For each object with `actions.upload`: `PUT actions.upload.href` with the raw bytes and any
   `actions.upload.header` entries (do not send the Hub token to that host). An object without
-  `actions` is already stored. `actions.upload.header.chunk_size` present means multipart ->
-  `HubError.unsupported("multipart LFS upload (> 5 GB) is not supported")`.
+  `actions` is already stored. Only `basic` is advertised: offered `multipart`, the Hub returns
+  chunked uploads for ordinary files (a 16 MB photo, 2026-10-12), which this client does not
+  implement. `actions.upload.header.chunk_size` present anyway (files over 5 GB) ->
+  `HubError.unsupported("multipart upload requested; only files under 5 GB are supported")`.
 - commit: `POST /api/datasets/{repo}/commit/{revision}`, `Content-Type: application/x-ndjson`,
   one JSON object per line:
   `{"key": "header", "value": {"summary": message, "description": description}}`,
