@@ -73,3 +73,10 @@ preferences; the stale copy can write an old training image override back.
    For this project, all 69 mappings were written directly into job.yaml with the project closed
    (30 Erla, 30 Gunnar, 9 pairs; the old set's from its reviewed captions, the new frames by eye),
    then validated with the CLI and confirmed by the app on reopening.
+13. **Decided: model lists come from the provider.** Captioning shows a model dropdown for ChatGPT
+    but only a free-text field for other providers, and switching provider (to Google Gemini)
+    kept the previous provider's model name, `gpt-6.1-sol`. Fetch each provider's model list with
+    the saved key (the same free request that item 6's key check makes), filter it to models that
+    accept images (and video for clips) where the provider reports input types, and show it as a
+    dropdown with an "Other model…" free-text escape for vLLM, gateways and new names. Switching
+    provider resets the model to that provider's default.
