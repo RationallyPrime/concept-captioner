@@ -198,7 +198,10 @@ struct GPUJourneyView: View {
     }
 
     private var trainerPicker: some View {
-        Picker("Training model", selection: Binding(get: { workspace.baseModel }, set: workspace.chooseTrainingModel)) {
+        Picker("Training model", selection: Binding(
+            get: { workspace.baseModel },
+            set: { workspace.chooseTrainingModel($0) }
+        )) {
             Text("FLUX.1-dev · images").tag("black-forest-labs/FLUX.1-dev")
             Text("LTX-2 · images and video").tag("Lightricks/LTX-2")
             Text("MiniMax H3 · images and video").tag(GPUWorkspace.h3BaseModel)
