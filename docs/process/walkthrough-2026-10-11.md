@@ -98,3 +98,16 @@ preferences; the stale copy can write an old training image override back.
     stable Developer ID for releases.
 18. **Observation: Publish did not notice a newly saved Hugging Face token** until the step was
     left and reopened; it kept offering the no-account route.
+19. **Bug: the computer list ignores the saved storage's data center.** GPU pods offered an RTX PRO
+    6000 while the selected network volume lives in EU-RO-1, which had none (its largest GPU was a
+    32 GB RTX PRO 4500). Renting then failed. Offers must come from the volume's data center (the
+    catalog can be queried per data center), or the screen must say which data centers have the
+    chosen GPU and which storage can follow it.
+20. **Bug: RunPod's error text is thrown away.** The failure read only "RunPod could not complete
+    this action (400). Check your account and try again." RunPod's response body explains the
+    refusal; show it (or a plain translation of it).
+21. **Observation: a network volume is mandatory.** The app cannot rent without saved storage, so
+    data centers with stock but no network volumes (both Icelandic ones, EU-NL-1, EU-CZ-1 on
+    2026-10-12) are unreachable. Offer "no saved storage" with a plain warning that checkpoints
+    live only on the rented computer and the result is pushed when training finishes. Creating a
+    volume from the app, in a data center that has the chosen GPU, would also help.
