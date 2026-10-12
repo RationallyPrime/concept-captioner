@@ -122,11 +122,24 @@ Diffusion-Fun / Grease: 69 samples (47 earlier captioned photos + 22 new video s
 (179 MB) was pushed to private `RationallyPrime/grease-erla-gunnar-h3-v3`; the pod was stopped after
 72 minutes (about $3 GPU). Pod env held only RunPod secret placeholders (ticket 3 confirmed live).
 
-Recipe questions for the app seat (the built-in H3 recipe versus the owner's previous run):
-22. **Checkpoints:** saved every 250 steps keeping only the last 4; the previous run saved every 300
-    and kept 40, so earlier checkpoints were available for comparison.
-23. **Saved precision:** float16; the previous run saved float32.
-24. **Guidance loss:** off; the previous run trained with `do_guidance_loss` and target 3.5.
-25. **Resolution:** one value only (512, 768 or 1,024); the previous run used buckets 768 and 1,024.
+Recipe questions for the app seat. Corrected 2026-10-12: the owner's two earlier runs used different
+training adapters, and the app recipe follows v2, not v1.
+
+| Run | Training adapter | Guidance loss | Data | Resolution |
+|---|---|---|---|---|
+| v1 | Ostris v1 | on, target 3.5 | 47 photos | 768 + 1,024 |
+| v2 | Circlestone | off | the same 47 | 768 + 1,024 |
+| v3 (app) | Circlestone | off | 47 + 22 video stills | 1,024 |
+
+22. **Checkpoints:** saved every 250 steps keeping only the last 4; v1 and v2 saved every 300 and kept
+    40, so earlier checkpoints were available for comparison.
+23. **Saved precision:** float16; v1 and v2 saved float32.
+24. **Guidance loss:** off, which matches v2 and is correct with Circlestone (its author says not to
+    combine the adapter with the guidance loss). Not a defect. If the app ever offers the Ostris
+    adapter, the guidance loss belongs with that choice.
+25. **Resolution:** one value only (512, 768 or 1,024); v1 and v2 used buckets 768 and 1,024.
+
+Owner's verdict on the comparison renders (same seed and graphs, 2026-10-12): v3 gives the best Gunnar
+but loses Erla's likeness. Next experiment: an Erla-only adapter on v1's recipe.
 26. **Observation: steppers for large values.** Training steps moves in 25s with no text entry;
     reaching 3,000 took a long hold. A number field would serve better.
