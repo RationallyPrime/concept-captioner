@@ -85,3 +85,16 @@ preferences; the stale copy can write an old training image override back.
 14. **Observation: captioned samples read "Ready".** On Captioning, the 47 imported photos that
     already have captions show "Ready", the same as uncaptioned ones, though a normal run skips
     them. Show that they already have a caption (and whether it is final or imported).
+15. **Bug (fixed in PR #3): publishing failed on an ordinary 16 MB photo** with "multipart LFS upload
+    (> 5 GB) is not supported". The upload request offered multipart transfers, which the app does
+    not implement, so the Hub chose them. Now only single-request uploads are offered.
+16. **Observation: upload progress overwrites the final message.** Progress lines are posted late
+    and replace the outcome; the footer froze on "hashing: 9.png" while the real error showed
+    only in an alert. The final message must win.
+17. **Observation: a rebuilt app loses its folder and Keychain access.** A build signed differently
+    (every local rebuild, and any change of signing identity in a release) cannot restore recent
+    project folders ("could not be restored … isn't in the correct format") and macOS asks again
+    for each saved key. Expected for unsigned development builds; worth a clear message, and a
+    stable Developer ID for releases.
+18. **Observation: Publish did not notice a newly saved Hugging Face token** until the step was
+    left and reopened; it kept offering the no-account route.
