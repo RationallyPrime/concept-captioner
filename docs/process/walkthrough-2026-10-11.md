@@ -62,3 +62,14 @@ preferences; the stale copy can write an old training image override back.
     settings", "Definitions" and the rest) opens only when the chevron itself is clicked; a click
     on its label does nothing (reproduced in the concept editor). Clicking anywhere on the row
     should toggle it, or at least the label as well as the chevron.
+11. **Decided: no location text needed when the answer is obvious.** Mapping requires a location
+    phrase in addition to ticking the concept, even when the frame shows a single face. When only
+    one person (or one face) is present, ticking the concept is enough; the location defaults to
+    the plain class noun ("the woman").
+12. **Decided: model suggestions can be accepted.** "Request assignments from model" produces
+    suggestions per sample, but there is no way to accept them except confirming each sample by
+    hand. Add a way to accept suggestions, at least all of them at once, with per-sample review
+    still possible.
+   For this project, all 69 mappings were written directly into job.yaml with the project closed
+   (30 Erla, 30 Gunnar, 9 pairs; the old set's from its reviewed captions, the new frames by eye),
+   then validated with the CLI and confirmed by the app on reopening.
