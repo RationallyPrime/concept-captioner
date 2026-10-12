@@ -24,6 +24,16 @@ struct MappingView: View {
         images.first { $0.id == session.selectedImageID }
     }
 
+    /// The open sample, while it holds edits that are not confirmed yet; bulk actions leave it alone.
+    private var heldDraftIDs: Set<String> {
+        guard edited, let id = session.selectedImageID else { return [] }
+        return [id]
+    }
+
+    private var acceptableSuggestionIDs: [String] {
+        session.validMappingSuggestionIDs.filter { !heldDraftIDs.contains($0) }
+    }
+
     private var locatorConcepts: [Concept] {
         (session.project?.job.concepts ?? []).filter(\.targetConcept.requiresLocator)
     }
@@ -60,22 +70,22 @@ struct MappingView: View {
                         session.proposeMappings(useModel: true)
                     }
                 }.disabled(session.busy)
-                if !session.validMappingSuggestionIDs.isEmpty || session.canUndoMappingChange {
+                if !acceptableSuggestionIDs.isEmpty || session.canUndoMappingChange {
                     HStack(spacing: 10) {
-                        if !session.validMappingSuggestionIDs.isEmpty {
-                            Button("Accept all \(session.validMappingSuggestionIDs.count) suggestions") {
-                                session.acceptMappingSuggestions()
-                                load()
+                        if !acceptableSuggestionIDs.isEmpty {
+                            Button("Accept all \(acceptableSuggestionIDs.count) suggestions") {
+                                session.acceptMappingSuggestions(except: heldDraftIDs)
+                                if !edited { load() }
                             }
                             .help(
-                                "Accept valid suggestions for unconfirmed samples. "
-                                    + "Review them individually first if needed."
+                                "Accept valid suggestions for unconfirmed samples. The open sample's unconfirmed "
+                                    + "edits are kept for you to confirm. Review suggestions individually if needed."
                             )
                         }
                         if session.canUndoMappingChange {
                             Button("Undo last mapping change", systemImage: "arrow.uturn.backward") {
                                 session.undoMappingChange()
-                                load()
+                                if !edited { load() }
                             }
                         }
                     }.disabled(session.busy || session.editing)

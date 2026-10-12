@@ -271,9 +271,11 @@ extension StudioSession {
         } catch { errorMessage = Self.describe(error) }
     }
 
-    func acceptMappingSuggestions() {
+    /// Accepts every valid suggestion for an unconfirmed sample except `held` ones, such as the
+    /// sample whose unconfirmed draft is open in the editor.
+    func acceptMappingSuggestions(except held: Set<String> = []) {
         guard !busy, !editing, var project else { return }
-        let ids = validMappingSuggestionIDs
+        let ids = validMappingSuggestionIDs.filter { !held.contains($0) }
         guard !ids.isEmpty else {
             message = "There are no unconfirmed, valid suggestions to accept."
             return
@@ -290,7 +292,8 @@ extension StudioSession {
             try project.save()
             self.project = project
             mappingUndo.append(MappingUndo(snapshots: snapshots))
-            message = "\(snapshots.count) suggestions accepted. Review the assignments; Undo restores them."
+            message = (snapshots.count == 1 ? "1 suggestion accepted." : "\(snapshots.count) suggestions accepted.")
+                + " Review the assignments; Undo restores them."
         } catch { errorMessage = Self.describe(error) }
     }
 

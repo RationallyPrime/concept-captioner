@@ -103,6 +103,28 @@ struct MappingWorkflowTests {
         #expect(!session.canUndoMappingChange)
     }
 
+    @Test func acceptingAllLeavesTheOpenDraftsSampleUnaccepted() async throws {
+        var project = try await makeDemoProject()
+        defer { try? FileManager.default.removeItem(at: project.directory) }
+        let images = project.images
+        project.job = try Job(concepts: [Concept(trigger: "PERSON8")])
+        try project.save()
+        let defaults = IsolatedDefaults()
+        defer { defaults.remove() }
+        let session = StudioSession(preferences: defaults.defaults, secrets: MemorySecretStore())
+        session.project = project
+        session.mappingProposals = [
+            images[0].id: ["PERSON8": "the person by the window"],
+            images[1].id: ["PERSON8": "the person beside the gate"],
+        ]
+
+        session.acceptMappingSuggestions(except: [images[0].id])
+        #expect(session.project?.job.mapping(for: images[0].id) == nil)
+        #expect(session.mappingProposals[images[0].id] != nil)
+        #expect(session.project?.job.mapping(for: images[1].id)?["PERSON8"] == "the person beside the gate")
+        #expect(session.message.hasPrefix("1 suggestion accepted."))
+    }
+
     @Test func manualConfirmationClearsTheSuggestionBeforeUnconfirming() async throws {
         var project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
