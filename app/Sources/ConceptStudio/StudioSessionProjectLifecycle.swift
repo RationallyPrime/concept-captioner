@@ -208,7 +208,7 @@ extension StudioSession {
             for url in urls {
                 let accessed = url.startAccessingSecurityScopedResource()
                 defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-                try await project.importFiles([url])
+                try await project.importFiles([url], fromFolder: false)
                 try Task.checkCancellation()
                 guard self.busy, self.project?.directory.standardizedFileURL == projectDirectory else {
                     throw CancellationError()

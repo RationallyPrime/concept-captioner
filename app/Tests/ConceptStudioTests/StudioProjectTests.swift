@@ -139,6 +139,28 @@ struct StudioProjectTests {
         #expect(FileManager.default.fileExists(atPath: destination.recordURL(for: imported.id).path))
     }
 
+    @Test func chosenFilesImportWithoutCompanionsWhenTheirFolderCannotBeListed() async throws {
+        let source = temporaryTestDirectory("unlisted-parent")
+        let directory = temporaryTestDirectory("unlisted-parent-project")
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: source.path)
+            try? FileManager.default.removeItem(at: source)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        let image = source.appendingPathComponent("Chosen.png")
+        try MediaEditor.png(MediaFixtures.image()).write(to: image)
+        try Data("NORA7 caption beside it.".utf8).write(to: source.appendingPathComponent("Chosen.txt"))
+        // Like a sandboxed file pick: the file itself is reachable, its folder cannot be listed.
+        try FileManager.default.setAttributes([.posixPermissions: 0o311], ofItemAtPath: source.path)
+        var project = try StudioProject.create(at: directory)
+        await #expect(throws: (any Error).self) { try await project.importFiles([image]) }
+        try await project.importFiles([image], fromFolder: false)
+        let imported = try #require(project.images.first)
+        #expect(imported.id == "Chosen.png")
+        #expect(imported.caption.isEmpty)
+    }
+
     @Test func ambiguousCaseInsensitiveCompanionsAreRejectedBeforeImport() async throws {
         let source = temporaryTestDirectory("ambiguous-sidecars")
         let directory = temporaryTestDirectory("ambiguous-project")

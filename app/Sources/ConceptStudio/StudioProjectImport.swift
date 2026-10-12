@@ -4,9 +4,12 @@ import Foundation
 extension StudioProject {
     // MARK: Images
 
-    mutating func importFiles(_ files: [URL]) async throws {
+    /// Imports media with any matching caption/record companions. A folder import lists the folder
+    /// it was granted; individually chosen files (`fromFolder: false`) may have a parent a sandboxed
+    /// build cannot list, and then import without companions.
+    mutating func importFiles(_ files: [URL], fromFolder: Bool = true) async throws {
         let media = files.filter(Self.isImportableMedia)
-        let companions = try Self.companionFiles(for: media)
+        let companions = try Self.companionFiles(for: media, folderListingRequired: fromFolder)
         for source in media {
             try Task.checkCancellation()
             let previousJob = job
@@ -64,13 +67,22 @@ extension StudioProject {
 
     /// Resolve companions against the original files before normalization or collision renaming.
     /// Case-insensitive matches are safe only when exactly one media file owns that stem.
-    private static func companionFiles(for media: [URL]) throws -> [URL: ImportSidecars] {
+    private static func companionFiles(
+        for media: [URL], folderListingRequired: Bool
+    ) throws -> [URL: ImportSidecars] {
         var result: [URL: ImportSidecars] = [:]
         let folders = Dictionary(grouping: media, by: { $0.deletingLastPathComponent().standardizedFileURL })
         for (folder, requested) in folders {
-            let children = try FileManager.default.contentsOfDirectory(
-                at: folder, includingPropertiesForKeys: [.isRegularFileKey]
-            ).filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
+            let listing: [URL]
+            do {
+                listing = try FileManager.default.contentsOfDirectory(
+                    at: folder, includingPropertiesForKeys: [.isRegularFileKey]
+                )
+            } catch where !folderListingRequired {
+                continue
+            }
+            let children = listing
+                .filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
             let requestedStems = Set(requested.map { stemKey($0.lastPathComponent) })
             let siblings = children.filter(isImportableMedia)
             let mediaByStem = Dictionary(grouping: siblings, by: { stemKey($0.lastPathComponent) })
