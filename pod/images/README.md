@@ -1,20 +1,22 @@
 # images
 
-Current public release: `ghcr.io/rationallyprime/concept-captioner-pod-{base,aitoolkit,ltx}:v0.2.2-clean-20261011`,
-a **clean build from commit `2789c1d33a4aec015ad1728f24b72be3445e4b8f`** (`main`): the three
-Dockerfiles as committed, built on cx53 with `docker buildx build` and no overlay (the base image
-reused the layer cache of the previous clean build; the two trainer images were built after the
-build cache had been pruned). The images carry no OCI revision label; this table is the record of
+Current public release: `ghcr.io/rationallyprime/concept-captioner-pod-{base,aitoolkit,ltx}:v0.2.3-clean-20261011`,
+a **clean build from commit `b79086183bba40e8120f0cba1ee59173f10108a5`** (`main`, including the
+H3 recipe, initializer and generator additions): the three Dockerfiles as committed, built on
+cx53 with `docker buildx build` and no overlay. The previous release, `v0.2.2-clean-20261011`
+(from `2789c1d3`; base `5a10967a…`, aitoolkit `c8fc06b7…`, ltx `e1c4a492…`), stays published. The images carry no OCI revision label; this table is the record of
 which commit they came from.
 
 | image suffix | public manifest digest |
 | --- | --- |
-| `base` | `sha256:5a10967a5302c4484a390673b9a6f8422e011a1a7d4f97e071410e19d5cf8779` |
-| `aitoolkit` | `sha256:c8fc06b7552114e8ad9050e9d16cdd92bb42a5821245a7601792fd4884dc158f` |
-| `ltx` | `sha256:e1c4a492ddd889db3e3ebc1f48e1c887051fd3eafe7ebbee77f34ba2f8b561c6` |
+| `base` | `sha256:d41b8287d985f954fd66b57d77e4aa0f55c8b2c67aa9ea02b0c71f4df0e8a5bd` |
+| `aitoolkit` | `sha256:fe09109dc305278d8a89897969b5605df96ce3aca7bffd1ae763933477341509` |
+| `ltx` | `sha256:40a0361fea34fb48a8d595c3c2ddae5d395fc4b27244eb76039f9fd3e7ef3cf8` |
 
-Checked on cx53 after the push: each image pulled anonymously by digest with an empty Docker
-client configuration, and each tag resolves anonymously to the digest above. The base build ran
+Checked after the push: each tag resolves anonymously on GHCR to the digest above. The CPU
+control smoke described next ran against the pushed `v0.2.3` base image and passed (receipt
+`cx53:~/work/cc-clean3-logs/smoke.out`). The paragraph below records the same checks for
+`v0.2.2`, including its anonymous pulls by digest. The base build ran
 `check_vllm_flags.py` (23 flags found, build passed). The CPU control smoke ran against the
 pushed base image: authentication (401 without the bearer), service catalog,
 TensorBoard session and its cookie scope, run files with a range read, and planning with two
@@ -185,7 +187,7 @@ refuses to start without the token, so a pod created without it exits immediatel
 Actual builds, anonymous pulls, runtime receipts and their exact scope are recorded in
 [POD-STATUS](../docs/POD-STATUS.md). The three repository Dockerfiles built successfully on
 cx53 with the pinned vLLM cu129 stack, FlashInfer cache, AI Toolkit stack and LTX workspace, and
-`v0.2.2-clean-20261011` is that build from `main` with nothing overlaid.
+`v0.2.3-clean-20261011` is that build from `main` with nothing overlaid.
 
 On the real CUDA 13.0 Blackwell hosts used for this project, vLLM returned structured captions,
 both trainers produced checkpoints and loss curves, FLUX generation/Resume completed, and the

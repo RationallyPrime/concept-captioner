@@ -4,9 +4,8 @@ Updated 2026-10-11 after the review repairs, based on all seven hardening lanes 
 follow-up `cd5f746`, with the review corrections and owner acceptance below. Source checks,
 native offline demo checks and bounded FLUX/LTX generation, resume and video training checks
 have completed. The GPU proofs predate the review repairs: FLUX used r1; LTX used r2.
-The current `v0.2.2-clean-20261011` images contain the review repairs and direct upload;
-their checks are anonymous pulls and CPU controls, not a new GPU run. H3 changes in this
-working round still require a subsequent image build. See [RUNNING.md](RUNNING.md),
+The current `v0.2.3-clean-20261011` images contain the review repairs, direct upload and the H3
+additions; their checks are anonymous tag-to-digest checks and a CPU control smoke, not a GPU run. See [RUNNING.md](RUNNING.md),
 [CORE-STATUS.md](CORE-STATUS.md) and [POD-STATUS.md](../../pod/docs/POD-STATUS.md).
 
 ## Implemented
@@ -49,7 +48,7 @@ working round still require a subsequent image build. See [RUNNING.md](RUNNING.m
   and 20 GiB/dataset limits. Training waits for atomic installation. Local Resume checks the
   exact input digest in both app and pod; Repeat allows edited data as a new run. No Hub
   dataset account is required; gated base-model access is unchanged. The current
-  `v0.2.2-clean-20261011` images include this route; the older r2 images do not.
+  `v0.2.2-clean-20261011` and later images include this route; the older r2 images do not.
 - **Saved training runs:** project-local dataset revisions or local input digests, settings, checkpoints, outputs and
   available GPU cost information; reopen history, Load settings for repeat and supported
   checkpoint resume. Each new run captures its budget and rental-spend baseline before
@@ -222,8 +221,8 @@ including rejected unauthenticated and out-of-scope requests. This proves backen
 not native WebKit rendering. Both new proof pods used one 32 GB GPU and 62 GB host RAM; these
 small recipes do not establish a memory guarantee for other datasets or settings.
 
-Current trainer images are published under `v0.2.2-clean-20261011`, a clean build from `main`
-at `2789c1d3` (digests in `pod/images/README.md`), and verified by anonymous digest pulls. The
+Current trainer images are published under `v0.2.3-clean-20261011`, a clean build from `main`
+at `b7908618` (digests in `pod/images/README.md`), and verified by anonymous tag-to-digest checks. The
 app default uses this tag. Real-pod runs so far used the earlier `v0.2.0-overnight20261011-r2`
 tag, which stays published. Bounded GPU
 checks and their limits are recorded in POD-STATUS.
