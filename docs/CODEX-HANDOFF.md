@@ -1,4 +1,4 @@
-# Handoff, updated 2026-10-11
+# Handoff, updated 2026-10-12
 
 Read CLAUDE.md, docs/v0.2-plan.md and [ADR-LOG](ADR-LOG.md) first.
 Accepted decisions remain in force after implementation; preserve their text and record any
@@ -29,14 +29,18 @@ build does not prove live success.
 
 ## Two parallel streams
 
-**Mac application:** the owner-approved introduction, single-concept flow, curation/video, saved
-runs, result generation and OpenRouter are implemented. Every UI surface has been reviewed. Next is the owner's native walkthrough, account consent and real dataset
-run. Keep the workflow accessible without programming or ML knowledge, with direct expert controls.
+**Mac application:** live ChatGPT and OpenRouter sign-in/captioning and one H3 still-image training
+run on `v0.2.3-clean-20261011` are complete. PR #6 merged to `main` on 2026-10-12. Next is the
+owner's native walkthrough of the merged repairs, followed by VoiceOver and signed-sandbox
+Keychain, Photos and bookmark checks when a Developer ID Application identity is available.
+Direct upload, storage cleanup, in-run TensorBoard rendering and the repaired generation/Resume
+paths still need live acceptance. Keep the workflow accessible without programming or ML
+knowledge, with direct expert controls.
 
-**Pod services:** maintain exact dataset pulls, supported training/resume and actual
-base-versus-LoRA generation. Rebuild published images when their code changes. Meet the app at
-the existing authenticated HTTP API and shared project/training contracts. Secure outputs and
-stop paid pods as soon as useful work ends.
+**Pod services:** the H3 still-image run verifies one 69-still, 3,000-step train/publish/stop path.
+H3 clips, external warm-start, same-run Resume and matched generation still need live acceptance.
+Maintain exact dataset pulls and the shared authenticated HTTP contract. Rebuild published images
+when their code changes. Secure outputs and stop paid pods as soon as useful work ends.
 
 ## Conventions
 

@@ -9,8 +9,10 @@ Placeholders throughout use the fixture triggers `NORA7` / `IVAN9`. Nothing here
 concept.
 
 The owner's review repairs, including direct dataset upload without a Hub account, are
-implemented in source. Published r2 images predate these repairs; rebuilding them is a
-separate ticket. POD-STATUS records source, image and live verification separately.
+implemented in source and included in the published `v0.2.3-clean-20261011` image. Earlier r2
+images predate these repairs. The owner/Claude's H3 still-image run on v0.2.3 is recorded in
+[POD-STATUS](POD-STATUS.md); it does not verify H3 clips, external warm-start, same-run Resume
+or matched generation.
 
 ## 0. Layout of `pod/`
 
@@ -791,17 +793,20 @@ preset. None is a universal fit or training-quality promise.
 **Live evidence and remaining uncertainty** (full receipts and exact image revisions are in
 `POD-STATUS.md`):
 
-- AI Toolkit: FLUX produced real checkpoints, loss, Resume and matched generation. H3’s
-  `minimax_h3` registration, trained-network attachment, exported-key conversion and exact
-  loader behavior are source-verified at the pinned commit with offline controls; this new
-  H3 app/pod path has not yet trained or generated on hosted hardware.
+- AI Toolkit: FLUX produced real checkpoints, loss, Resume and matched generation. H3 completed
+  one owner/Claude-reported 3,000-step still-image run on 69 stills with the published
+  `v0.2.3-clean-20261011` image; its LoRA was published privately and the pod was stopped. This
+  verifies that still-image train/publish/stop path only. H3 clips, external warm-start, same-run
+  Resume and matched generation remain unverified on hosted hardware. The single run on one
+  96 GB RTX PRO 6000 does not establish general model quality or capacity for other settings.
 - LTX-2: the pinned trainer's entrypoints, `caption`/`media_path` preparation, one-frame
   buckets, mapped training keys, nested checkpoints and scraped TensorBoard events ran on
   real hardware. A 512-pixel/rank-16 run passed on one visible 32 GB GPU in a 125 GB host.
   The trainer venv requires TensorBoard explicitly; the image tests an actual event write/read.
-- H3 capacity, other model families and training quality remain unverified. LTX’s approved
-  video training, Resume and paired generation have separate real receipts. These tiny functional checks do not establish universal memory
-  capacity. Resume evidence and its exact scope are recorded separately in `POD-STATUS.md`.
+- Other model families and capacity beyond the measured runs remain unverified. LTX’s approved
+  video training, Resume and paired generation have separate real receipts. These functional
+  checks do not establish universal memory capacity. Resume evidence and its exact scope are
+  recorded separately in `POD-STATUS.md`.
 
 ### 4.3 Launch wrappers (`scripts/launch_aitoolkit.py`, `scripts/launch_ltx.py`)
 

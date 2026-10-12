@@ -30,9 +30,9 @@ cannot declare a newly started training/generation action failed. H3 exposes che
 retention, saved precision and multiple buckets; Circlestone guidance loss stays off and invalid
 imports/runs are refused. New valid requests use the published image’s existing parameter contract.
 
-Current offline gates: **540 Swift tests** (279 app in 42 suites, 261 Core in 38), **118 Python
-reference tests** and **315 pod-script tests** passed. Strict SwiftLint reports zero violations
-across 179 source/test files; SwiftFormat and Python Ruff/format are clean. Independent source
+Current offline gates: **550 Swift tests** (289 app and 261 Core), **118 Python reference tests**
+and **315 pod-script tests** passed. Strict SwiftLint reports zero violations; SwiftFormat and
+Python Ruff/format are clean. Independent source
 review accepted project/provider/UI changes; the integration review closed startup settlement
 and output-custody defects. Visual/native checks and delivery receipts are recorded in the repair
 record. Developer ID signing remains unavailable on this Mac.
@@ -159,14 +159,15 @@ check passed, including preserving custom style details through reopening and un
 
 ## Offline verification
 
-- **Current walkthrough/H3/help integration:** 498 Swift tests passed (238 app tests in 39
-  suites; 260 Core tests in 38 suites), plus 117 Python reference tests. H3 media cases export
+- **Earlier walkthrough/H3/help gate (2026-10-11, before the 2026-10-12 walkthrough/glossary
+  integration):** 498 Swift tests passed (238 app tests in 39 suites; 260 Core tests in 38
+  suites), plus 117 Python reference tests. H3 media cases export
   real synthetic 22- and 39-frame audiovisual segments and check exact caption/critic request
   bytes, sidecars, publication and Undo. Budget checks include failed/cancelled preparation,
   accumulated Resume cost and restoration without the original project open. The pod's
   script and agent gates are recorded separately in POD-STATUS. These are offline tests;
   the real provider/trainer evidence below retains its original scope.
-- **Final presentation checks:** strict SwiftLint and SwiftFormat are clean across 164 Swift
+- **Earlier presentation checks (2026-10-11):** strict SwiftLint and SwiftFormat were clean across 164 Swift
   files. The offscreen harness rendered 116 light/dark, minimum/default screen states,
   including Help at 640 × 480 and 780 × 720. Bounded visual review covered all nine journey
   screens, Welcome, Settings and Help; a narrow Captioning rerender confirmed that the demo
@@ -197,7 +198,7 @@ check passed, including preserving custom style details through reopening and un
   cost/output custody. Independent source review has driven repairs at the integration seams.
 - Actual local video fixtures exercise frame counts, variable timing and visible-edge
   preservation, plus HEIC/TIFF normalization and file/sidecar restoration.
-- 116 offscreen render frames cover Welcome, nine journey screens, Settings,
+- The earlier 116-frame offscreen set covers Welcome, nine journey screens, Settings,
   concept/crop editors, empty/error states and generated/saved-result surfaces in light and
   dark at minimum/default sizes. None captures an expanded Advanced section. Native vibrancy
   and interactions are verified separately.
