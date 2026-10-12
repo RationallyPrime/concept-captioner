@@ -47,12 +47,12 @@ extension StudioSession {
         perform("Preparing your training dataset…") {
             self.activePublishID = publishID
             defer { if self.activePublishID == publishID { self.activePublishID = nil } }
-            var publishingDirectory: URL?
+            // Captured before any check can throw, so a refusal is reported rather than read as a switch.
+            let publishingDirectory = self.project?.directory.standardizedFileURL
             do {
                 guard let project = self.project, !project.images.isEmpty else {
                     throw StudioError.message("Import images or clips before publishing your dataset.")
                 }
-                publishingDirectory = project.directory.standardizedFileURL
                 guard !project.job.concepts.isEmpty else {
                     throw StudioError.message("Add a concept before preparing data for training.")
                 }

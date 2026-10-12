@@ -205,6 +205,18 @@ struct StudioSessionTests {
         await realWorkspace.stopEverything()
     }
 
+    @Test func publishingAnEmptyProjectReportsWhyInsteadOfCancelling() async throws {
+        let session = makeTestSession()
+        var project = try await makeDemoProject()
+        defer { try? FileManager.default.removeItem(at: project.directory) }
+        project.images = []
+        session.project = project
+        session.publish()
+        await session.task?.value
+        #expect(session.errorMessage?.contains("Import images or clips before publishing") == true)
+        #expect(session.message.contains("Dataset publication failed"))
+    }
+
     @Test func latePublishProgressCannotReplaceOutcomeOrCrossProjects() async throws {
         let session = makeTestSession()
         let first = try await makeDemoProject()
