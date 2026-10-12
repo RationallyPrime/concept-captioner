@@ -44,6 +44,31 @@ extension StudioSession {
     static let defaultPodImageName =
         "ghcr.io/rationallyprime/concept-captioner-pod-{trainer}:v0.2.3-clean-20261011"
 
+    /// Builds before 2026-10-12 saved the shipped default image as the training-image preference,
+    /// where it read as a manual override. Once per install, a stored value that is exactly such a
+    /// default (this registry path with the `{trainer}` placeholder, any tag) is cleared to mean
+    /// automatic. Anything else, and anything entered after the migration, is kept.
+    static let podImageMigrationKey = "ConceptStudio.shippedDefaultPodImageCleared"
+
+    nonisolated static func isShippedDefaultPodImage(_ name: String) -> Bool {
+        name.range(
+            of: #"\Aghcr\.io/rationallyprime/concept-captioner-pod-\{trainer\}:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}\z"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private func loadPodImageChoice() {
+        var stored = preferences.string(forKey: "podImage") ?? ""
+        if !preferences.bool(forKey: Self.podImageMigrationKey) {
+            if Self.isShippedDefaultPodImage(stored) {
+                stored = ""
+                preferences.set("", forKey: "podImage")
+            }
+            preferences.set(true, forKey: Self.podImageMigrationKey)
+        }
+        podImageName = stored
+    }
+
     var vllmTargetURL: String {
         requestBaseURL.isEmpty ? customBaseURL : requestBaseURL
     }
@@ -59,7 +84,7 @@ extension StudioSession {
         criticKind = endpointKind
         criticModel = modelName
         customBaseURL = preferences.string(forKey: "vllmBaseURL") ?? ""
-        podImageName = preferences.string(forKey: "podImage") ?? ""
+        loadPodImageChoice()
         volumeID = preferences.string(forKey: "volumeID") ?? ""
         requestBaseURL = ""
         criticRequestBaseURL = ""

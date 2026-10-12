@@ -61,6 +61,33 @@ struct StudioSessionTests {
         await session.gpu.stopEverything()
     }
 
+    @Test(arguments: [
+        ("ghcr.io/rationallyprime/concept-captioner-pod-{trainer}:v0.1.0-verify20261010", ""),
+        ("ghcr.io/rationallyprime/concept-captioner-pod-{trainer}:v0.2.3-clean-20261011", ""),
+        (
+            "ghcr.io/rationallyprime/concept-captioner-pod-aitoolkit:v0.2.3-clean-20261011",
+            "ghcr.io/rationallyprime/concept-captioner-pod-aitoolkit:v0.2.3-clean-20261011"
+        ),
+        (
+            "ghcr.io/rationallyprime/concept-captioner-pod-{trainer}:v0.2.3 extra",
+            "ghcr.io/rationallyprime/concept-captioner-pod-{trainer}:v0.2.3 extra"
+        ),
+        ("ghcr.io/example/custom-{trainer}:chosen", "ghcr.io/example/custom-{trainer}:chosen"),
+    ])
+    func previouslySavedDefaultImageBecomesAutomaticOnce(saved: String, loaded: String) throws {
+        let suite = "StudioSessionTests." + UUID().uuidString
+        let preferences = try #require(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        preferences.set(saved, forKey: "podImage")
+        let session = StudioSession(preferences: preferences)
+        #expect(session.podImageName == loaded)
+        #expect(preferences.string(forKey: "podImage") == loaded)
+        // After the one-time migration a deliberately entered default is kept.
+        session.podImageName = StudioSession.defaultPodImageName
+        session.rememberChoices()
+        #expect(StudioSession(preferences: preferences).podImageName == StudioSession.defaultPodImageName)
+    }
+
     @Test(arguments: ["", " \n\t", "ghcr.io/example/custom:chosen"])
     func changedTrainingImageIsRememberedImmediately(_ changed: String) throws {
         let suite = "StudioSessionTests." + UUID().uuidString
