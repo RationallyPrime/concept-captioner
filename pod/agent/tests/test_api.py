@@ -30,7 +30,7 @@ from fastapi.testclient import TestClient
 from podagent import __version__
 from podagent.__main__ import main as podagent_main
 from podagent.app import MAX_BODY_BYTES, MAX_STOP_TIMEOUT_S, create_app
-from podagent.catalog import SERVICE_NAMES
+from podagent.catalog import CATALOG, SERVICE_NAMES
 from podagent.gpus import FakeBackend, InventoryUnavailable
 from podagent.settings import Settings
 
@@ -67,9 +67,17 @@ ISO_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$")
 
 
 def free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+    """A free loopback port other than this test's TensorBoard port.
+
+    ``tensorboard_port`` released its port before the test started, so the kernel may hand the
+    same one out again; a vLLM fake bound there makes the TensorBoard fake fail to bind.
+    """
+    while True:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = int(sock.getsockname()[1])
+        if port != CATALOG["tensorboard"].port:
+            return port
 
 
 def wait_until(predicate: Callable[[], bool], what: str, timeout: float = WAIT_S) -> None:
@@ -85,11 +93,15 @@ def wait_for_log(path: str, needle: str) -> str:
     """Block until the service log contains ``needle``; return the log text."""
     file = Path(path)
 
-    def present() -> bool:
-        return file.exists() and needle in file.read_text(encoding="utf-8", errors="replace")
+    def text() -> str:
+        return file.read_text(encoding="utf-8", errors="replace") if file.exists() else ""
 
-    wait_until(present, f"{needle!r} in {file.name}")
-    return file.read_text(encoding="utf-8", errors="replace")
+    try:
+        wait_until(lambda: needle in text(), f"{needle!r} in {file.name}")
+    except AssertionError as error:
+        # Say what the child did print, so a timeout in CI is diagnosable from the log alone.
+        raise AssertionError(f"{error}; the log holds:\n{text() or '(nothing)'}") from None
+    return text()
 
 
 def wait_for_exit(client: TestClient, name: str) -> dict[str, Any]:
