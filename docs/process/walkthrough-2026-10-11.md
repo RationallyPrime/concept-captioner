@@ -96,6 +96,13 @@ preferences; the stale copy can write an old training image override back.
     project folders ("could not be restored … isn't in the correct format") and macOS asks again
     for each saved key. Expected for unsigned development builds; worth a clear message, and a
     stable Developer ID for releases.
+    **Fixed 2026-10-13:** debug builds sign with the Keychain's Apple Development identity, so the
+    designated requirement is the bundle id plus that certificate instead of the binary's hash.
+    Tested live: after two rebuilds with different code hashes, the project reopened and a saved
+    key was used with no folder picker and no Keychain prompt. The same signing applies the
+    entitlements, so debug builds are now sandboxed for the first time (container
+    `~/Library/Containers/is.conceptstudio.app`); the first signed launch starts with default
+    settings and asks once per saved key.
 18. **Observation: Publish did not notice a newly saved Hugging Face token** until the step was
     left and reopened; it kept offering the no-account route.
 19. **Bug: the computer list ignores the saved storage's data center.** GPU pods offered an RTX PRO
