@@ -1033,7 +1033,8 @@ def check_native_paths(document: dict[str, Any], run_dir: Path) -> None:
     ``extra`` merges last and may name anything, so the check runs on the final document
     rather than on ``extra``: ``training_folder`` and ``log_dir`` (written to), every
     ``datasets[*].folder_path`` (read), ``model.name_or_path`` (a Hub id or a local path) and
-    ``config.name`` (a folder created under ``training_folder``, so it must be a plain run id).
+    ``config.name`` (a folder created under ``training_folder``, so it must be a plain run id),
+    and ``repa.encoder`` (a Hub id or a local path, like the model).
     Allowed roots: ``PODAGENT_WORKSPACE`` and the run directory. Raises ConfigError listing
     every violation.
     """
@@ -1066,6 +1067,9 @@ def check_native_paths(document: dict[str, Any], run_dir: Path) -> None:
             require_model_ref(
                 errors, f"{label}.model.name_or_path", model.get("name_or_path"), roots
             )
+        repa = process.get("repa")
+        if isinstance(repa, dict) and repa.get("encoder") is not None:
+            require_model_ref(errors, f"{label}.repa.encoder", repa["encoder"], roots)
         datasets = process.get("datasets")
         if not isinstance(datasets, list):
             errors.append(f"{label}.datasets: must be a list")

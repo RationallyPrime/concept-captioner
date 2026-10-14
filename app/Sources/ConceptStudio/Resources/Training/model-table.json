@@ -398,6 +398,7 @@
       "model_ref": "Qwen/Qwen-Image-2.1",
       "source": {
         "revision": null,
+        "weight_repos": ["Comfy-Org/Qwen-Image-2.1"],
         "gated": false,
         "first_download_gb": 32.5,
         "download_note": "The bf16 transformer (14.2 GB), the bf16 Qwen3-VL-8B text encoder (17.5 GB) and the VAE (0.7 GB) from the Comfy-Org/Qwen-Image-2.1 repack, plus the processor and configs from Qwen/Qwen-Image-2.1 (under 0.1 GB). AI Toolkit downloads them on first use into its own models folder (MODELS_PATH, by default /opt/ai-toolkit/models), which is on the pod's container disk rather than the /workspace volume, so the download repeats on a new pod. The revisions are not pinned."

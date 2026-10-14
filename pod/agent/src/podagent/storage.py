@@ -41,6 +41,17 @@ def dataset_folder(paths: Paths, value: Any) -> Path | None:
     return folder
 
 
+def dataset_ancestor(paths: Paths, value: Any) -> Path | None:
+    """The top-level ``datasets/`` folder holding a nested path, which cleanup must leave alone."""
+    if not isinstance(value, str):
+        return None
+    try:
+        relative = Path(value).resolve().relative_to(paths.datasets.resolve())
+    except ValueError:
+        return None
+    return paths.datasets / relative.parts[0] if relative.parts else None
+
+
 def tree_bytes(root: Path) -> int:
     if root.is_symlink() or not root.is_dir():
         return 0
@@ -65,6 +76,19 @@ def regularization_folder(paths: Paths, config: dict[str, Any]) -> Path | None:
     if not isinstance(block, dict) or block.get("source") != "folder":
         return None
     return dataset_folder(paths, block.get("path"))
+
+
+def nested_regularization_ancestor(paths: Paths, config: dict[str, Any]) -> Path | None:
+    """For a provided set nested deeper in ``datasets/``, the top-level folder holding it.
+
+    Like a nested primary dataset, it is never removed: it may be another run's input.
+    """
+    block = config.get("regularization")
+    if not isinstance(block, dict) or block.get("source") != "folder":
+        return None
+    if dataset_folder(paths, block.get("path")) is not None:
+        return None
+    return dataset_ancestor(paths, block.get("path"))
 
 
 @dataclass(frozen=True)
@@ -112,16 +136,14 @@ def cleanup_candidates(
         dataset = cfg.get("dataset")
         if not isinstance(dataset, dict):
             return []
+        nested_reg = nested_regularization_ancestor(paths, cfg)
+        if nested_reg is not None:
+            protected.add(nested_reg)
         folder = dataset_folder(paths, dataset.get("path"))
         if folder is None:
-            value = dataset.get("path")
-            if isinstance(value, str):
-                try:
-                    relative = Path(value).resolve().relative_to(paths.datasets.resolve())
-                    if relative.parts:
-                        protected.add(paths.datasets / relative.parts[0])
-                except ValueError:
-                    pass
+            ancestor = dataset_ancestor(paths, dataset.get("path"))
+            if ancestor is not None:
+                protected.add(ancestor)
             continue
         reg_folder = regularization_folder(paths, cfg)
         if run.name in keep:

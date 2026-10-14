@@ -43,6 +43,7 @@ apply.
 | `trainer` | `aitoolkit` or `ltx`. |
 | `model_ref` | The `base_model` value in run.json, a Hub id. Unique across the table. |
 | `source.revision` | Pinned Hub revision, or `null` when the trainer resolves the name itself. |
+| `source.weight_repos` | Optional. Other Hub repos the trainer downloads this model's weights from (a repack). With an unpinned revision, cached regularisation images are keyed by the current commit of each. |
 | `source.gated` | The Hub repo needs an accepted licence before a token can download it. |
 | `source.first_download_gb` | Size of the first model download on a fresh volume, decimal GB. Shown in the picker for rows whose licence notice is on. |
 | `source.download_note` | What that size covers. |

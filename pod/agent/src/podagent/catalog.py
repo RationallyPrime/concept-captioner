@@ -391,6 +391,15 @@ class Repa(BaseModel):
         return _model_ref(value, "repa.encoder")
 
 
+def _resolution(value: int | list[int]) -> int | list[int]:
+    sizes = [value] if isinstance(value, int) else value
+    if not sizes:
+        raise ValueError("resolution must be an int or a non-empty list of ints")
+    if any(size < MIN_RESOLUTION or size > MAX_RESOLUTION for size in sizes):
+        raise ValueError(f"resolution must be between {MIN_RESOLUTION} and {MAX_RESOLUTION}")
+    return value
+
+
 class DrawRegularizationParams(ServiceParams):
     """Draw the pictures of a generated regularisation set before the run (regularization.py).
 
@@ -407,6 +416,11 @@ class DrawRegularizationParams(ServiceParams):
     @classmethod
     def _base_model(cls, value: str) -> str:
         return _model_ref(value, "base_model")
+
+    @field_validator("resolution")
+    @classmethod
+    def _resolution(cls, value: int | list[int]) -> int | list[int]:
+        return _resolution(value)
 
 
 class RunConfig(ServiceParams):
@@ -457,12 +471,7 @@ class RunConfig(ServiceParams):
     @field_validator("resolution")
     @classmethod
     def _resolution(cls, value: int | list[int]) -> int | list[int]:
-        sizes = [value] if isinstance(value, int) else value
-        if not sizes:
-            raise ValueError("resolution must be an int or a non-empty list of ints")
-        if any(size < MIN_RESOLUTION or size > MAX_RESOLUTION for size in sizes):
-            raise ValueError(f"resolution must be between {MIN_RESOLUTION} and {MAX_RESOLUTION}")
-        return value
+        return _resolution(value)
 
     @field_validator("sample_prompts")
     @classmethod

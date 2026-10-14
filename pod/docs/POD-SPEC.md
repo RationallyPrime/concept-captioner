@@ -744,8 +744,8 @@ them. A fixed service like `generate-aitoolkit`: it exposes no port, takes one G
 argv is `[/opt/venvs/aitoolkit/bin/python, /opt/pod/scripts/regularization.py, draw, --run,
 /workspace/runs/<id>]`. `prepare()` creates the run directory and saves the params as
 `regularization-draw.json` (no `run.json`, so dataset retention never treats the directory as a
-training run). The script plans the prompts, draws what `/workspace/regsets` lacks, and copies the
-planned pictures to `output/<image key>.png`, where the file routes of 2.10 serve them. Its log
+training run). The script plans the prompts, draws what `/workspace/regsets` lacks, and hard-links
+the planned pictures (a copy where linking fails) to `output/<image key>.png`, where the file routes of 2.10 serve them. Its log
 prints `[regularization] ready k/N` after each picture, which the app shows as progress. Exit 0 =
 the pictures are in `output/`; 2 = bad input (nothing drawn), 1 = the drawing failed.
 
@@ -918,11 +918,13 @@ set is made in two steps with the app between them, and the launcher only copies
    `generate_results.render_base` (the model class ai-toolkit registers for the row's `arch`, no
    LoRA) and draws what is not cached, in chunks of 8. Each finished image goes to
    `/workspace/regsets/<model-key>/<image-key>.png` and `.txt` (the prompt) under temporary names,
-   renamed `.png` first; the model key is the hash of the base model, its revision, the AI Toolkit
-   pin and the row's `architecture`, the image key of the prompt, seed, size, steps, guidance and
+   renamed `.png` first; the model key is the hash of the base model, the Hub commits its weights
+   come from (the row's pinned revision, or for an unpinned row the current commit of the base
+   model and of each `source.weight_repos` repo, read at planning; planning fails when the Hub
+   cannot be read), the AI Toolkit pin and the row's `architecture`, the image key of the prompt, seed, size, steps, guidance and
    sampler. A stopped or crashed drawing keeps every finished image and the next start draws only
    the missing ones; the cache is never removed by `cleanup-datasets`. The planned pictures are
-   copied to the drawing's `output/<image key>.png`.
+   hard-linked to the drawing's `output/<image key>.png`, so a drawing's run adds no second copy.
 2. The app downloads the pictures and has the project's own captioner (the provider, model and
    endpoint the project captions with) describe each one. The captioner is given the skill, the
    project's profile, the skill's `references/regularization.md` and the class nouns, and never a

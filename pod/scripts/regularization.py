@@ -170,9 +170,9 @@ def derive_prompt(caption: str, class_nouns: dict[str, str]) -> str | None:
                 edits.append((start, end + 2, ""))
             else:
                 edits.append((start, end, f"the {nouns[trigger]}"))
-    edits.sort()
+    edits.sort(key=lambda edit: (edit[0], -edit[1]))
     kept: list[tuple[int, int, str]] = []
-    for edit in edits:  # triggers that run into each other: the earlier span wins
+    for edit in edits:  # overlapping triggers: the earlier span wins, then the longer
         if not kept or edit[0] >= kept[-1][1]:
             kept.append(edit)
     if not kept:
@@ -256,12 +256,39 @@ def _digest(value: Any) -> str:
     return hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()[:16]
 
 
-def model_key(base_model: str, row: dict[str, Any], ai_pin: str) -> str:
-    """Everything that changes an image besides its prompt: model, revision, trainer pin, arch."""
+def resolved_revisions(base_model: str, row: dict[str, Any]) -> dict[str, str]:
+    """The commit of every Hub repo the model's weights come from.
+
+    A pinned row names its revision. An unpinned one is resolved now, together with the repos
+    ``source.weight_repos`` lists (a repack AI Toolkit downloads from), so a cached picture is
+    reused only while every one of them is unchanged. A local model is its own identity.
+    """
+    source = row["source"]
+    if source.get("revision"):
+        return {base_model: source["revision"]}
+    if Path(base_model).is_absolute():
+        return {base_model: "local"}
+    from huggingface_hub import HfApi
+
+    api = HfApi()
+    revisions = {}
+    for repo in dict.fromkeys([base_model, *source.get("weight_repos", [])]):
+        try:
+            revisions[repo] = api.model_info(repo).sha or ""
+        except Exception as error:  # any failure leaves the identity unknown
+            raise GenerationError(
+                f"Could not read the current revision of {repo} from the Hub ({error}); "
+                "regularisation images are only drawn or reused for a known revision"
+            ) from error
+    return revisions
+
+
+def model_key(base_model: str, row: dict[str, Any], ai_pin: str, revisions: dict[str, str]) -> str:
+    """Everything that changes an image besides its prompt: model commits, trainer pin, arch."""
     return _digest(
         {
             "base_model": base_model,
-            "revision": row["source"]["revision"] or "default",
+            "revisions": revisions,
             "ai_toolkit": ai_pin,
             "architecture": row["architecture"],
         }
@@ -387,7 +414,7 @@ def plan_generated(cfg: dict[str, Any], run_dir: Path, workspace: Path) -> dict[
         raise InputError(
             f"No regularisation prompts could be derived from the captions in {dataset}"
         )
-    key = model_key(cfg["base_model"], row, ai_pin)
+    key = model_key(cfg["base_model"], row, ai_pin, resolved_revisions(cfg["base_model"], row))
     cache = regsets_root(workspace) / key
     images: list[dict[str, Any]] = []
     for index, k in allocate(len(prompts), block["images"]):
@@ -519,12 +546,21 @@ def generate(
 
 
 def export_images(plan: dict[str, Any], run_dir: Path) -> None:
-    """Copy the planned pictures to ``<run>/output/<image key>.png``, which the agent serves."""
+    """Link the planned pictures to ``<run>/output/<image key>.png``, which the agent serves.
+
+    Hard links, so a drawing's run holds no second copy of the cached set (a copy where the
+    filesystem cannot link).
+    """
     output = run_dir / OUTPUT_DIR
     output.mkdir(parents=True, exist_ok=True)
     cache = Path(plan["cache_dir"])
     for image in plan["images"]:
-        shutil.copyfile(cache / f"{image['key']}.png", output / f"{image['key']}.png")
+        source, target = cache / f"{image['key']}.png", output / f"{image['key']}.png"
+        target.unlink(missing_ok=True)
+        try:
+            os.link(source, target)
+        except OSError:
+            shutil.copyfile(source, target)
 
 
 def draw(cfg: dict[str, Any], run_dir: Path, workspace: Path) -> None:
