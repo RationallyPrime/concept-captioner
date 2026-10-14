@@ -42,8 +42,11 @@ struct ModelRow: Sendable, Identifiable, Equatable {
         /// `items` training images and clips, which is `ceil(epochs × items / (batch × accumulation))`.
         func optimizerSteps(length: Int, items: Int, batchSize: Int, accumulation: Int) -> Int {
             guard self == .epochs else { return length }
-            let perStep = max(1, batchSize * accumulation)
-            return (length * items + perStep - 1) / perStep
+            let group = batchSize.multipliedReportingOverflow(by: accumulation)
+            let perStep = group.overflow ? Int.max : max(1, group.partialValue)
+            let passes = length.multipliedReportingOverflow(by: items)
+            guard !passes.overflow else { return Int.max / perStep }
+            return passes.partialValue / perStep + (passes.partialValue % perStep == 0 ? 0 : 1)
         }
     }
 
