@@ -493,7 +493,7 @@
         "note": "40 class-only images at reg_weight 1.0. seconds_per_image is an estimate for the time shown before generation."
       },
       "repa": {
-        "default_on": false,
+        "default_on": true,
         "encoder": "facebook/dinov2-giant",
         "encoder_download_gb": 4.4,
         "block_index": 8,
