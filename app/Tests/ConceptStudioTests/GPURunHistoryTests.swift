@@ -526,8 +526,8 @@ extension GPURunHistoryTests {
         let workspace = connected(folder, preferences: preferences, agent: agent)
         let run = fixtureRun(datasetRepo: "") // recorded by a direct upload: settings only
         workspace.runHistory = [run]
+        workspace.datasetRevision = "project-sha" // the project's publish, loaded before Repeat is chosen
         workspace.repeatSettings(from: run)
-        workspace.datasetRevision = "project-sha"
         await workspace.train(datasetRepo: "me/current-data")
         let pull = try #require(await agent.starts.first { $0.service == "pull-dataset" })
         #expect(pull.params["repo_id"]?.stringValue == "me/current-data")

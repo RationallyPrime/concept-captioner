@@ -328,8 +328,12 @@ extension GPUWorkspace {
         profile = run.params["profile"]?.stringValue ?? modelTable.defaultRow.captions.imageProfile
         seed = run.params["seed"]?.intValue ?? 42
         if let cap = run.gpuBudgetUSD { runBudget = cap }
-        datasetContainsVideo = run.datasetContainsVideo
-        datasetRevision = run.datasetRevision ?? ""
+        // A direct-upload run supplies settings only: its repeat trains on this project's dataset, whose
+        // revision and media kind must stay as the project recorded them.
+        if !run.datasetRepo.isEmpty {
+            datasetContainsVideo = run.datasetContainsVideo
+            datasetRevision = run.datasetRevision ?? ""
+        }
         repeatSourceRunID = run.runID
         selectedHistoryRunID = run.runID
         message = "Saved settings loaded. Change them in Training, then start a new run. "
