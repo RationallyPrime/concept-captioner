@@ -389,6 +389,95 @@
         "generator": "aitoolkit_arch_image"
       },
       "notes": "Undistilled base model, AI Toolkit arch zimage (not zimage_l2p), read from the standard diffusers layout (transformer/, text_encoder/ Qwen3, tokenizer/, vae/) that AI Toolkit's ZImageModel expects. bf16, no quantisation, no gradient checkpointing, 768 px, AdamW at 1e-4, rank and alpha 32, batch 1, 150 epochs. Checkpoint cadence is in steps: every 500 steps, newest 20 kept. A LoRA trained on this base model works on Z-Image-Turbo at about twice the strength; that is shown as a note in the picker and on the model card and is never applied automatically."
+    },
+    {
+      "id": "qwen-image-2.1",
+      "display_name": "Qwen-Image-2.1",
+      "short_name": "Qwen",
+      "trainer": "aitoolkit",
+      "model_ref": "Qwen/Qwen-Image-2.1",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 32.5,
+        "download_note": "The bf16 transformer (14.2 GB), the bf16 Qwen3-VL-8B text encoder (17.5 GB) and the VAE (0.7 GB) from the Comfy-Org/Qwen-Image-2.1 repack, plus the processor and configs from Qwen/Qwen-Image-2.1 (under 0.1 GB). AI Toolkit downloads them on first use into its own models folder (MODELS_PATH, by default /opt/ai-toolkit/models), which is on the pod's container disk rather than the /workspace volume, so the download repeats on a new pod. The revisions are not pinned."
+      },
+      "architecture": {
+        "arch": "qwen_image_2",
+        "dtype": "bf16",
+        "quantize": false,
+        "quantize_text_encoder": false,
+        "gradient_checkpointing": false,
+        "model_extra": {}
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [512, 768],
+        "default": [768],
+        "multiple": false
+      },
+      "recipe": {
+        "length": {
+          "unit": "epochs",
+          "value": 400
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 8,
+          "dtype": "bf16",
+          "editable": false
+        }
+      },
+      "trainer_options": {
+        "process": {
+          "train": {
+            "timestep_type": "shift",
+            "lr_scheduler": "constant_with_warmup",
+            "lr_scheduler_params": {
+              "num_warmup_steps": 50
+            },
+            "cache_text_embeddings": true
+          }
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 80,
+        "verify_on_pod": false,
+        "note": "Qwen-Image-2.1 trains in bf16 with no quantisation, so it needs a large card.",
+        "verify_message": null
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "qwen-research",
+        "name": "Qwen Research License Agreement",
+        "url": "https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE",
+        "notice": "Qwen-Image-2.1 is released under the Qwen Research License Agreement, which allows non-commercial research or evaluation use only; commercial use needs a separate licence from its authors. If you share a LoRA made with it, the licence requires \"Built with Qwen\" or \"Improved using Qwen\" in the LoRA's documentation.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "AI Toolkit qwen_image_2 (one architecture for text-to-image and editing; this row trains plain text-to-image LoRAs). bf16, no quantisation, no gradient checkpointing, 768 px, AdamW at 1e-4 with a 50-step constant warmup, rank and alpha 32, timestep_type shift (AI Toolkit's own default for this architecture), cached text embeddings (the trainer then unloads the 17.5 GB text encoder from the GPU after caching), batch 1, 400 epochs. Checkpoint cadence is in steps: every 250 steps, newest 8 kept. 1024 px is not offered. Preview is off: aitoolkit_image builds the legacy StableDiffusion class, which does not serve qwen_image_2. Weights come from the Comfy-Org repack through AI Toolkit's own resolver, which picks the bf16 files when quantisation is off."
     }
   ]
 }
