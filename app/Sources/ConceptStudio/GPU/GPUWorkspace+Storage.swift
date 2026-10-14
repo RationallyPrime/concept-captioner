@@ -107,6 +107,8 @@ extension GPUWorkspace {
             guard self.budget.isFinite, self.budget > saved.accruedGPUCostUSD else {
                 throw StudioError.message("Set a whole-computer budget above its GPU cost so far before starting it.")
             }
+            // Only the latest attempt's refusal describes the host.
+            self.restartBlockedByHost = false
             do {
                 try await provider.start(id: pod.id)
             } catch {
@@ -115,7 +117,6 @@ extension GPUWorkspace {
                 throw StudioError.message("This computer's host has no free GPU, so it cannot start now. "
                     + "Try again later, or remove it and rent a new one.")
             }
-            self.restartBlockedByHost = false
             saved.started = Date()
             saved.budget = self.budget
             self.saved = saved

@@ -342,13 +342,14 @@ final class GPUWorkspace {
         var agentAnswered = false
         do {
             try await enforceLimits()
-            guard hasRunningPod else { return }
+            // A pod found stopped ends the polling, so a resolved error must clear here too.
+            guard hasRunningPod else { clearRefreshFailure(); return }
             let currentStatus = try await provider.status(id: current.id)
             if !currentStatus.isRunning { freezePodCost() }
             updateHourlyRate(currentStatus)
             pod = currentStatus
             persist()
-            guard hasRunningPod else { return }
+            guard hasRunningPod else { clearRefreshFailure(); return }
             guard let agent else {
                 throw StudioError.message("Open Settings to restore this computer’s saved connection.")
             }
