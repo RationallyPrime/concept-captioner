@@ -1701,3 +1701,35 @@ def test_resume_load_restores_missing_inputs_after_config_validation(
     with pytest.raises(wrapper.ConfigError, match="JSON object"):
         wrapper.load_run(path)
     assert len(calls) == 1
+
+
+def test_row_dataset_defaults_preserve_runtime_paths_and_user_extra():
+    launcher = load_script("launch_aitoolkit")
+    process = {
+        "train": {},
+        "save": {},
+        "datasets": [
+            {"folder_path": "/workspace/datasets/example", "resolution": [768]},
+            {"folder_path": "/workspace/datasets/another", "resolution": [512]},
+        ],
+    }
+    row = {
+        "architecture": {"dtype": "bf16", "gradient_checkpointing": True},
+        "recipe": {"optimizer": "adamw8bit", "checkpoints": {"dtype": "bf16", "keep": 4}},
+        "trainer_options": {"dataset": {"cache_latents_to_disk": False}},
+    }
+    launcher.apply_row_recipe(process, row)
+    merged = launcher.deep_merge(process, {"train": {"lr": 0.002}})
+    assert merged["datasets"] == [
+        {
+            "folder_path": "/workspace/datasets/example",
+            "resolution": [768],
+            "cache_latents_to_disk": False,
+        },
+        {
+            "folder_path": "/workspace/datasets/another",
+            "resolution": [512],
+            "cache_latents_to_disk": False,
+        },
+    ]
+    assert merged["train"]["lr"] == 0.002

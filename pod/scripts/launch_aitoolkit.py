@@ -759,7 +759,13 @@ def apply_row_recipe(process: dict[str, Any], row: dict[str, Any]) -> None:
     if recipe["checkpoints"]["dtype"] is not None:
         process["save"]["dtype"] = recipe["checkpoints"]["dtype"]
     process["save"]["max_step_saves_to_keep"] = recipe["checkpoints"]["keep"]
-    options = (row.get("trainer_options") or {}).get("process")
+    trainer_options = row.get("trainer_options") or {}
+    dataset_defaults = trainer_options.get("dataset")
+    if dataset_defaults:
+        process["datasets"] = [
+            deep_merge(dataset, dataset_defaults) for dataset in process["datasets"]
+        ]
+    options = trainer_options.get("process")
     if options:
         process.update(deep_merge(process, options))
 

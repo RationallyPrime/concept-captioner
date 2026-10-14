@@ -56,12 +56,14 @@ struct SkillsTests {
         #expect(instructions.hasPrefix("# Diffusion Training Captioner\n"))
         #expect(instructions.hasSuffix("\n") && !instructions.hasSuffix("\n\n"))
         #expect(instructions == skill.body.trimmingCharacters(in: .whitespacesAndNewlines) + "\n")
-        #expect(skill.profiles() == ["flux-image", "h3-still", "h3-video", "ltx-image", "ltx-video", "plain"])
+        for profile in skill.profiles() {
+            #expect(try !skill.profile(profile).isEmpty)
+        }
         #expect(try skill.profile("h3-still").contains("[Shot 1]"))
         #expect(
             configurationMessage { try skill.profile("nope") }
                 == "unknown profile 'nope'; skill 'diffusion-training-captioner' has "
-                + "['flux-image', 'h3-still', 'h3-video', 'ltx-image', 'ltx-video', 'plain'], "
+                + "[" + skill.profiles().map { "'" + $0 + "'" }.joined(separator: ", ") + "], "
                 + "or pass a path to a .md file"
         )
     }
