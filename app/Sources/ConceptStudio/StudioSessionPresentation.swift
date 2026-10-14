@@ -54,15 +54,14 @@ extension StudioSession {
     var trainingPrerequisites: [TrainingPrerequisite] {
         guard let project else { return [TrainingPrerequisite(missing: "open a project", step: .images)] }
         var missing: [TrainingPrerequisite] = []
-        // Training reads a published dataset (this project's recorded publish, or the one a Repeat recorded)
-        // rather than local media. An epoch-counted model still needs an item count: a Repeat that recorded one
-        // supplies it, otherwise it comes from the media included here.
+        // A Repeat that recorded a published dataset trains on it, with the media kind it recorded; an
+        // epoch-counted model also needs the positive item count it recorded. This project's own publish does
+        // not stand in for media: its record has no media kind, which comes from the media included here.
         let repeatsPublishedDataset = gpu.publishedRepeatRun != nil
         let projectPublished = !gpu.usesLocalDataset && !repoID.isEmpty && !projectState.datasetRevision.isEmpty
-        let countsSteps = gpu.effectiveModelRow.recipe.lengthUnit == .steps
-        let publishedMediaSuffices = gpu.publishedRepeatRun.map { $0.itemCount != nil || countsSteps }
-            ?? (projectPublished && countsSteps)
-        if project.images.isEmpty, !publishedMediaSuffices {
+        let repeatSuppliesMedia = repeatsPublishedDataset
+            && (gpu.publishedRepeatItemCount != nil || gpu.effectiveModelRow.recipe.lengthUnit == .steps)
+        if project.images.isEmpty, !repeatSuppliesMedia {
             missing.append(.init(missing: "import images or clips", step: .images))
         }
         if project.job.concepts.isEmpty {

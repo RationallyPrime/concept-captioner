@@ -87,7 +87,7 @@ extension GPUWorkspace {
                 ?? (self.datasetRevision.isEmpty ? nil : self.datasetRevision)
             let containsVideo = local?.containsVideo ?? repeated?.datasetContainsVideo ?? self.datasetContainsVideo
             let inputFacts = (profile: self.profile, triggers: self.triggerWords, video: containsVideo)
-            let items = local?.itemCount ?? repeated?.itemCount ?? self.datasetItemCount
+            let items = local?.itemCount ?? self.publishedRepeatItemCount ?? self.datasetItemCount
             try self.validateTrainingSettings(
                 local: local != nil, repo: repo, containsVideo: containsVideo, items: items
             )

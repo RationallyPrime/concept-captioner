@@ -63,7 +63,8 @@ struct GPURunHistoryTests {
         defer { preferences.removePersistentDomain(forName: suite) }
         let project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
-        let secrets = MemorySecretStore()
+        // Signed in to Hugging Face, so the repeated run's published dataset is the one training reads.
+        let secrets = MemorySecretStore(["huggingface": "fixture-hub"])
         let session = StudioSession(preferences: preferences, secrets: secrets)
         session.project = project
         session.projectState.datasetRevision = "different-current-sha"
@@ -85,8 +86,9 @@ struct GPURunHistoryTests {
             #expect(session.gpu.rank == 8)
             #expect(session.gpu.learningRate == 0.0001)
             #expect(session.gpu.resolution == 512)
-            #expect(session.gpu.datasetContainsVideo)
-            #expect(session.gpu.datasetRevision == "old-sha")
+            #expect(session.gpu.publishedRepeatRun?.runID == run.runID)
+            #expect(session.gpu.publishedRepeatRun?.datasetRevision == "old-sha")
+            #expect(session.gpu.trainingDatasetContainsVideo)
         }
         #expect(secrets.readAccounts.count(where: { $0 == "runpod" }) == 1)
     }

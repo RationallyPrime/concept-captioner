@@ -287,6 +287,16 @@ extension GPUWorkspace {
     }
 
     /// Prefills editable settings; it never starts billing or submits training.
+    /// Whether the next run's dataset holds video: the repeated run's published dataset, else this project's.
+    var trainingDatasetContainsVideo: Bool {
+        publishedRepeatRun?.datasetContainsVideo ?? datasetContainsVideo
+    }
+
+    /// The next run's item count from a repeated run's published dataset, when it recorded a usable one.
+    var publishedRepeatItemCount: Int? {
+        publishedRepeatRun?.itemCount.flatMap { $0 > 0 ? $0 : nil }
+    }
+
     func repeatSettings(from run: TrainingRun) {
         guard !isBusy,
               !isTraining else { message = "Finish the active action before selecting saved settings."; return }
@@ -328,12 +338,8 @@ extension GPUWorkspace {
         profile = run.params["profile"]?.stringValue ?? modelTable.defaultRow.captions.imageProfile
         seed = run.params["seed"]?.intValue ?? 42
         if let cap = run.gpuBudgetUSD { runBudget = cap }
-        // A direct-upload run supplies settings only: its repeat trains on this project's dataset, whose
-        // revision and media kind must stay as the project recorded them.
-        if !run.datasetRepo.isEmpty {
-            datasetContainsVideo = run.datasetContainsVideo
-            datasetRevision = run.datasetRevision ?? ""
-        }
+        // The project's dataset revision and media kind stay as the project recorded them: a run that recorded a
+        // published dataset supplies its own through `publishedRepeatRun`, and one that did not trains on these.
         repeatSourceRunID = run.runID
         selectedHistoryRunID = run.runID
         message = "Saved settings loaded. Change them in Training, then start a new run. "

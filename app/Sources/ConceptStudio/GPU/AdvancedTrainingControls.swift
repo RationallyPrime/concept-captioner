@@ -45,7 +45,7 @@ struct AdvancedTrainingControls: View {
             TextField("Triggers", text: $workspace.triggerWords)
             TextField("Caption profile", text: $workspace.profile)
             TextField("Training seed", value: $workspace.seed, format: .number)
-            if workspace.datasetContainsVideo, row.video != nil {
+            if workspace.trainingDatasetContainsVideo, row.video != nil {
                 Text(
                     "Video training uses every frame at the dimensions and rate approved in Images. To change a "
                         + "clip's dimensions or length, approve its segment again, then caption and publish it. "
