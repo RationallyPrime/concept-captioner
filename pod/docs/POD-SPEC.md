@@ -629,7 +629,7 @@ they expose no port and use the same supervisor/GPU reservation as training. The
 | `width`, `height` | integers 64–2048, each a multiple of 32 | 512, 512 |
 | `inference_steps` | integer 1–100 | 20 |
 | `guidance_scale` | number 0–20 | 4 |
-| `num_frames` | integer 1–257; the source model's frame law from the model table (4.4): FLUX and Z-Image require 1, LTX requires 8n+1, H3 accepts 1 or 17n+5 (5–243) | 1 |
+| `num_frames` | integer 1–257; the source model's frame law from the model table (4.4): FLUX requires 1, LTX requires 8n+1, H3 accepts 1 or 17n+5 (5–243) | 1 |
 | `frame_rate` | number greater than 0 and at most 60; a model with a fixed cadence requires it (H3: exactly 24) | 24 |
 
 Validation refuses an existing generation directory and an unavailable source config or
@@ -637,8 +637,8 @@ checkpoint before `prepare()` creates anything. Prompt override refusal preserve
 requested settings for both arms; prompts are argv values, never shell input.
 
 A source run is admitted when the model table (4.4) has a row for its `base_model` on this
-trainer that names a `generator` hook: today `black-forest-labs/FLUX.1-dev`,
-`Comfy-Org/MiniMax-H3` and `Tongyi-MAI/Z-Image` on AI Toolkit, and `Lightricks/LTX-2` on LTX.
+trainer that names a `generator` hook: today `black-forest-labs/FLUX.1-dev`
+and `Comfy-Org/MiniMax-H3` on AI Toolkit, and `Lightricks/LTX-2` on LTX.
 Other models return `422 invalid_params` before creating a generation run, naming the trainer's
 default model (`This generation path supports <model_ref> checkpoints only`). The frame count and frame
 rate are then checked against the row's `video` law and fixed cadence, in this order: an
