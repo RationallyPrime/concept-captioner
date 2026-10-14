@@ -66,9 +66,12 @@ extension GPUWorkspace {
             if let hook = self.nativeRecipeHook {
                 try hook.validateGuidance(settings: self.h3RecipeSettings, guidanceLoss: self.guidanceLoss)
             }
-            if let row = self.exactModelRow, row.gpu.verifyOnPod {
+            // The rental filter only covers new computers; a running one may predate a model switch.
+            if let row = self.exactModelRow {
                 let plan = try await agent.plan()
-                try await self.verifyGPUMemory(agent, gpus: plan.train?.gpus ?? [], row: row)
+                try await self.verifyGPUMemory(
+                    agent, gpus: plan.train?.gpus ?? [], row: row, requireReport: row.gpu.verifyOnPod
+                )
             }
             let local = try await self.currentLocalDataset(capture: captureLocal)
             defer { local?.remove() }
@@ -82,7 +85,7 @@ extension GPUWorkspace {
                 ?? (self.datasetRevision.isEmpty ? nil : self.datasetRevision)
             let containsVideo = local?.containsVideo ?? repeated?.datasetContainsVideo ?? self.datasetContainsVideo
             let inputFacts = (profile: self.profile, triggers: self.triggerWords, video: containsVideo)
-            let items = local?.itemCount ?? self.datasetItemCount
+            let items = local?.itemCount ?? repeated?.itemCount ?? self.datasetItemCount
             try self.validateTrainingSettings(
                 local: local != nil, repo: repo, containsVideo: containsVideo, items: items
             )
@@ -99,7 +102,7 @@ extension GPUWorkspace {
             self.plan = plan
             params = await self.admitNewRun(
                 dataset, params: params, repo: repo, local: local, revision: revision,
-                cap: cap, baseline: baseline, containsVideo: containsVideo
+                cap: cap, baseline: baseline, inputs: (containsVideo, items)
             )
             let destination = self.result?.destination ?? .download
             var trainerStartAttempted = false
@@ -176,7 +179,7 @@ extension GPUWorkspace {
 
     private func admitNewRun(
         _ id: String, params: JSONObject, repo: String, local: LocalTrainingDataset?, revision: String?,
-        cap: Double, baseline: Double, containsVideo: Bool
+        cap: Double, baseline: Double, inputs: (containsVideo: Bool, items: Int)
     ) async -> JSONObject {
         var params = params
         runID = id
@@ -188,7 +191,7 @@ extension GPUWorkspace {
             ])
         }
         points = []
-        datasetContainsVideo = containsVideo
+        datasetContainsVideo = inputs.containsVideo
         datasetRevision = local == nil ? (revision ?? "") : ""
         result = TrainingResult(
             runID: id,
@@ -203,6 +206,7 @@ extension GPUWorkspace {
             params: params,
             resumed: false,
             localInputDigest: local?.digest,
+            itemCount: inputs.items,
             budget: cap,
             baseline: baseline
         )

@@ -178,11 +178,13 @@ extension GPUWorkspace {
     /// Refuses a computer whose GPUs report less memory than the row's reference. The provider's offers use
     /// decimal GB and the agent reports MiB; a 96 GB class GPU can expose less than 96 GiB after firmware
     /// reservations (the H3 reference reports 97,887 MiB).
-    func verifyGPUMemory(_ agent: any PodAgent, gpus: [Int], row: ModelRow) async throws {
+    /// An agent too old to report memory fails the check only when the row requires it (`requireReport`).
+    func verifyGPUMemory(_ agent: any PodAgent, gpus: [Int], row: ModelRow, requireReport: Bool = true) async throws {
         let inventory: [AgentGPU]
         do {
             inventory = try await agent.gpus()
         } catch is AgentCannotReportGPUMemory {
+            guard requireReport else { return }
             throw StudioError.message(
                 "This agent cannot report GPU memory. Update its training image before using \(row.shortName)."
             )

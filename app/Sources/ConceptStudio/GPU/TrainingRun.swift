@@ -14,6 +14,8 @@ struct TrainingRun: Codable, Equatable, Identifiable {
     var datasetRevision: String?
     var datasetContainsVideo: Bool
     var localInputDigest: String?
+    /// Training images and clips the run started with; epoch rows convert steps with it on Repeat.
+    var itemCount: Int?
     var paramsJSON: Data
     var params: JSONObject {
         get { (try? JSONValue(parsing: paramsJSON).objectValue) ?? [:] }
@@ -202,6 +204,7 @@ extension GPUWorkspace {
         params: JSONObject,
         resumed: Bool,
         localInputDigest: String? = nil,
+        itemCount: Int? = nil,
         budget: Double? = nil,
         baseline: Double? = nil
     ) {
@@ -218,7 +221,7 @@ extension GPUWorkspace {
             runHistory.append(TrainingRun(
                 runID: runID, trainer: trainer, datasetRepo: datasetRepo,
                 datasetRevision: datasetRevision.isEmpty ? nil : datasetRevision,
-                datasetContainsVideo: datasetContainsVideo, localInputDigest: localInputDigest,
+                datasetContainsVideo: datasetContainsVideo, localInputDigest: localInputDigest, itemCount: itemCount,
                 paramsJSON: JSONValue.object(params).pythonDumpsData(),
                 volumeID: currentVolumeID, startedAt: now, updatedAt: now, result: result,
                 hourlyRateUSD: saved?.hourlyRate, estimatedGPUCostUSD: nil, gpuBudgetUSD: budget,
@@ -324,11 +327,13 @@ extension GPUWorkspace {
             + "Dataset: \(run.datasetDescription)."
     }
 
-    /// A saved run holds optimizer steps. A model that counts epochs shows them as passes over the current items.
+    /// A saved run holds optimizer steps. A model that counts epochs shows them as passes over the items
+    /// that run trained on (recorded since the model table; older runs fall back to the current items).
     private func lengthToRepeat(_ run: TrainingRun, row: ModelRow) -> Int {
-        guard row.recipe.lengthUnit == .epochs, datasetItemCount > 0 else { return run.targetSteps }
+        let items = run.itemCount ?? datasetItemCount
+        guard row.recipe.lengthUnit == .epochs, items > 0 else { return run.targetSteps }
         let perStep = Double(max(1, batchSize * accumulation))
-        return max(1, Int((Double(run.targetSteps) * perStep / Double(datasetItemCount)).rounded()))
+        return max(1, Int((Double(run.targetSteps) * perStep / Double(items)).rounded()))
     }
 
     func resumeRun(
