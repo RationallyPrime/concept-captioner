@@ -351,7 +351,7 @@ struct GPUJourneyView: View {
                 .help("Start training (⌘↩)")
                 .disabled(workspace.isBusy || workspace.isTraining || !workspace
                     .hasRunningPod || session.busy || session
-                    .editing || (!workspace.usesLocalDataset && datasetRepo.isEmpty))
+                    .editing || (!workspace.usesLocalDataset && trainingDatasetRepo.isEmpty))
             }
             if !workspace.repeatSourceRunID.isEmpty {
                 StudioNotice(workspace.usesLocalDataset
