@@ -309,6 +309,86 @@
         "generator": "minimax_h3"
       },
       "notes": "AI Toolkit minimax_h3 registration, BF16 DiT and Qwen encoder, frozen Circlestone image-training adapter (guidance preservation loss must stay off while it is used). Images and 17n+5-frame clips at exactly 24 fps. Native recipe import and warm start. The quality recipe lives in pod/scripts/h3_recipe.py; this row mirrors it."
+    },
+    {
+      "id": "z-image",
+      "display_name": "Z-Image",
+      "short_name": "Z-Image",
+      "trainer": "aitoolkit",
+      "model_ref": "Tongyi-MAI/Z-Image",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 20.5,
+        "download_note": "Diffusers transformer (12.3 GB), Qwen3 text encoder (8.0 GB), VAE, tokenizer and scheduler. AI Toolkit downloads them on first use; the revision is not pinned."
+      },
+      "architecture": {
+        "arch": "zimage",
+        "dtype": "bf16",
+        "quantize": false,
+        "quantize_text_encoder": false,
+        "gradient_checkpointing": false,
+        "model_extra": {}
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [512, 768, 1024],
+        "default": [768],
+        "multiple": false
+      },
+      "recipe": {
+        "length": {
+          "unit": "epochs",
+          "value": 150
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 500,
+          "keep": 20,
+          "dtype": "bf16",
+          "editable": false
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 96,
+        "verify_on_pod": false,
+        "note": "Z-Image's default recipe (768 px, no gradient checkpointing) is set up for 96 GB GPUs.",
+        "verify_message": null
+      },
+      "video": null,
+      "preview": {
+        "training_samples": true,
+        "still": true,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "flux-image",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "flux-image": "FLUX · image captions"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "apache-2.0",
+        "name": "Apache License 2.0",
+        "url": "https://github.com/Tongyi-MAI/Z-Image/blob/main/LICENSE",
+        "notice": "Z-Image is released under the Apache License 2.0. Read its terms before redistributing the model or a LoRA trained on it.",
+        "show_notice": true
+      },
+      "usage_note": "A LoRA trained on Z-Image also works on Z-Image-Turbo, at about twice the strength.",
+      "hooks": {
+        "generator": "aitoolkit_arch_image"
+      },
+      "notes": "Undistilled base model, AI Toolkit arch zimage (not zimage_l2p), read from the standard diffusers layout (transformer/, text_encoder/ Qwen3, tokenizer/, vae/) that AI Toolkit's ZImageModel expects. bf16, no quantisation, no gradient checkpointing, 768 px, AdamW at 1e-4, rank and alpha 32, batch 1, 150 epochs. Checkpoint cadence is in steps: every 500 steps, newest 20 kept. A LoRA trained on this base model works on Z-Image-Turbo at about twice the strength; that is shown as a note in the picker and on the model card and is never applied automatically."
     }
   ]
 }
