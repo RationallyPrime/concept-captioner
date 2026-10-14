@@ -531,16 +531,17 @@ def build_parser() -> argparse.ArgumentParser:
 def run(args: argparse.Namespace, hub: Hub | None) -> int:
     out = Path(args.to).expanduser().resolve()
     local = getattr(args, "local_dir", None)
-    rules = runpy.run_path(str(Path(__file__).with_name("dataset_stage.py"))) if local else None
-    snapshot = None
+    source: Path | Hub  # the local upload stage, or the Hub that serves the repo
+    rules: dict[str, Any] = {}
     digest = None
     if local:
+        rules = runpy.run_path(str(Path(__file__).with_name("dataset_stage.py")))
         if not args.only_metadata or args.revision is not None:
             raise PullError("Local mode requires --only-metadata and accepts no Hub revision")
         workspace = Path(os.environ.get("PODAGENT_WORKSPACE", "/workspace"))
         try:
-            snapshot = rules["confined_stage"](Path(local).expanduser(), workspace)
-            originals = rules["staged_files"](snapshot)
+            source = rules["confined_stage"](Path(local).expanduser(), workspace)
+            originals = rules["staged_files"](source)
         except ValueError as error:
             raise PullError(str(error)) from error
         if out.parent != (workspace / "datasets").resolve() or out.name in {"", ".", ".."}:
@@ -555,16 +556,19 @@ def run(args: argparse.Namespace, hub: Hub | None) -> int:
         sha = None
         convention = IMAGEFOLDER
     else:
-        if hub is None:
-            hub = Hub(token_from_env())
+        source = hub if hub is not None else Hub(token_from_env())
         try:
-            files = hub.list_files(args.repo, args.revision)
-            sha = hub.resolve_sha(args.repo, args.revision)
+            files = source.list_files(args.repo, args.revision)
+            sha = source.resolve_sha(args.repo, args.revision)
         except Exception as exc:  # not found, no access, offline: one line instead of a traceback
             raise PullError(f"cannot read {args.repo}: {exc}") from None
         convention = detect_convention(files)
     revision = sha or args.revision
-    origin = f"local {snapshot.name}" if local else f"{args.repo} @ {revision or 'main'}"
+    origin = (
+        f"local {source.name}"
+        if isinstance(source, Path)
+        else f"{args.repo} @ {revision or 'main'}"
+    )
     print(f"pull_dataset: {origin} -> {out} ({convention})", flush=True)
 
     stage = out.with_name(out.name + PARTIAL_SUFFIX)
@@ -572,17 +576,20 @@ def run(args: argparse.Namespace, hub: Hub | None) -> int:
     _remove(stage)
     stage.mkdir(parents=True)
     try:
-        if convention == IMAGEFOLDER:
-            if not local:
-                snapshot = hub.snapshot(args.repo, revision, list(SNAPSHOT_PATTERNS))
+        if isinstance(source, Path) or convention == IMAGEFOLDER:
+            folder = (
+                source
+                if isinstance(source, Path)
+                else source.snapshot(args.repo, revision, list(SNAPSHOT_PATTERNS))
+            )
             entries: Iterable[Entry] = collect_imagefolder(
-                snapshot,
+                folder,
                 split=args.split,
                 caption_column=args.caption_column,
                 only_metadata=args.only_metadata,
             )
         else:
-            rows = hub.load_dataset(
+            rows = source.load_dataset(
                 args.repo, split=args.split, revision=revision, image_column=args.image_column
             )
             entries = iter_dataset_entries(
@@ -593,12 +600,13 @@ def run(args: argparse.Namespace, hub: Hub | None) -> int:
             )
         written = write_entries(entries, stage)
         job_yaml = None
-        if local and "job.yaml" in files:
-            shutil.copyfile(snapshot / "job.yaml", stage / "job.yaml")
-            job_yaml = "job.yaml"
-        elif not local and args.job_path and args.job_path in files:
+        if isinstance(source, Path):
+            if "job.yaml" in files:
+                shutil.copyfile(source / "job.yaml", stage / "job.yaml")
+                job_yaml = "job.yaml"
+        elif args.job_path and args.job_path in files:
             shutil.copyfile(
-                hub.download_file(args.repo, args.job_path, revision), stage / "job.yaml"
+                source.download_file(args.repo, args.job_path, revision), stage / "job.yaml"
             )
             job_yaml = "job.yaml"
         manifest = build_manifest(
@@ -614,12 +622,12 @@ def run(args: argparse.Namespace, hub: Hub | None) -> int:
             json.dumps(manifest, indent=1, ensure_ascii=False) + "\n", encoding="utf-8"
         )
         swap_in(stage, out)
-        if local:
+        if isinstance(source, Path):
             # Retire the claimed directory atomically before permitting another upload under
             # this public name. Removing the private old stage cannot delete new incoming bytes.
-            private_stage = Path(tempfile.mkdtemp(prefix=".installed-", dir=snapshot.parent))
+            private_stage = Path(tempfile.mkdtemp(prefix=".installed-", dir=source.parent))
             try:
-                os.replace(snapshot, private_stage)
+                os.replace(source, private_stage)
             except OSError:
                 private_stage.rmdir()
                 raise
@@ -628,10 +636,10 @@ def run(args: argparse.Namespace, hub: Hub | None) -> int:
         _remove(stage)
         raise
     finally:
-        if local and snapshot is not None:
-            ((retired or snapshot) / rules["INSTALLING"]).unlink(missing_ok=True)
+        if isinstance(source, Path):
+            ((retired or source) / rules["INSTALLING"]).unlink(missing_ok=True)
 
-    if local:
+    if retired is not None:
         shutil.rmtree(retired)
 
     print(

@@ -392,7 +392,9 @@ def _read_with_tensorboard(logdir: Path, api: TensorboardApi, state: dict[str, _
 
 def _latest(scalars: dict[str, ScalarPoint]) -> ScalarPoint | None:
     """The most recently written point of any tag (wall time, then step)."""
-    return max(scalars.values(), key=lambda p: (p.wall_time, p.step), default=None)
+    if not scalars:
+        return None
+    return max(scalars.values(), key=lambda p: (p.wall_time, p.step))
 
 
 def summarize_run(run_id: str, logdir: Path) -> EventsSummary:
