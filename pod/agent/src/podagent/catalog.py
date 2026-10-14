@@ -29,7 +29,7 @@ import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Literal, TypeVar
+from typing import Annotated, Any, ClassVar, Literal, NoReturn, TypeVar
 
 from pydantic import (
     AfterValidator,
@@ -444,7 +444,7 @@ class RunConfig(ServiceParams):
     sample_prompts: list[str] = []
     hub: HubTarget | None = None
     hf_token: Secret = None
-    extra: dict[str, Any] = {}
+    extra: Mapping[str, Any] = {}
     resume: bool = False
     initialization: Initialization | None = None
     regularization: Regularization | None = None
@@ -524,7 +524,9 @@ class LtxRunConfig(RunConfig):
     # The Hub source launch_ltx.py prepares on its own, and the revision it is pinned to.
     hub_source: ClassVar[tuple[str, str]] = (LTX_HUB_MODEL, LTX_HUB_REVISION)
 
-    extra: LtxExtra = {}  # type: ignore[assignment]
+    # Narrowing the inherited field is how pydantic validates `extra.preprocess` in place (errors
+    # at ["extra", "preprocess"]); nothing assigns `extra` after validation.
+    extra: LtxExtra = {}  # ty: ignore[invalid-mutable-override]
 
     @model_validator(mode="after")
     def _ai_toolkit_only(self) -> LtxRunConfig:
@@ -557,8 +559,13 @@ class PullDatasetParams(ServiceParams):
 
     @model_validator(mode="after")
     def _name_defaults_to_repo_name(self) -> PullDatasetParams:
-        if (self.repo_id is None) == (self.local_name is None):
-            raise ValueError("Exactly one of repo_id or local_name is required")
+        match self.repo_id, self.local_name:
+            case str() as repo_id, None:
+                candidate = repo_id.rsplit("/", 1)[1]
+            case None, str() as local_name:
+                candidate = local_name
+            case _:
+                raise ValueError("Exactly one of repo_id or local_name is required")
         if self.local_name is not None and (
             not self.only_metadata or self.revision is not None or self.hf_token is not None
         ):
@@ -566,7 +573,6 @@ class PullDatasetParams(ServiceParams):
                 "Local mode requires only_metadata and accepts no Hub revision or token"
             )
         if self.name is None:
-            candidate = self.local_name or self.repo_id.rsplit("/", 1)[1]
             if not re.fullmatch(NAME_PATTERN, candidate):
                 raise ValueError(
                     f"repo name {candidate!r} is not a valid dataset folder name; pass 'name'"
@@ -626,7 +632,7 @@ class GenerationParams(ServiceParams):
 
 def _check_under(
     errors: list[InitErrorDetails],
-    loc: tuple[str, ...],
+    loc: tuple[str | int, ...],
     value: str,
     root: Path,
     *,
@@ -799,7 +805,11 @@ def parse_params(
     return params
 
 
-def _invalid(model: ServiceParams, reason: str, loc: tuple[str, ...] = ("run_id",)) -> None:
+def _invalid(
+    model: RunConfig | GenerationParams | DrawRegularizationParams,
+    reason: str,
+    loc: tuple[str, ...] = ("run_id",),
+) -> NoReturn:
     raise ValidationError.from_exception_data(
         type(model).__name__,
         [
@@ -1057,7 +1067,9 @@ class ServiceSpec:
     port: int | None
     argv: Callable[[ServiceParams, list[int], Paths], list[str]]
     cwd: Callable[[ServiceParams, Paths], Path]
-    log_path: Callable[[ServiceParams, Paths], Path]
+    # None asks for a path that does not depend on the params; a builder that needs them raises
+    # TypeError (Supervisor._static_log_path).
+    log_path: Callable[[ServiceParams | None, Paths], Path]
     env: Callable[[ServiceParams, Settings], dict[str, str]]
     prepare: Callable[[ServiceParams, Paths], None]
     run_id: Callable[[ServiceParams], str | None]
@@ -1102,7 +1114,7 @@ def _noop_prepare(_: ServiceParams, __: Paths) -> None:
     return None
 
 
-def _logs(name: str) -> Callable[[ServiceParams, Paths], Path]:
+def _logs(name: str) -> Callable[[ServiceParams | None, Paths], Path]:
     return lambda _params, paths: paths.logs / f"{name}.log"
 
 
@@ -1117,7 +1129,9 @@ def _run_dir(params: ServiceParams, paths: Paths) -> Path:
     return paths.run_dir(run_id)
 
 
-def _trainer_log(params: ServiceParams, paths: Paths) -> Path:
+def _trainer_log(params: ServiceParams | None, paths: Paths) -> Path:
+    if params is None:
+        raise TypeError("a trainer log sits in its run directory")
     return _run_dir(params, paths) / "trainer.log"
 
 
@@ -1198,7 +1212,7 @@ def _trainer_env(params: ServiceParams, settings: Settings) -> dict[str, str]:
     return {"PYTHONUNBUFFERED": "1", **_hf_env(params, settings)}
 
 
-def _prestart_cleanup(params: ServiceParams, paths: Paths) -> None:
+def _prestart_cleanup(params: RunConfig | GenerationParams, paths: Paths) -> None:
     keep = {params.run_id}
     datasets: set[Path] = set()
     if isinstance(params, GenerationParams):
@@ -1373,11 +1387,16 @@ def _pull_dataset_argv(params: ServiceParams, _gpus: list[int], paths: Paths) ->
     p = _as(params, PullDatasetParams)
     if p.name is None:  # the model validator fills it in; guard the type all the same
         raise TypeError("PullDatasetParams.name is unset")
+    if p.local_name is not None:
+        source = ["--local-dir", str(paths.uploads / p.local_name)]
+    elif p.repo_id is not None:
+        source = ["--repo", p.repo_id]
+    else:  # the model validator requires one of them; guard the type all the same
+        raise TypeError("PullDatasetParams has neither repo_id nor local_name")
     argv = [
         paths.venv_bin("agent", "python"),
         str(paths.scripts / "pull_dataset.py"),
-        "--local-dir" if p.local_name else "--repo",
-        str(paths.uploads / p.local_name) if p.local_name else p.repo_id,
+        *source,
         "--to",
         str(paths.datasets / p.name),
         "--split",

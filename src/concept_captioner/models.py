@@ -56,7 +56,7 @@ import httpx2
 from pydantic import BaseModel
 from pydantic_ai import NativeOutput, PromptedOutput, ToolOutput, UserError
 from pydantic_ai.models import Model, infer_model
-from pydantic_ai.models.openai import OpenAIResponsesModel
+from pydantic_ai.models.openai import OpenAIResponsesModel, OpenAIResponsesModelSettings
 from pydantic_ai.settings import ModelSettings
 
 from .job import EndpointSpec, OutputMode, ThinkingLevel
@@ -277,8 +277,10 @@ def _model(spec: EndpointSpec, http_client: httpx2.AsyncClient | None) -> Model:
                 provider = GoogleProvider(http_client=client)
             elif spec.kind == "openrouter":
                 provider = OpenRouterProvider(http_client=client)
+            elif spec.kind == "gateway/google":
+                provider = gateway_provider("google", http_client=client)
             else:
-                provider = gateway_provider(spec.kind.removeprefix("gateway/"), http_client=client)
+                provider = gateway_provider("google-cloud", http_client=client)
             return infer_model(spec.spec, provider_factory=lambda _name: provider)
         return infer_model(spec.spec)
     except UserError as error:
@@ -348,7 +350,7 @@ def resolve(
     if isinstance(model, OpenAIResponsesModel):
         # Retention is not the job file's to set: off on every Responses route, after the job's
         # own keys have been validated above.
-        settings["openai_store"] = False
+        settings = OpenAIResponsesModelSettings(**settings, openai_store=False)
     return Resolved(
         model=model,
         settings=settings,

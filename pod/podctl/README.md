@@ -5,8 +5,8 @@ sugars, compact tables by default, raw JSON with `--json`. The contract is `../d
 §8; the agent's endpoints and error envelope are §2.
 
 ```bash
-uv venv && uv pip install -e ".[dev]"
-pytest -q && ruff check . && ruff format --check .
+uv sync
+uv run pytest && ruff check . && ruff format --check . && ty check
 
 export PODCTL_URL=https://<pod-id>-8800.proxy.runpod.net   # or http://127.0.0.1:8800 in fake mode
 export PODAGENT_TOKEN=...                                   # the token the pod was created with

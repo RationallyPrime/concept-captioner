@@ -1,0 +1,12 @@
+# The scripts have no project of their own: they run in the agent venv (`uv sync --extra pod` in
+# pod/agent), and the trainer scripts also import torch and AI Toolkit, which exist only in the
+# pod images.
+[environment]
+python = "../agent/.venv"
+
+[src]
+# Tests are not type-checked.
+exclude = ["tests"]
+
+[analysis]
+allowed-unresolved-imports = ["torch.**", "toolkit.**"]

@@ -22,7 +22,7 @@ source .venv/bin/activate
 concept-captioner --help
 ```
 
-Choose one of the two install commands. For repository development and tests, the project workflow is `uv pip install -e ".[dev,hf]"`. The `hf` extra installs `datasets` and `huggingface_hub`; local-folder use needs no extra.
+Choose one of the two install commands. For repository development and tests, the project workflow is `uv sync --all-extras` (see `CLAUDE.md`, "Tooling"). The `hf` extra installs `datasets` and `huggingface_hub`; local-folder use needs no extra.
 
 ## Quick start
 

@@ -3,6 +3,9 @@ on:
   push:
     branches: [main]
   pull_request:
+env:
+  # Tool versions come from mise.toml; mise's own version and Xcode's (swift job) are pinned here.
+  MISE_VERSION: 2026.10.10
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -11,13 +14,15 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: jdx/mise-action@v5
         with:
-          python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[dev]"
+          version: ${{ env.MISE_VERSION }}
+          install_args: uv ruff pipx:ty
+      - run: uv sync --locked --all-extras --python ${{ matrix.python-version }}
       - run: ruff check src tests
       - run: ruff format --check src tests
-      - run: pytest -q
+      - run: ty check
+      - run: uv run --no-sync pytest -q
 
   swift:
     name: swift (app/)
@@ -30,9 +35,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: latest-stable
+          xcode-version: "26.6"
+      - uses: jdx/mise-action@v5
+        with:
+          version: ${{ env.MISE_VERSION }}
+          install_args: swiftlint swiftformat
       - run: swift --version
-      - run: brew install swiftlint swiftformat
       - run: swift build
       - name: swift test (sampled and killed if it hangs for 5 minutes)
         run: ../.github/scripts/swift-test-watchdog.sh
@@ -48,19 +56,23 @@ jobs:
         tree: [agent, podctl, scripts]
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: jdx/mise-action@v5
+        with:
+          version: ${{ env.MISE_VERSION }}
+          install_args: uv ruff pipx:ty
       - name: Install
         run: |
           if [ "${{ matrix.tree }}" = podctl ]; then
-            cd pod/podctl && uv venv -p 3.12 && uv pip install -e ".[dev]"
+            cd pod/podctl && uv sync --locked --python 3.12
           else
             # scripts/ is tested from the agent venv (pod/README.md)
-            cd pod/agent && uv venv -p 3.12 && uv pip install -e ".[dev]" huggingface_hub datasets Pillow
+            cd pod/agent && uv sync --locked --extra pod --python 3.12
           fi
       - name: Test and lint
         working-directory: pod/${{ matrix.tree }}
         run: |
           if [ "${{ matrix.tree }}" = scripts ]; then py=../agent/.venv/bin; else py=.venv/bin; fi
           $py/python -m pytest tests -q
-          $py/ruff check .
-          $py/ruff format --check .
+          ruff check .
+          ruff format --check .
+          ty check

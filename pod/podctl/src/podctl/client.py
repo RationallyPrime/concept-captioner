@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 from urllib.parse import quote
 
 import httpx
@@ -65,7 +65,7 @@ class AgentUnreachable(Exception):
         self.status = status
 
 
-def _is_envelope(value: Any) -> bool:
+def _is_envelope(value: Any) -> TypeGuard[dict[str, Any]]:
     return (
         isinstance(value, dict)
         and isinstance(value.get("error"), dict)

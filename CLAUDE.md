@@ -73,9 +73,11 @@ language-neutral, and do not add Python-only features to them.
 
 ## Tooling
 
-- Python ≥ 3.11, `src/` layout, `pyproject.toml` with extras `hf` and `dev`.
-- `uv venv && uv pip install -e ".[dev,hf]"`, then `pytest -q` and
-  `ruff check . && ruff format --check .`. CI runs both on 3.11–3.13.
+- Python ≥ 3.11, `src/` layout, `pyproject.toml` with the extra `hf` and a `dev` dependency
+  group; each Python project (root, `pod/agent`, `pod/podctl`) commits its `uv.lock`.
+- Tool versions (uv, ruff, ty, swiftlint, swiftformat) come from `mise.toml`: `mise install`.
+- `uv sync --all-extras`, then `uv run pytest`, `ruff check . && ruff format --check .` and
+  `ty check`. ty checks source only, never tests. CI runs them on 3.11–3.13.
 - A handful of unit tests, using pydantic-ai's `FunctionModel` / `TestModel` via
   `agent.override(model=…)`. The acceptance test is running the tool against a real provider.
 
