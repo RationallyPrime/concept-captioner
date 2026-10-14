@@ -1,6 +1,6 @@
 # ConceptStudio app: brief
 
-Working name ConceptStudio; Hákon may rename it. Read `docs/v0.2-plan.md` ("Beyond v0.2" in
+Working name ConceptStudio; the owner may rename it. Read `docs/v0.2-plan.md` ("Beyond v0.2" in
 particular), `app/docs/CORE-STATUS.md` and `pod/docs/POD-STATUS.md` first. The ConceptCore
 library in this package is the pipeline; the app drives it and never reimplements it.
 
@@ -32,7 +32,7 @@ not guarantee that correlated details in the dataset are disentangled.
 Someone with no programming or ML knowledge, using an ordinary MacBook. They bring photos and
 an intended result; no development environment or knowledge of model families is assumed.
 
-Throughout the project's lifetime, that person must be able to finish, and Hákon must find the
+Throughout the project's lifetime, that person must be able to finish, and the owner must find the
 same app useful enough to prefer it to running transformers in a terminal for convenience.
 Use guidance and sensible defaults for first runs; direct controls and remembered choices for
 efficient repeat runs. Keep model, skill, profile and training controls available without

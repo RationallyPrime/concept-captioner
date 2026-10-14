@@ -70,7 +70,7 @@ Commits on `main` after `e620882`, 2026-10-11, as each commit records itself:
 | `8cda07c` | 00:40 | Hákon Freyr Gunnarsson | none | Add video training data to the later roadmap |
 
 `371c9ad` and `8cda07c` carry Hákon's identity and no trailer, so the commits do not show who
-produced them; their producer is unrecorded unless Hákon or the integrator states it. Later
+produced them; their producer is unrecorded unless the owner or the integrator states it. Later
 commits are added here by hash in the same form when they reach `main`.
 
 The local narrative candidate in the private notes (`restage/candidate`) uses the placeholder

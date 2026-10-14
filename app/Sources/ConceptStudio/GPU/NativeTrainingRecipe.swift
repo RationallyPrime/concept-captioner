@@ -5,6 +5,8 @@ import Yams
 /// The effective H3 settings from a native AI Toolkit recipe. Paths, job metadata and
 /// counters never enter this projection. The pod consumes the same allow-field resource.
 struct NativeTrainingRecipe {
+    /// The id of the table row whose `native_recipe` hook read this recipe.
+    let modelID: String
     let settings: JSONObject
     let rank: Int
     let alpha: Int
@@ -21,22 +23,22 @@ struct NativeTrainingRecipe {
         resolutions.max() ?? 512
     }
 
-    static func load(_ data: Data) throws -> NativeTrainingRecipe {
-        guard let text = String(data: data, encoding: .utf8), let node = try Yams.compose(yaml: text),
-              let document = try JSONValue(yamlNode: node).objectValue else {
-            throw StudioError.message("Choose a native AI Toolkit YAML or JSON training recipe.")
+    /// The row's `native_recipe` hook; a row without one cannot start from an imported recipe.
+    static func requiredHook(of row: ModelRow) throws -> ModelHooks.NativeRecipe {
+        guard let hook = row.hooks.nativeRecipe else {
+            throw StudioError.message("\(row.shortName) cannot start from an imported training recipe.")
         }
-        let process: JSONObject
-        if let processes = document["config"]?.objectValue?["process"]?.arrayValue {
-            guard processes.count == 1, let item = processes.first?.objectValue else {
-                throw StudioError.message("Choose a recipe containing one AI Toolkit training process.")
-            }
-            process = item
-        } else { process = document }
+        return hook
+    }
+
+    /// Reads a native recipe for `row`, the table row the user chose to import it for.
+    static func load(_ data: Data, row: ModelRow, table: ModelTable = .shared) throws -> NativeTrainingRecipe {
+        let hook = try requiredHook(of: row)
+        let process = try trainingProcess(in: data)
         guard let model = process["model"]?.objectValue,
-              model["arch"]?.stringValue == "minimax_h3",
-              model["name_or_path"]?.stringValue == GPUWorkspace.h3BaseModel else {
-            throw StudioError.message("This import accepts a MiniMax H3 recipe for Comfy-Org/MiniMax-H3.")
+              model["arch"]?.stringValue == row.architecture.arch,
+              model["name_or_path"]?.stringValue == row.modelRef else {
+            throw StudioError.message("This import accepts a \(row.displayName) recipe for \(row.modelRef).")
         }
         let datasets = process["datasets"]?.arrayValue
         guard datasets == nil || datasets?.count == 1 else {
@@ -65,15 +67,15 @@ struct NativeTrainingRecipe {
             throw StudioError.message("The imported save and guidance fields have unsupported types. "
                 + "No settings were replaced.")
         }
-        let checkpointEvery = save["save_every"]?.intValue ?? 300
-        let checkpointRetention = save["max_step_saves_to_keep"]?.intValue ?? 40
-        let checkpointPrecision = save["dtype"]?.stringValue ?? "float32"
+        let checkpointEvery = save["save_every"]?.intValue ?? row.recipe.checkpoints.every
+        let checkpointRetention = save["max_step_saves_to_keep"]?.intValue ?? row.recipe.checkpoints.keep
+        let checkpointPrecision = save["dtype"]?.stringValue ?? table.checkpointPrecision(for: row)
         let guidanceLoss = train["do_guidance_loss"]?.boolValue ?? false
         let guidanceTarget = train["guidance_loss_target"] ?? .double(3.5)
-        try GPUWorkspace.validateH3Guidance(settings: settings, guidanceLoss: guidanceLoss)
+        try hook.validateGuidance(settings: settings, guidanceLoss: guidanceLoss)
         guard checkpointEvery > 0, checkpointRetention >= 0,
               ["float16", "float32", "bfloat16", "fp16", "fp32", "bf16"].contains(checkpointPrecision),
-              GPUWorkspace.validGuidanceTarget(guidanceTarget) else {
+              hook.validGuidanceTarget(guidanceTarget) else {
             throw StudioError.message("The imported checkpoint cadence, retention, saved precision or guidance target "
                 + "is unsupported. No settings were replaced.")
         }
@@ -90,10 +92,11 @@ struct NativeTrainingRecipe {
             }
         } else { resolutions = [512] }
         guard rank > 0, alpha > 0, lr.isFinite, lr > 0, lr <= 1, batch > 0, accumulation > 0,
-              !resolutions.isEmpty, resolutions.allSatisfy(GPUWorkspace.resolutionChoices.contains) else {
+              !resolutions.isEmpty, resolutions.allSatisfy(row.resolution.choices.contains) else {
             throw StudioError.message("The imported rank, alpha, learning rate, batch or resolution is unsupported.")
         }
         return NativeTrainingRecipe(
+            modelID: row.id,
             settings: settings,
             rank: rank, alpha: alpha, learningRate: lr, batchSize: batch, accumulation: accumulation,
             checkpointEvery: checkpointEvery,
@@ -103,6 +106,19 @@ struct NativeTrainingRecipe {
             guidanceTarget: guidanceTarget,
             resolutions: resolutions
         )
+    }
+
+    /// The one training process a native recipe holds: its `config.process` entry, else the document itself.
+    private static func trainingProcess(in data: Data) throws -> JSONObject {
+        guard let text = String(data: data, encoding: .utf8), let node = try Yams.compose(yaml: text),
+              let document = try JSONValue(yamlNode: node).objectValue else {
+            throw StudioError.message("Choose a native AI Toolkit YAML or JSON training recipe.")
+        }
+        guard let processes = document["config"]?.objectValue?["process"]?.arrayValue else { return document }
+        guard processes.count == 1, let item = processes.first?.objectValue else {
+            throw StudioError.message("Choose a recipe containing one AI Toolkit training process.")
+        }
+        return item
     }
 
     private static func projectedSettings(_ effective: JSONObject, model: JSONObject) throws -> JSONObject {

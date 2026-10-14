@@ -18,6 +18,8 @@ struct LocalTrainingDataset {
     let files: [File]
     let digest: String
     let containsVideo: Bool
+    /// How many images and clips the upload holds, not counting captions and records.
+    let itemCount: Int
 
     static func prepare(projectFolder: URL) async throws -> LocalTrainingDataset {
         let project = try await StudioProject.open(at: projectFolder)
@@ -80,7 +82,8 @@ struct LocalTrainingDataset {
             return LocalTrainingDataset(
                 folder: folder, files: files,
                 digest: inputDigest(files),
-                containsVideo: project.images.contains { Sources.isVideo(Sources.suffix(of: $0.id)) }
+                containsVideo: project.images.contains { Sources.isVideo(Sources.suffix(of: $0.id)) },
+                itemCount: project.images.count
             )
         } catch {
             try? FileManager.default.removeItem(at: folder)

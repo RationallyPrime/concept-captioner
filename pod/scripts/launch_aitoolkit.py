@@ -54,8 +54,9 @@ import signal
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, NamedTuple, TextIO
 
 SCRIPT_NAME = "launch_aitoolkit"
 
@@ -689,8 +690,6 @@ def finish(run_dir: Path, cfg: dict[str, Any], code: int, out: TextIO) -> int:
 AI_TOOLKIT_DIR_ENV = "AI_TOOLKIT_DIR"
 DEFAULT_AI_TOOLKIT_DIR = "/opt/ai-toolkit"
 ROOT_KEYS = frozenset({"job", "config", "meta"})
-_H3_RE = re.compile(r"(?<![a-z0-9])h3(?![a-z0-9])")
-_H3_MARKERS = ("minimax", "hailuo")
 
 YAML_HEADER = (
     "# ai-toolkit config written by launch_aitoolkit.py from run.json (POD-SPEC §4.3).\n"
@@ -699,20 +698,40 @@ YAML_HEADER = (
 )
 
 
+def model_table() -> dict[str, Any]:
+    """``model_table.py``'s namespace: the scripts run under ``python -I``, so no sibling import."""
+    return runpy.run_path(str(Path(__file__).with_name("model_table.py")))
+
+
 def model_block(base_model: str) -> dict[str, Any]:
-    """ai-toolkit ``model`` section for a base model id or path (POD-SPEC §4.3)."""
-    lowered = base_model.lower()
-    block: dict[str, Any] = {"name_or_path": base_model}
-    if "flux" in lowered:
-        block["arch"] = "flux"  # VERIFY: newer ai-toolkit selects the family by `arch`
-        block["is_flux"] = True  # VERIFY: legacy flag, kept for older checkouts
-        block["quantize"] = True  # 8-bit mixed precision, as in ai-toolkit's FLUX examples
-    elif _H3_RE.search(lowered) or any(marker in lowered for marker in _H3_MARKERS):
-        block["arch"] = "minimax_h3"
-        block["quantize"] = False
-        block["quantize_te"] = False
-    # any other family: name_or_path only; set `extra.model.arch` in run.json
-    return block
+    """ai-toolkit ``model`` section for a base model id or path (POD-SPEC §4.3).
+
+    The model table's exact row for this trainer, else its family match (custom paths such as
+    ``/workspace/models/MiniMax-H3``), else ``name_or_path`` only; any other family sets
+    ``extra.model.arch`` in run.json.
+    """
+    return model_table()["aitoolkit_model_block"](base_model)
+
+
+def apply_row_recipe(process: dict[str, Any], row: dict[str, Any]) -> None:
+    """A generic row's trainer settings over the skeleton, in place and before ``extra`` merges.
+
+    The skeleton already carries FLUX's values, so for FLUX this changes nothing; a row whose
+    recipe differs (precision, checkpointing, optimizer, checkpoint retention) gets its own. A row
+    can also list further ``process`` keys under ``trainer_options.process`` (Qwen-Image-2.1's
+    ``train.timestep_type``, learning-rate schedule and ``train.cache_text_embeddings``): they
+    merge over the skeleton here and under run.json ``extra``, which still wins.
+    """
+    architecture, recipe = row["architecture"], row["recipe"]
+    process["train"]["dtype"] = architecture["dtype"]
+    process["train"]["gradient_checkpointing"] = architecture["gradient_checkpointing"]
+    process["train"]["optimizer"] = recipe["optimizer"]
+    if recipe["checkpoints"]["dtype"] is not None:
+        process["save"]["dtype"] = recipe["checkpoints"]["dtype"]
+    process["save"]["max_step_saves_to_keep"] = recipe["checkpoints"]["keep"]
+    options = (row.get("trainer_options") or {}).get("process")
+    if options:
+        process.update(deep_merge(process, options))
 
 
 def build_native_config(cfg: dict[str, Any], run_dir: Path) -> dict[str, Any]:
@@ -768,6 +787,12 @@ def build_native_config(cfg: dict[str, Any], run_dir: Path) -> dict[str, Any]:
             "sample_steps": 20,
         },
     }
+    # The table's exact row for this base model: the generic recipe keys, or a trainer_config hook.
+    table = model_table()
+    row = table["exact_row"](cfg["base_model"], "aitoolkit")
+    hook = table["hook"](row, "trainer_config") if row is not None else None
+    if row is not None and hook is None:
+        apply_row_recipe(process, row)
     # VERIFY: resume. ai-toolkit continues from the newest checkpoint in training_folder/<name>
     # by itself; nothing is deleted here, so a restart with an existing output/ resumes.
     extra = cfg["extra"]
@@ -778,64 +803,89 @@ def build_native_config(cfg: dict[str, Any], run_dir: Path) -> dict[str, Any]:
         "meta": {"name": "[name]", "version": "1.0"},
     }
     document = deep_merge(document, {k: v for k, v in extra.items() if k in ROOT_KEYS})
-    if cfg["base_model"] == "Comfy-Org/MiniMax-H3":
-        rules = runpy.run_path(str(Path(__file__).with_name("h3_recipe.py")))
-        groups = runpy.run_path(str(Path(__file__).with_name("h3_dataset.py")))["dataset_groups"](
-            cfg, run_dir
-        )
-        quality = rules["quality_settings"](video=any(d["num_frames"] > 1 for d in groups))
-        if cfg.get("initialization"):
-            quality = deep_merge(
-                quality, rules["read_initialization"](run_dir, cfg["initialization"], cfg["rank"])
-            )
-        quality = deep_merge(quality, extra)
-        rules["validate_guidance"](quality)
-        process = document["config"]["process"][0]
-        process.pop("dataset", None)
-        process.pop("trigger_word", None)
-        process["training_folder"] = str(run_dir / "output")
-        process["log_dir"] = str(run_dir / "tensorboard")
-        process["device"] = "cuda:0"
-        document["job"] = "extension"
-        document["config"]["name"] = cfg["run_id"]
-        document["config"]["process"] = [process]
-        model = quality["model"].copy()
-        adapter = model.pop("use_training_adapter", True)
-        process["model"] = deep_merge(
-            rules["model_config"](workspace_root(), training_adapter=adapter), model
-        )
-        process["network"] = deep_merge(process["network"], quality["network"])
-        process["network"].update(linear=cfg["rank"], linear_alpha=cfg["alpha"])
-        process["save"] = deep_merge(process["save"], quality["save"])
-        process["save"]["save_every"] = cfg["save_every"]
-        process["train"] = deep_merge(process["train"], quality["train"])
-        process["train"].update(
-            steps=cfg["steps"],
-            lr=cfg["learning_rate"],
-            batch_size=cfg["batch_size"],
-            gradient_accumulation=cfg["gradient_accumulation"],
-        )
-        process["train"].pop("gradient_accumulation_steps", None)
-        process["datasets"] = [deep_merge(quality["dataset"], row) for row in groups]
-        if cfg.get("initialization"):
-            process["network"]["pretrained_lora_path"] = str(run_dir / "initial-lora.safetensors")
-            rules["validate_weights"](
-                run_dir / "initial-lora.safetensors",
-                cfg["rank"],
-                process["network"].get("network_kwargs"),
-            )
-            if not cfg["resume"]:
-                if any((run_dir / "output").rglob("*.safetensors")):
-                    raise ConfigError(
-                        "External initial weights require a new run without old outputs"
-                    )
-                process["train"]["start_step"] = 0
-            else:
-                # A real same-run Resume restores the newest checkpoint's saved step.
-                process["train"].pop("start_step", None)
-        process["sample"].update(num_frames=1, fps=24)
+    if hook is not None:
+        TRAINER_CONFIG_HOOKS[hook].build(cfg, run_dir, document, extra)
     check_native_paths(document, run_dir)
     return document
+
+
+def minimax_h3_trainer_config(
+    cfg: dict[str, Any], run_dir: Path, document: dict[str, Any], extra: dict[str, Any]
+) -> None:
+    """The ``minimax_h3`` trainer_config hook: H3's quality recipe over the generic document."""
+    rules = runpy.run_path(str(Path(__file__).with_name("h3_recipe.py")))
+    groups = runpy.run_path(str(Path(__file__).with_name("h3_dataset.py")))["dataset_groups"](
+        cfg, run_dir
+    )
+    quality = rules["quality_settings"](video=any(d["num_frames"] > 1 for d in groups))
+    if cfg.get("initialization"):
+        quality = deep_merge(
+            quality, rules["read_initialization"](run_dir, cfg["initialization"], cfg["rank"])
+        )
+    quality = deep_merge(quality, extra)
+    rules["validate_guidance"](quality)
+    process = document["config"]["process"][0]
+    process.pop("dataset", None)
+    process.pop("trigger_word", None)
+    process["training_folder"] = str(run_dir / "output")
+    process["log_dir"] = str(run_dir / "tensorboard")
+    process["device"] = "cuda:0"
+    document["job"] = "extension"
+    document["config"]["name"] = cfg["run_id"]
+    document["config"]["process"] = [process]
+    model = quality["model"].copy()
+    adapter = model.pop("use_training_adapter", True)
+    process["model"] = deep_merge(
+        rules["model_config"](workspace_root(), training_adapter=adapter), model
+    )
+    process["network"] = deep_merge(process["network"], quality["network"])
+    process["network"].update(linear=cfg["rank"], linear_alpha=cfg["alpha"])
+    process["save"] = deep_merge(process["save"], quality["save"])
+    process["save"]["save_every"] = cfg["save_every"]
+    process["train"] = deep_merge(process["train"], quality["train"])
+    process["train"].update(
+        steps=cfg["steps"],
+        lr=cfg["learning_rate"],
+        batch_size=cfg["batch_size"],
+        gradient_accumulation=cfg["gradient_accumulation"],
+    )
+    process["train"].pop("gradient_accumulation_steps", None)
+    process["datasets"] = [deep_merge(quality["dataset"], row) for row in groups]
+    if cfg.get("initialization"):
+        process["network"]["pretrained_lora_path"] = str(run_dir / "initial-lora.safetensors")
+        rules["validate_weights"](
+            run_dir / "initial-lora.safetensors",
+            cfg["rank"],
+            process["network"].get("network_kwargs"),
+        )
+        if not cfg["resume"]:
+            if any((run_dir / "output").rglob("*.safetensors")):
+                raise ConfigError("External initial weights require a new run without old outputs")
+            process["train"]["start_step"] = 0
+        else:
+            # A real same-run Resume restores the newest checkpoint's saved step.
+            process["train"].pop("start_step", None)
+    process["sample"].update(num_frames=1, fps=24)
+
+
+def minimax_h3_prelaunch(native: dict[str, Any]) -> None:
+    """The ``minimax_h3`` hook's pre-launch step: fetch the pinned assets the config points at."""
+    rules = runpy.run_path(str(Path(__file__).with_name("h3_recipe.py")))
+    model = native["config"]["process"][0]["model"]
+    rules["download_assets"](
+        workspace_root(), training_adapter=bool(model.get("assistant_lora_path"))
+    )
+
+
+class TrainerConfigHook(NamedTuple):
+    build: Callable[[dict[str, Any], Path, dict[str, Any], dict[str, Any]], None]
+    prelaunch: Callable[[dict[str, Any]], None]
+
+
+# Registered names; ``model_table.HOOKS["trainer_config"]`` lists the same ones.
+TRAINER_CONFIG_HOOKS: dict[str, TrainerConfigHook] = {
+    "minimax_h3": TrainerConfigHook(minimax_h3_trainer_config, minimax_h3_prelaunch),
+}
 
 
 def check_native_paths(document: dict[str, Any], run_dir: Path) -> None:
@@ -929,12 +979,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         say("dry run: trainer not started")
         return 0
-    if cfg["base_model"] == "Comfy-Org/MiniMax-H3":
-        rules = runpy.run_path(str(Path(__file__).with_name("h3_recipe.py")))
-        model = native["config"]["process"][0]["model"]
-        rules["download_assets"](
-            workspace_root(), training_adapter=bool(model.get("assistant_lora_path"))
-        )
+    table = model_table()
+    row = table["exact_row"](cfg["base_model"], "aitoolkit")
+    hook = table["hook"](row, "trainer_config") if row is not None else None
+    if hook is not None:
+        TRAINER_CONFIG_HOOKS[hook].prelaunch(native)
     code = run_trainer(cmd, run_dir, cfg, sys.stdout)
     return finish(run_dir, cfg, code, sys.stdout)
 

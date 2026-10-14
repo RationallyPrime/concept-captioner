@@ -249,11 +249,12 @@ extension StudioSession {
     func updateTrainingProjectDefaults(preservingTrainer: Bool = false) {
         guard gpu.repeatSourceRunID.isEmpty else { return }
         gpu.triggerWords = project?.job.triggers.joined(separator: ",") ?? ""
-        gpu.profile = project?.job.profile ?? "flux-image"
+        gpu.profile = project?.job.profile ?? gpu.modelTable.defaultRow.captions.imageProfile
         gpu.datasetRevision = projectState.datasetRevision
         gpu.datasetContainsVideo = project?.images.contains { Sources.isVideo(Sources.suffix(of: $0.id)) } ?? false
+        gpu.datasetItemCount = project?.images.count ?? 0
         if !preservingTrainer, !gpu.hasRunningPod, !gpu.hasNativeRecipe,
-           ["black-forest-labs/FLUX.1-dev", "Lightricks/LTX-2"].contains(gpu.baseModel) {
+           gpu.exactModelRow?.followsProjectProfile == true {
             // The model picker's path, so the project's model arrives with that model's checkpoint,
             // precision and resolution defaults; an unchanged model keeps the values already edited.
             gpu.chooseTrainingModel(GPUWorkspace.projectModel(forProfile: gpu.profile))

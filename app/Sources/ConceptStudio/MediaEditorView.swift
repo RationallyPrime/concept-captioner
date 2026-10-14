@@ -24,7 +24,9 @@ struct MediaEditorView: View {
     init(session: StudioSession, media: ProjectImage) {
         self.session = session
         self.media = media
-        _format = State(initialValue: VideoTrainingFormat(profile: session.project?.job.profile ?? "ltx-video"))
+        _format = State(initialValue: VideoTrainingFormat(
+            profile: session.project?.job.profile ?? VideoTrainingFormat.allCases[0].rawValue
+        ))
     }
 
     private var isVideo: Bool {
@@ -180,9 +182,7 @@ struct MediaEditorView: View {
                 ForEach(VideoTrainingFormat.allCases) { Text($0.title).tag($0) }
             }
             .help("Choose the diffusion model that will learn this segment; its supported durations differ.")
-            Text(format == .h3
-                ? "H3 requires 24 frames per second and specific segment lengths. Approval keeps those exact frames."
-                : "LTX supports specific segment lengths. Approval keeps the selected frames at their original timing.")
+            Text(format.editorIntro)
                 .font(.callout).foregroundStyle(StudioStyle.supportingText)
             if session.project?.job.profile != format.rawValue {
                 Text("Approving selects \(format.title) video captions for this project. Other existing captions "
@@ -245,11 +245,7 @@ struct MediaEditorView: View {
                     Text("Selected: \(start)–\(end) seconds")
                         .monospacedDigit().font(.callout)
                     if !constantRateSelection {
-                        Text(format == .h3
-                            ? "This segment does not have constant timing at 24 frames per second. "
-                            + "Choose a compatible portion or import a 24 fps copy; approval never retimes it."
-                            : "This segment has variable frame timing that LTX cannot preserve. "
-                            + "Choose a constant-rate portion or import a constant-frame-rate copy.")
+                        Text(format.timingWarning)
                             .foregroundStyle(.orange)
                     }
                     Button("Preview selected segment") {
@@ -354,7 +350,7 @@ struct MediaEditorView: View {
     static func durationChoices(
         in timeline: VideoTimeline, startFrame: Int, currentCount: Int, format: VideoTrainingFormat = .ltx
     ) -> [Int] {
-        let counts = format == .ltx ? [9, 17, 33, 49, 97, 129, 257] : Array(stride(
+        let counts = format.durationChoices ?? Array(stride(
             from: format.minimumFrames, through: timeline.maximumTrainingFrames(format: format), by: format.frameStep
         ))
         return Set(counts + [currentCount])

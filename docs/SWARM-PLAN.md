@@ -7,7 +7,7 @@ Prepared 2026-10-10. Current state lives in the status documents, not here.
 ## Target and acceptance
 
 A person with no programming or ML knowledge can go from photos to a trained LoRA through
-the nine-screen journey. Hákon can use the same app efficiently enough to prefer it to a
+the nine-screen journey. The owner can use the same app efficiently enough to prefer it to a
 terminal. Apply the audience rules in the app brief to defaults, language, errors and repeat
 runs, not merely to onboarding copy. Keep meaningful controls and the shared project formats.
 

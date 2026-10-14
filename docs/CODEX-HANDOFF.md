@@ -54,7 +54,7 @@ appropriately sized dataset.
 
 ## Re-stage rule (owner instruction, 2026-10-11)
 
-Do not prepare, maintain, synchronize or publish a re-stage until Hákon explicitly says it is
+Do not prepare, maintain, synchronize or publish a re-stage until the owner explicitly says it is
 time to re-stage the app. Decide the granularity and commit partition with him then. Existing
 narrative commits and decision sheets are historical drafts, not an agreed partition or
 maintenance obligation. This applies to all agents. Continue ordinary lab commits and pushes.

@@ -277,7 +277,7 @@ The r2 history: runtime source
   receipt fields are source changes awaiting Claude-owned image publication. This is offline
   compatibility evidence, not new live acceptance of those controls or pod-disk restart.
 - **Caption quality.** The 3B and 8B captions failed the concept boundary in the cancelled
-  five-image experiment; none is training data. The larger comparison is deferred by Hákon.
+  five-image experiment; none is training data. The larger comparison is deferred by the owner.
 - **Caption inference while training runs.** Both services were resident at once, but the
   caption request ran after training exited.
 - **Not run live through this new app/pod path:** H3 clip training, external initialization,

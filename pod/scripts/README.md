@@ -9,15 +9,17 @@ They never import `podagent`, and nothing heavy is imported at module level, so
 LTX-2 Hub revision) from `../agent/src/podagent/ltx_rules.py` at import, by path with runpy.
 The image recreates that layout under `/opt/pod`, and the build's `--help` check fails if the
 copy is missing. H3 helpers read the single native/pod recipe field-and-asset JSON
-resource, copied beside scripts; they also remain stdlib-only at import.
+resource, copied beside scripts; they also remain stdlib-only at import. `model_table.py`
+reads `model-table.json` beside it in the same way; see "The model table" below.
 
 | script | runs in | purpose |
 | --- | --- | --- |
 | `pull_dataset.py` | `/opt/venvs/agent` | Hub dataset → `/workspace/datasets/<name>`: images, `<stem>.txt` captions, `metadata.jsonl`, `manifest.json`, `job.yaml` |
 | `push_lora.py` | `/opt/venvs/agent` | `/workspace/runs/<id>` → model repo: newest `.safetensors`, samples, `run.json`, `config.yaml`, generated model card |
-| `launch_aitoolkit.py` | `/opt/venvs/aitoolkit` | FLUX/H3 `run.json` → ai-toolkit YAML → `run.py`; effective native snapshot, log tee and loss scraper |
+| `model_table.py` | stdlib | the model table (`model-table.json`): which models exist and what each needs; lookups and hook registry |
+| `launch_aitoolkit.py` | `/opt/venvs/aitoolkit` | `run.json` → ai-toolkit YAML → `run.py` for the AI Toolkit models in the table; effective native snapshot, log tee and loss scraper |
 | `h3_recipe.py`, `h3_dataset.py` | stdlib admission, then AI Toolkit | canonical H3 quality/initializer contracts, fixed pinned BF16 asset download, exact approved clip grouping |
-| `generate_results.py` | selected trainer venv | actual matched FLUX/H3/LTX base/LoRA inference; incremental manifest and private checkpoint cleanup |
+| `generate_results.py` | selected trainer venv | actual matched base/LoRA inference for each model whose table row names a generator; incremental manifest and private checkpoint cleanup |
 | `launch_ltx.py` | `/opt/venvs/ltx` | `run.json` → preprocess + LTX-2 trainer config → train; same tee and scraper (POD-SPEC §4.3) |
 
 `docs/POD-STATUS.md` says which of these are implemented. The agent builds each argv from the
@@ -134,6 +136,39 @@ uv pip install huggingface_hub datasets Pillow             # or: -e ".[dev,pod]"
 .venv/bin/python -m pytest ../scripts/tests -q
 .venv/bin/ruff check ../scripts && .venv/bin/ruff format --check ../scripts
 ```
+
+## The model table
+
+`app/Sources/ConceptStudio/Resources/Training/model-table.json` is the one list of supported
+models, and `model_table.py` is how the scripts read it; `docs/model-table.md` is the format and
+the checklist for adding a model. Both images `COPY` the file to `/opt/pod/scripts/model-table.json`,
+and `model_table.py` reads that path when it exists, else the file in the checkout it sits in. The
+wrappers run under `python -I`, so they load `model_table.py` with `runpy` as they load the H3
+helpers.
+
+Three lookups: the **exact row** (`model_ref` equals `base_model`, on the script's trainer), the
+**effective row** (the exact row, else the trainer's default) and, for the AI Toolkit `model`
+block only, a **family match** that keeps custom paths such as `/workspace/models/MiniMax-H3`
+working. What each script reads:
+
+- `launch_aitoolkit.py`: `model_block` is `model_table.aitoolkit_model_block` (exact row, else
+  family match, else `name_or_path` only). `build_native_config` writes an exact row's
+  `train.dtype`, `train.gradient_checkpointing`, `train.optimizer`, `save.dtype` and
+  `save.max_step_saves_to_keep`, then its `trainer_options.process` keys, over the skeleton before
+  `extra` merges (run.json `extra` wins), unless the row names a
+  `trainer_config` hook (H3's whole recipe, `minimax_h3_trainer_config`, and its asset download
+  before launch).
+- `generate_results.py`: the exact row must name a `generator` hook (`aitoolkit_image` is
+  `flux_generate`, reading the row's model settings; `aitoolkit_arch_image` is `arch_generate`, for a
+  model AI Toolkit registers as its own class, built from the saved native config; `ltx_one_stage`;
+  `minimax_h3`), else
+  `Generation supports <display names>`. Frame count and rate are checked against the row's
+  `video` law and fixed cadence before any model loads.
+- `push_lora.py`: the model card adds the row's licence only when `license.show_notice`, and the row's
+  `usage_note` (when it has one) to its `## Use` section.
+
+A model the generic mapping can express is a new row and no code. Hooks are the
+only place a model's name appears in code; `model_table.HOOKS` registers them.
 
 ## H3 training, initialization and comparison
 

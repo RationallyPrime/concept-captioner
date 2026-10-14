@@ -64,11 +64,12 @@ struct GenerationView: View {
                 }
                 TextField("Seeds (comma separated)", text: $seedText)
                 Stepper("Generation steps: \(inferenceSteps)", value: $inferenceSteps, in: 1 ... 100)
-                if selectedRun?.generatesVideo == true {
-                    Picker("Generated output at 24 fps", selection: $videoFrames) {
-                        ForEach(selectedRun?.generationFrameChoices ?? [], id: \.self) { frames in
+                if let run = selectedRun, run.generatesVideo {
+                    let rate = run.generationFrameRate
+                    Picker("Generated output at \(rate) fps", selection: $videoFrames) {
+                        ForEach(run.generationFrameChoices, id: \.self) { frames in
                             if frames == 1 { Text("Still image").tag(frames) } else {
-                                Text("\(frames) frames · \(Double(frames) / 24, specifier: "%.1f") seconds")
+                                Text("\(frames) frames · \(Double(frames) / Double(rate), specifier: "%.1f") seconds")
                                     .tag(frames)
                             }
                         }
@@ -81,11 +82,13 @@ struct GenerationView: View {
                 }.disabled(workspace.isBusy || !workspace.hasRunningPod)
                 if !run.supportsGeneration {
                     StudioNotice(
-                        "Generation supports FLUX.1-dev, LTX-2 and MiniMax H3. This run uses \(run.baseModel)."
+                        "Generation supports \(workspace.modelTable.generationModelList). "
+                            + "This run uses \(run.baseModel)."
                     )
                 }
                 if run.generatesVideo {
-                    Text("Both outputs use the selected frame count at 24 fps and the same resolution and settings. "
+                    Text("Both outputs use the selected frame count at \(run.generationFrameRate) fps "
+                        + "and the same resolution and settings. "
                         + "H3 can generate still images or videos even when its LoRA was trained on still images.")
                         .font(.callout).foregroundStyle(StudioStyle.supportingText)
                 }

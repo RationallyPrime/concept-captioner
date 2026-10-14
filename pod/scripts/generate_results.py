@@ -4,8 +4,12 @@
 The agent writes generation.json after validating the source checkpoint. Outputs and the
 incremental comparison.json manifest live in this generation run's output directory, so
 the existing authenticated files/download endpoints serve them. No listener is added.
-FLUX uses ai-toolkit's StableDiffusion/GenerateImageConfig; H3 uses its registered model
-and the trained LoRASpecialNetwork recipe; LTX uses its official one-stage CLI.
+Which models can be compared, and how, comes from the model table (model_table.py): a row
+names a generator hook. ``aitoolkit_image`` uses ai-toolkit's StableDiffusion/GenerateImageConfig
+with the row's model settings (FLUX is one such row); ``aitoolkit_arch_image`` uses the model class
+ai-toolkit registers for the row's ``arch`` with the trained LoRA bound as a network (Z-Image is one
+such row); ``minimax_h3`` uses H3's registered model and the trained LoRASpecialNetwork recipe;
+``ltx_one_stage`` uses LTX's official one-stage CLI.
 Heavy imports happen only at execution.
 """
 
@@ -26,6 +30,21 @@ from typing import Any
 
 AI_PIN = "f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47"
 LTX_PIN = "9ec55f9f22798a3198d9c923856824821bc3317e"
+
+# Generator hook name -> (function that renders the pairs, function that adds the hook's fields to
+# the manifest or None). Names, not functions: they are looked up in this module's globals when
+# a request runs. ``model_table.HOOKS["generator"]`` registers the same names.
+GENERATOR_HOOKS: dict[str, tuple[str, str | None]] = {
+    "aitoolkit_image": ("flux_generate", None),
+    "aitoolkit_arch_image": ("arch_generate", None),
+    "ltx_one_stage": ("ltx_generate", None),
+    "minimax_h3": ("h3_generate", "h3_manifest"),
+}
+
+
+def model_table() -> dict[str, Any]:
+    """``model_table.py``'s namespace: the scripts run under ``python -I``, so no sibling import."""
+    return runpy.run_path(str(Path(__file__).with_name("model_table.py")))
 
 
 def source_config(request: dict[str, Any], workspace: Path) -> tuple[dict[str, Any], Path]:
@@ -74,6 +93,11 @@ def flux_generate(
     rows: list[dict[str, Any]],
     out: Path,
 ) -> None:
+    """The ``aitoolkit_image`` generator: still images through ai-toolkit's own primitives.
+
+    The model settings (arch, extra model keys, quantisation, precision) come from the model
+    table row for the source run's base model; for FLUX that is the call this function always made.
+    """
     # Public source: toolkit/stable_diffusion_model.py load_model (fuses model.lora_path
     # before quantization), generate_images; config_modules.py GenerateImageConfig. The
     # built-in GenerateProcess has an invalid self.train_config fallback for legacy FLUX,
@@ -85,20 +109,20 @@ def flux_generate(
     from toolkit.sampler import get_sampler
     from toolkit.stable_diffusion_model import StableDiffusion
 
+    table = model_table()
+    spec = table["exact_row"](cfg["base_model"], "aitoolkit")
+    architecture = spec["architecture"]
     for variant in ("base", "lora"):
         model = ModelConfig(
-            name_or_path=cfg["base_model"],
-            arch="flux",
-            is_flux=True,
-            quantize=True,
-            dtype="bf16",
+            **table["aitoolkit_model_values"](spec, cfg["base_model"]),
+            dtype=architecture["dtype"],
             lora_path=str(checkpoint) if variant == "lora" else None,
         )
         sd = StableDiffusion(
             device="cuda:0",
             model_config=model,
-            dtype="bf16",
-            noise_scheduler=get_sampler("flowmatch", arch="flux"),
+            dtype=architecture["dtype"],
+            noise_scheduler=get_sampler("flowmatch", arch=architecture["arch"]),
         )
         with torch.no_grad():
             sd.load_model()
@@ -268,6 +292,80 @@ def h3_generate(
         torch.cuda.empty_cache()
 
 
+def h3_manifest(checkpoint: Path, manifest: dict[str, Any]) -> None:
+    """The ``minimax_h3`` generator's manifest fields: the recipe actually trained, minus paths."""
+    captured = json.loads((checkpoint.parent / "source-native-config.json").read_text())
+    rules = runpy.run_path(str(Path(__file__).with_name("h3_recipe.py")))
+    manifest["effective_native_config"] = rules["comparison_recipe"](
+        captured["config"]["process"][0]
+    )
+    manifest["comparison_training_adapter"] = False
+
+
+def arch_generate(
+    cfg: dict[str, Any],
+    checkpoint: Path,
+    request: dict[str, Any],
+    rows: list[dict[str, Any]],
+    out: Path,
+) -> None:
+    """The ``aitoolkit_arch_image`` generator: stills from the model class registered for ``arch``.
+
+    ``aitoolkit_image`` builds the legacy ``StableDiffusion`` class, which only serves the older
+    architectures (FLUX among them). A newer architecture such as Z-Image is its own ``BaseModel``
+    subclass and takes the trained LoRA as a network, the way the trainer's previews do. So the
+    model and the network are rebuilt from the source run's captured native config (the
+    ``model`` and ``network`` blocks the trainer ran with), the base side renders with the network
+    at multiplier 0 and the trained side at 1: one model load, the same weights, prompts and seeds.
+    """
+    import torch
+
+    sys.path.insert(0, os.environ.get("AI_TOOLKIT_DIR", "/opt/ai-toolkit"))
+    from toolkit.config_modules import GenerateImageConfig, ModelConfig, NetworkConfig
+    from toolkit.util.get_model import get_model_class
+
+    native = json.loads((checkpoint.parent / "source-native-config.json").read_text())
+    process = native["config"]["process"][0]
+    if process["network"].get("type") != "lora":
+        raise ValueError("Comparison requires a trained LoRA network")
+    model = ModelConfig(**process["model"])
+    cls = get_model_class(model)
+    sd = cls(
+        device="cuda:0",
+        model_config=model,
+        dtype=process["train"].get("dtype", "bf16"),
+        noise_scheduler=cls.get_train_scheduler(),
+    )
+    try:
+        with torch.no_grad():
+            sd.load_model()
+            network_values = process["network"].copy()
+            network_values.pop("pretrained_lora_path", None)
+            # H3 in name only: this is the trainer's own network construction for any
+            # BaseModel architecture, applied here without optimizer or training state.
+            bind_h3_network(sd, NetworkConfig(**network_values), checkpoint, torch)
+            for variant, multiplier in (("base", 0.0), ("lora", 1.0)):
+                configs = [
+                    GenerateImageConfig(
+                        prompt=row["prompt"],
+                        seed=row["seed"],
+                        width=request["width"],
+                        height=request["height"],
+                        num_inference_steps=request["inference_steps"],
+                        guidance_scale=request["guidance_scale"],
+                        network_multiplier=multiplier,
+                        output_path=str(out / row[f"{variant}_path"]),
+                        output_ext="png",
+                    )
+                    for row in rows
+                ]
+                sd.generate_images(configs, sampler="flowmatch")
+    finally:
+        del sd
+        gc.collect()
+        torch.cuda.empty_cache()
+
+
 def ltx_generate(
     cfg: dict[str, Any],
     checkpoint: Path,
@@ -293,6 +391,29 @@ def _stopped(_signum: int, _frame: Any) -> None:
     raise InterruptedError("generation stopped by SIGTERM")
 
 
+def check_frames(table: dict[str, Any], spec: dict[str, Any], request: dict[str, Any]) -> None:
+    """The row's frame law and cadence, the same rules the agent applies before a run starts.
+
+    An image-only row takes one frame; a video row takes ``first + k * step`` frames (and one
+    still when it previews stills); a row with a fixed cadence takes exactly that frame rate.
+    """
+    video = spec["video"]
+    fps = video["fixed_fps"] if video is not None else None
+    if table["frame_count_ok"](spec, request["num_frames"]) and (
+        fps is None or request["frame_rate"] == fps
+    ):
+        return
+    short = spec["short_name"]
+    if video is None:
+        raise ValueError(f"{short} comparison produces images; num_frames must be 1")
+    law = video["frame_law"]
+    stills = "1 or " if spec["preview"]["still"] else ""
+    cadence = f" at exactly {fps} fps" if fps is not None else ""
+    raise ValueError(
+        f"{short} comparison needs {stills}{law['step']}n+{law['first']} frames{cadence}"
+    )
+
+
 def generate(config_path: Path, trainer: str) -> int:
     # Own the private copy before reading either config: validation can fail before inference.
     checkpoint = config_path.parent / "selected-checkpoint.safetensors"
@@ -303,22 +424,12 @@ def generate(config_path: Path, trainer: str) -> int:
         request = json.loads(config_path.read_text(encoding="utf-8"))
         workspace = Path(os.environ.get("PODAGENT_WORKSPACE", "/workspace"))
         cfg, checkpoint = source_config(request, workspace)
-        h3 = trainer == "aitoolkit" and cfg["base_model"] == "Comfy-Org/MiniMax-H3"
-        supported = (
-            (trainer == "aitoolkit" and cfg["base_model"] == "black-forest-labs/FLUX.1-dev")
-            or (trainer == "ltx" and cfg["base_model"] == "Lightricks/LTX-2")
-            or h3
-        )
-        if not supported:
-            raise ValueError("Generation supports FLUX.1-dev, MiniMax-H3 with AI Toolkit and LTX-2")
-        if h3 and (
-            request["frame_rate"] != 24
-            or (
-                request["num_frames"] != 1
-                and (request["num_frames"] < 5 or request["num_frames"] % 17 != 5)
-            )
-        ):
-            raise ValueError("H3 comparison needs 1 or 17n+5 frames at exactly 24 fps")
+        table = model_table()
+        spec = table["exact_row"](cfg["base_model"], trainer)
+        hook = table["hook"](spec, "generator") if spec is not None else None
+        if spec is None or hook is None:
+            raise ValueError(f"Generation supports {table['generation_support']()}")
+        check_frames(table, spec, request)
         out = config_path.parent / "output"
         out.mkdir(exist_ok=True)
         rows = pairs(request, trainer)
@@ -331,17 +442,11 @@ def generate(config_path: Path, trainer: str) -> int:
             "state": "generating",
             "pairs": rows,
         }
-        if h3:
-            captured = json.loads((checkpoint.parent / "source-native-config.json").read_text())
-            rules = runpy.run_path(str(Path(__file__).with_name("h3_recipe.py")))
-            manifest["effective_native_config"] = rules["comparison_recipe"](
-                captured["config"]["process"][0]
-            )
-            manifest["comparison_training_adapter"] = False
+        render, add_to_manifest = GENERATOR_HOOKS[hook]
+        if add_to_manifest is not None:
+            globals()[add_to_manifest](checkpoint, manifest)
         path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-        (h3_generate if h3 else flux_generate if trainer == "aitoolkit" else ltx_generate)(
-            cfg, checkpoint, request, rows, out
-        )
+        globals()[render](cfg, checkpoint, request, rows, out)
         missing = [
             row[key]
             for row in rows

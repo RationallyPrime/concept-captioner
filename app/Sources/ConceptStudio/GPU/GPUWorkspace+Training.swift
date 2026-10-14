@@ -37,18 +37,6 @@ extension GPUWorkspace {
         Self.captionServerSettings(for: captionModel).params(model: captionModel)
     }
 
-    static let ltxTrainingExtra: JSONObject = [
-        "optimization": .object(["optimizer_type": .string("adamw8bit")]),
-        "acceleration": .object([
-            "quantization": .string("int8-quanto"),
-            "load_text_encoder_in_8bit": .bool(true),
-            "offload_optimizer_during_validation": .bool(true),
-        ]),
-        "preprocess": .object(["args": .array([
-            .string("--load-text-encoder-in-8bit"), .string("--vae-tiling"), .string("--skip-audio"),
-        ])]),
-    ]
-
     func updateTrainingService(_ services: [AgentService]) {
         guard let state = services.first(where: { $0.name.hasPrefix("trainer-") && $0.active })
             ?? services.first(where: { $0.name == "trainer-\(trainer)" }) else { return }
@@ -75,10 +63,12 @@ extension GPUWorkspace {
             let baseline = self.estimatedPodCost
             let selectedTrainer = self.trainer
             let selectedModel = self.baseModel
-            if self.isH3Training {
-                try Self.validateH3Guidance(settings: self.h3RecipeSettings, guidanceLoss: self.guidanceLoss)
+            if let hook = self.nativeRecipeHook {
+                try hook.validateGuidance(settings: self.h3RecipeSettings, guidanceLoss: self.guidanceLoss)
+            }
+            if let row = self.exactModelRow, row.gpu.verifyOnPod {
                 let plan = try await agent.plan()
-                try await self.validateH3Computer(agent, gpus: plan.train?.gpus ?? [])
+                try await self.verifyGPUMemory(agent, gpus: plan.train?.gpus ?? [], row: row)
             }
             let local = try await self.currentLocalDataset(capture: captureLocal)
             defer { local?.remove() }
@@ -92,10 +82,13 @@ extension GPUWorkspace {
                 ?? (self.datasetRevision.isEmpty ? nil : self.datasetRevision)
             let containsVideo = local?.containsVideo ?? repeated?.datasetContainsVideo ?? self.datasetContainsVideo
             let inputFacts = (profile: self.profile, triggers: self.triggerWords, video: containsVideo)
-            try self.validateTrainingSettings(local: local != nil, repo: repo, containsVideo: containsVideo)
+            let items = local?.itemCount ?? self.datasetItemCount
+            try self.validateTrainingSettings(
+                local: local != nil, repo: repo, containsVideo: containsVideo, items: items
+            )
             let initialization = try self.trainingInitialization()
             let dataset = "concept-" + UUID().uuidString.prefix(12).lowercased()
-            var params = self.trainingParams(dataset: dataset, inputFacts: inputFacts)
+            var params = self.trainingParams(dataset: dataset, inputFacts: inputFacts, items: items)
             let servicesBeforeStart = try await agent.services()
             self.updateCaptionServerState(servicesBeforeStart)
             guard !servicesBeforeStart.contains(where: { $0.active && ($0.name.hasPrefix("trainer-")
@@ -139,31 +132,42 @@ extension GPUWorkspace {
         }
     }
 
-    private func validateTrainingSettings(local: Bool, repo: String, containsVideo: Bool) throws {
-        guard nativeRecipe == nil || isH3Training else {
-            throw StudioError.message("This imported recipe is for H3. Choose another training model to clear it "
-                + "before using a different base model.")
+    private func validateTrainingSettings(local: Bool, repo: String, containsVideo: Bool, items: Int) throws {
+        let row = effectiveModelRow
+        guard nativeRecipe == nil || nativeRecipeHook != nil else {
+            throw StudioError.message("This imported recipe is for \(nativeRecipeName). Choose another training model "
+                + "to clear it before using a different base model.")
         }
         guard !triggerWords.split(whereSeparator: { $0 == "," || $0.isWhitespace }).isEmpty else {
             throw StudioError.message("Define a concept and its trigger in Concepts before starting training.")
         }
         guard local || !repo.isEmpty, steps > 0, rank > 0, !baseModel.isEmpty,
-              !trainingResolutions.isEmpty, trainingResolutions.allSatisfy(Self.resolutionChoices.contains) else {
+              !trainingResolutions.isEmpty, trainingResolutions.allSatisfy(resolutionChoices.contains) else {
             throw StudioError.message("Prepare your dataset and choose a model with positive training steps and rank.")
         }
-        guard !containsVideo || trainer == "ltx" || isH3Training else {
-            throw StudioError.message("FLUX image training does not accept video clips. Choose LTX or H3 training.")
+        guard !containsVideo || row.video != nil else {
+            let capable = ModelTable.sentenceList(modelTable.videoRows.map(\.shortName), conjunction: "or")
+            throw StudioError.message(
+                "\(row.shortName) image training does not accept video clips. Choose \(capable) training."
+            )
         }
-        if isH3Training { try Self.validateH3Guidance(settings: h3RecipeSettings, guidanceLoss: guidanceLoss) }
+        if let hook = nativeRecipeHook {
+            try hook.validateGuidance(settings: h3RecipeSettings, guidanceLoss: guidanceLoss)
+        }
         guard seed >= 0, learningRate.isFinite, learningRate > 0, learningRate <= 1,
               alpha > 0, batchSize > 0, accumulation > 0 else {
             throw StudioError.message("Choose positive training values and a nonnegative seed.")
         }
-        guard !isH3Training || (checkpointEvery > 0 && checkpointRetention >= 0
-            && ["float16", "float32", "bfloat16", "fp16", "fp32", "bf16"].contains(checkpointPrecision)
-            && Self.validGuidanceTarget(guidanceTarget)) else {
+        let checkpointsValid = !row.recipe.checkpoints.editable || (checkpointEvery > 0 && checkpointRetention >= 0
+            && ["float16", "float32", "bfloat16", "fp16", "fp32", "bf16"].contains(checkpointPrecision))
+        let guidanceValid = nativeRecipeHook?.validGuidanceTarget(guidanceTarget) ?? true
+        guard checkpointsValid, guidanceValid else {
             throw StudioError.message("Choose a positive checkpoint interval, retention of zero or more, "
                 + "a supported saved precision and guidance target from 0 to 20 (or a two-value range).")
+        }
+        guard row.recipe.lengthUnit == .steps || items > 0 else {
+            throw StudioError.message("Training length in epochs needs the number of included images and clips. "
+                + "Open the project that holds them.")
         }
         guard !resultNeedsSaving else {
             throw StudioError.message("Retrieve pending trained models or generated outputs before starting a run.")
@@ -244,16 +248,27 @@ extension GPUWorkspace {
         }
     }
 
+    /// The optimizer steps the next run takes: the length as entered, or for a model that counts epochs the
+    /// passes over each of `items` images and clips turned into steps.
+    func optimizerSteps(items: Int) -> Int {
+        effectiveModelRow.recipe.lengthUnit.optimizerSteps(
+            length: steps, items: items, batchSize: batchSize, accumulation: accumulation
+        )
+    }
+
     func trainingParams(
-        dataset: String, inputFacts: (profile: String, triggers: String, video: Bool)
+        dataset: String, inputFacts: (profile: String, triggers: String, video: Bool), items: Int? = nil
     ) -> JSONObject {
         let words = inputFacts.triggers.split(whereSeparator: { $0 == "," || $0.isWhitespace }).map(String.init)
-        let saveInterval = isH3Training ? checkpointEvery : min(250, steps)
+        let row = effectiveModelRow
+        let totalSteps = optimizerSteps(items: items ?? datasetItemCount)
+        let saveInterval = row.recipe.checkpoints.editable
+            ? checkpointEvery : min(row.recipe.checkpoints.every, totalSteps)
         var params: JSONObject = [
             "run_id": .string(dataset),
             "dataset": .object(["path": .string("/workspace/datasets/\(dataset)")]),
             "triggers": .array(words.map(JSONValue.string)), "profile": .string(inputFacts.profile),
-            "base_model": .string(baseModel), "steps": .int(steps), "rank": .int(rank),
+            "base_model": .string(baseModel), "steps": .int(totalSteps), "rank": .int(rank),
             "alpha": .int(alpha), "batch_size": .int(batchSize), "gradient_accumulation": .int(accumulation),
             "learning_rate": .double(learningRate),
             "resolution": trainingResolutions.count > 1
@@ -265,23 +280,19 @@ extension GPUWorkspace {
             params["sample_prompts"] = .array([.string(words.joined(separator: " "))])
         }
         if trainer == "ltx" {
-            var extra = Self.ltxTrainingExtra
-            if inputFacts.video {
-                extra["preprocess"] = .object([
-                    "buckets_from_media": .bool(true),
-                    "args": Self.ltxTrainingExtra["preprocess"]?.objectValue?["args"] ?? .array([]),
-                ])
-            }
-            params["extra"] = .object(extra)
+            let extra = row.runExtra ?? [:]
+            params["extra"] = .object(row.hooks.runExtra?.apply(to: extra, containsVideo: inputFacts.video) ?? extra)
         } else {
             var extra = nativeRecipe?.settings
                 ?? runHistory.first(where: { $0.runID == repeatSourceRunID })?.params["extra"]?.objectValue ?? [:]
-            if isH3Training {
+            if row.recipe.checkpoints.editable {
                 var save = extra["save"]?.objectValue ?? [:]
                 save["save_every"] = .int(saveInterval)
                 save["max_step_saves_to_keep"] = .int(checkpointRetention)
                 save["dtype"] = .string(checkpointPrecision)
                 extra["save"] = .object(save)
+            }
+            if nativeRecipeHook != nil {
                 var train = extra["train"]?.objectValue ?? [:]
                 train["do_guidance_loss"] = .bool(guidanceLoss)
                 train["guidance_loss_target"] = guidanceTarget

@@ -87,6 +87,14 @@ actor H3TestAgent: PodAgent {
 
 @Suite("H3 native training and initialization")
 struct H3TrainingTests {
+    /// The table row the H3 recipes below are imported for.
+    static let h3Row: ModelRow = {
+        guard let row = ModelTable.shared.nativeRecipeRow(.minimaxH3) else {
+            fatalError("The bundled model table has no row with the minimax_h3 native_recipe hook")
+        }
+        return row
+    }()
+
     static let recipe = """
     job: extension
     config:
@@ -164,7 +172,7 @@ struct H3TrainingTests {
         let workspace = Self.connected(preferences, folder: project.directory, agent: agent)
         let recipe = project.directory.appendingPathComponent("input.yaml")
         try Data(Self.recipe.utf8).write(to: recipe)
-        try workspace.importTrainingRecipe(from: recipe)
+        try workspace.importTrainingRecipe(from: recipe, row: Self.h3Row)
         #expect(workspace.steps == 200)
         #expect(workspace.checkpointEvery == 300 && workspace.checkpointRetention == 40)
         #expect(workspace.checkpointPrecision == "float32" && workspace.guidanceLoss)
@@ -238,12 +246,12 @@ struct H3TrainingTests {
     @Test(arguments: ["unknown-video-vae.safetensors", "minimax_h3_image_training_adapter_other.safetensors"])
     func unknownImportedModelAssetsRefuseWithoutSilentReplacement(file: String) {
         let text = Self.recipe.replacingOccurrences(of: "minimax_h3_video_vae_fp16.safetensors", with: file)
-        #expect(throws: (any Error).self) { try NativeTrainingRecipe.load(Data(text.utf8)) }
+        #expect(throws: (any Error).self) { try NativeTrainingRecipe.load(Data(text.utf8), row: Self.h3Row) }
     }
 
     @MainActor @Test func explicitResolutionEditReplacesImportedMultiresolution() throws {
         let workspace = GPUWorkspace(demoMode: true)
-        let recipe = try NativeTrainingRecipe.load(Data(Self.recipe.utf8))
+        let recipe = try NativeTrainingRecipe.load(Data(Self.recipe.utf8), row: Self.h3Row)
         workspace.nativeRecipe = recipe
         workspace.resolution = recipe.resolution
         workspace.trainingResolutions = recipe.resolutions
@@ -312,7 +320,7 @@ struct H3TrainingTests {
         session.updateTrainingProjectDefaults()
         #expect(session.gpu.baseModel == "custom/edited")
         #expect(session.gpu.trainer == "aitoolkit")
-        session.gpu.nativeRecipe = try NativeTrainingRecipe.load(Data(Self.recipe.utf8))
+        session.gpu.nativeRecipe = try NativeTrainingRecipe.load(Data(Self.recipe.utf8), row: Self.h3Row)
         session.gpu.baseModel = GPUWorkspace.h3BaseModel
         session.updateTrainingProjectDefaults()
         #expect(session.gpu.isH3Training && session.gpu.hasNativeRecipe)
@@ -418,13 +426,13 @@ struct H3TrainingTests {
         }
         let text = Self.recipe.replacingOccurrences(of: "use_training_adapter: false", with: replacement)
         #expect(throws: StudioError.self) {
-            _ = try NativeTrainingRecipe.load(Data(text.utf8))
+            _ = try NativeTrainingRecipe.load(Data(text.utf8), row: Self.h3Row)
         }
     }
 
     @Test func nativeRecipeWithoutAnAdapterKeepsTrainingWithoutOne() throws {
         let text = Self.recipe.replacingOccurrences(of: "use_training_adapter: false", with: "")
-        let recipe = try NativeTrainingRecipe.load(Data(text.utf8))
+        let recipe = try NativeTrainingRecipe.load(Data(text.utf8), row: Self.h3Row)
         #expect(recipe.settings["model"]?.objectValue?["use_training_adapter"] == .bool(false))
         #expect(recipe.guidanceLoss)
         let named = text.replacingOccurrences(of: "do_guidance_loss: true", with: "do_guidance_loss: false")
@@ -432,7 +440,7 @@ struct H3TrainingTests {
                 of: "low_vram: false",
                 with: "low_vram: false\n        assistant_lora_path: /old/minimax_h3_image_training_adapter.safetensors"
             )
-        let withAdapter = try NativeTrainingRecipe.load(Data(named.utf8))
+        let withAdapter = try NativeTrainingRecipe.load(Data(named.utf8), row: Self.h3Row)
         #expect(withAdapter.settings["model"]?.objectValue?["use_training_adapter"] == .bool(true))
         #expect(!withAdapter.guidanceLoss)
     }

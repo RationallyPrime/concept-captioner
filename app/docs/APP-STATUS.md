@@ -37,6 +37,24 @@ review accepted project/provider/UI changes; the integration review closed start
 and output-custody defects. Visual/native checks and delivery receipts are recorded in the repair
 record. Developer ID signing remains unavailable on this Mac.
 
+## Model table
+
+The supported training models are rows of `Sources/ConceptStudio/Resources/Training/model-table.json`
+(format and how to add a model: [model-table.md](../../docs/model-table.md); the pod images copy the
+same file). The app loads it once through `ModelTable` (`GPU/ModelTable.swift`, `GPU/ModelRow.swift`)
+and the picker, defaults, GPU floor, checkpoint and resolution controls, run.json, saved-run
+capabilities, generation frame rules, video formats and caption titles all read the row for the
+selected trainer and model. Where a model genuinely differs the row names a hook (`ModelHooks`): the
+H3 native recipe, its guidance rules and the LTX video-bucket change to the trainer settings. No code
+outside a hook tests a model's name; the trainer (`aitoolkit`, `ltx`) is still branched on.
+
+The table has five rows: FLUX.1-dev, LTX-2, MiniMax H3, Z-Image and Qwen-Image-2.1. Z-Image and
+Qwen-Image-2.1 count their training length in epochs (the app sends steps) and show their licence
+notice and first-download size under the picker. Z-Image compares through the
+`aitoolkit_arch_image` generator hook, and its picker note says a Z-Image LoRA works on Z-Image-Turbo
+at about twice the strength. Qwen-Image-2.1 is offered only on GPUs with at least 80 GB and has no
+comparison generator.
+
 ## Implemented
 
 - **Onboarding:** Images contains the owner's full explanation of diffusion
