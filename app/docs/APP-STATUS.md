@@ -48,7 +48,10 @@ selected trainer and model. Where a model genuinely differs the row names a hook
 H3 native recipe, its guidance rules and the LTX video-bucket change to the trainer settings. No code
 outside a hook tests a model's name; the trainer (`aitoolkit`, `ltx`) is still branched on.
 
-The table has three rows: FLUX.1-dev, LTX-2 and MiniMax H3.
+The table has four rows: FLUX.1-dev, LTX-2, MiniMax H3 and Z-Image. Z-Image counts its training
+length in epochs (the app sends steps) and shows its licence notice and first-download size under
+the picker. It compares through the `aitoolkit_arch_image` generator hook, and its picker note says
+a Z-Image LoRA works on Z-Image-Turbo at about twice the strength.
 
 ## Implemented
 
