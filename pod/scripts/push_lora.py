@@ -7,9 +7,10 @@ Usage:
 
 What goes up, as ``upload_folder`` allow-patterns relative to DIR:
 
-- the newest ``*.safetensors`` under DIR (by mtime; ``preprocessed/`` and dot-folders are not
-  searched), or every one of them with ``--all-checkpoints``. None found: exit 1 and nothing is
-  created on the Hub;
+- the newest ``*.safetensors`` under DIR (by mtime; ``preprocessed/``, ``regularization/`` and
+  dot-folders are not searched: they hold the trainers' latent and feature caches, which are
+  ``.safetensors`` files too), or every one of them with ``--all-checkpoints``. None found: exit 1
+  and nothing is created on the Hub;
 - ``run.json`` and ``config.yaml`` when present;
 - every file under a ``samples`` folder (``DIR/samples`` or ``DIR/output/*/samples``) unless
   ``--no-samples``;
@@ -38,7 +39,7 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-SKIPPED_DIRS = frozenset({"preprocessed"})
+SKIPPED_DIRS = frozenset({"preprocessed", "regularization"})
 SIDE_FILES = ("run.json", "config.yaml")
 SAMPLE_PATTERNS = ("samples/*", "*/samples/*")
 CARD_NAME = "README.md"

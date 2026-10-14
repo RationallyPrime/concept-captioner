@@ -10,16 +10,18 @@ LTX-2 Hub revision) from `../agent/src/podagent/ltx_rules.py` at import, by path
 The image recreates that layout under `/opt/pod`, and the build's `--help` check fails if the
 copy is missing. H3 helpers read the single native/pod recipe field-and-asset JSON
 resource, copied beside scripts; they also remain stdlib-only at import. `model_table.py`
-reads `model-table.json` beside it in the same way; see "The model table" below.
+reads the model table (`/opt/pod/scripts/model-table.json` in an image, the app's file in a
+checkout); see "The model table" below.
 
 | script | runs in | purpose |
 | --- | --- | --- |
 | `pull_dataset.py` | `/opt/venvs/agent` | Hub dataset → `/workspace/datasets/<name>`: images, `<stem>.txt` captions, `metadata.jsonl`, `manifest.json`, `job.yaml` |
-| `push_lora.py` | `/opt/venvs/agent` | `/workspace/runs/<id>` → model repo: newest `.safetensors`, samples, `run.json`, `config.yaml`, generated model card |
+| `push_lora.py` | `/opt/venvs/agent` | `/workspace/runs/<id>` → model repo: newest `.safetensors` (not the trainers' caches), samples, `run.json`, `config.yaml`, generated model card |
 | `model_table.py` | stdlib | the model table (`model-table.json`): which models exist and what each needs; lookups and hook registry |
 | `launch_aitoolkit.py` | `/opt/venvs/aitoolkit` | `run.json` → ai-toolkit YAML → `run.py` for the AI Toolkit models in the table; effective native snapshot, log tee and loss scraper |
 | `h3_recipe.py`, `h3_dataset.py` | stdlib admission, then AI Toolkit | canonical H3 quality/initializer contracts, fixed pinned BF16 asset download, exact approved clip grouping |
 | `generate_results.py` | selected trainer venv | actual matched base/LoRA inference for each model whose table row names a generator; incremental manifest and private checkpoint cleanup |
+| `regularization.py` | `/opt/venvs/aitoolkit` (the `draw-regularization` service runs `draw`; the launcher loads the module) | the regularisation set of an AI Toolkit run: class-only prompts from the subject captions, the drawn pictures in the shared cache `/workspace/regsets`, the run's copy with the app's captions, or a provided folder checked for triggers |
 | `launch_ltx.py` | `/opt/venvs/ltx` | `run.json` → preprocess + LTX-2 trainer config → train; same tee and scraper (POD-SPEC §4.3) |
 
 `docs/POD-STATUS.md` says which of these are implemented. The agent builds each argv from the
@@ -105,6 +107,27 @@ Files keep their run-relative paths in the repo (`output/<name>/<name>.safetenso
 lists them. On success the repo URL is printed last and `<run>/push.json` records `repo_id`,
 `url`, `commit`, `run_id`, `files`, `pushed_at`. Token from `HF_TOKEN`.
 
+## `regularization.py` and REPA (POD-SPEC §4.3, §7.5)
+
+```
+regularization.py draw --run DIR
+```
+
+A generated set is made in two steps. `draw` is the `draw-regularization` service: it plans the
+prompts, sizes and keys (the log says `regularisation: N planned, C cached, G to generate`), draws
+what `/workspace/regsets/<model-key>/` lacks through `generate_results.render_base`, and copies the
+pictures to `<run>/output/<key>.png` for the app, which captions them and starts the run with
+`regularization.captions`. When run.json has a `regularization` block, `launch_aitoolkit.py` plans
+again and `materialize`s each captioned picture into `<run>/regularization/` (+
+`<run>/regularization.json`) before the trainer starts; a `folder` set is `check_folder` instead.
+`--dry-run` plans and checks only. Exit codes: 0 done, 2 bad input (a trigger in a caption, no
+caption, no prompt derivable, an unsupported model), 1 drawing or copying failed.
+
+The launcher maps run.json's `regularization.weight` to `train.reg_weight`, appends the second
+dataset (`is_reg: true`, a copy of the first) and writes run.json's `repa` object as ai-toolkit's
+`process.repa`. REPA itself is in the patched trainer image (`pod/images/patches/ai-toolkit/`); the
+launcher only logs where the encoder weights come from.
+
 ## Launch wrappers: exit codes (POD-SPEC §4.3)
 
 `launch_aitoolkit.py --config <run>/run.json` and `launch_ltx.py --config <run>/run.json`
@@ -164,6 +187,9 @@ working. What each script reads:
   `minimax_h3`), else
   `Generation supports <display names>`. Frame count and rate are checked against the row's
   `video` law and fixed cadence before any model loads.
+- `regularization.py` and `launch_aitoolkit.py`: a row's `regularization` and `repa` fields only
+  admit run.json's blocks of the same names; the values a run uses are run.json's, copied by the app
+  from the row. `generate_results.render_base` draws a set with the exact row's model settings.
 - `push_lora.py`: the model card adds the row's licence only when `license.show_notice`, and the row's
   `usage_note` (when it has one) to its `## Use` section.
 

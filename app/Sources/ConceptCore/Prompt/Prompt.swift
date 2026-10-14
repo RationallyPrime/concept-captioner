@@ -40,8 +40,22 @@ public enum Prompt {
     may be quoted verbatim. Otherwise reject with short, specific notes the captioner can act on.
     """
 
+    /// The task text for regularization images: the same response, with no trigger to apply.
+    public static let regularizationTask = """
+    RESPONSE
+    Return one JSON object. `caption` is the training text only, in the profile's format, with
+    line breaks as JSON escapes. Keep uncertainty out of it. This job has no trigger: name each
+    subject by its class noun as the regularization instructions say, and describe the rest of the
+    picture ordinarily. If the picture is blank, damaged or cannot be described, set `usable`
+    false, leave `caption` empty and explain in `note`. Do not guess. Do not quote readable text
+    (labels, logos, signs) verbatim; describe it generically.
+    """
+
     /// The heading that introduces the job view; the runner's tests parse the line after it.
     static let jobConfigurationHeading = "ACTIVE JOB CONFIGURATION"
+
+    /// The skill's guidance for regularization images (`references/regularization.md`).
+    static let regularizationReference = "regularization.md"
 
     /// skill instructions, profile, policy overrides, ACTIVE JOB CONFIGURATION, captioner task.
     public static func captionerInstructions(
@@ -53,6 +67,24 @@ public enum Prompt {
     ) throws -> String {
         try join(sections(skill: skill, profileText: profileText, job: job, mapping: mapping, isVideo: isVideo)
             + [captionerTask])
+    }
+
+    /// For regularization images: skill instructions, profile, the skill's regularization guidance,
+    /// a job view that holds the class nouns and no trigger, and the regularization task. A skill
+    /// without the guidance (a copy made before it existed) uses the bundled skill's.
+    public static func regularizationInstructions(
+        skill: Skill, profile: String, profileText: String, classNouns: [String]
+    ) throws -> String {
+        let guidance = try (try? skill.reference(regularizationReference))
+            ?? Skills.load().reference(regularizationReference)
+        let view = JSONValue.object([
+            "training": .object(["profile": .string(profile), "trigger_handling": .string("none")]),
+            "regularization": .object(["class_nouns": .array(classNouns.map(JSONValue.string))]),
+            "inputs": .object(["evidence": .string("attached_target_image")]),
+            "output": .object(["caption_language": .string("English"), "delivery": .string("json_caption_field")]),
+        ])
+        let configuration = "\(jobConfigurationHeading)\n" + view.pythonDumps()
+        return try join([skill.instructions(), profileText, guidance, configuration, regularizationTask])
     }
 
     /// Same sections, ending with the critic task.

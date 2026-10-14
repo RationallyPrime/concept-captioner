@@ -123,6 +123,33 @@ struct ModelRow: Sendable, Identifiable, Equatable {
         let showNotice: Bool
     }
 
+    /// Regularisation images the base model draws before training and the trainer looks at beside the subject's
+    /// own (`regularization` in docs/model-table.md). A row without the field does not offer them.
+    struct Regularization: Sendable, Equatable {
+        let defaultOn: Bool
+        let images: Int
+        let weight: Double
+        let generationSteps: Int
+        let guidanceScale: Double
+        /// Estimated generation time for one image, for the time shown before the images are drawn.
+        let secondsPerImage: Double
+        let note: String
+    }
+
+    /// Representation alignment (`repa` in docs/model-table.md): an auxiliary loss that ties a transformer block's
+    /// image tokens to a frozen vision encoder's features. The six AI Toolkit keys go to the pod as they are.
+    struct Repa: Sendable, Equatable {
+        let defaultOn: Bool
+        let encoder: String
+        let encoderDownloadGB: Double
+        let blockIndex: Int
+        let weight: Double
+        let projector: String
+        let projectorDim: Int
+        let encoderResolution: Int
+        let note: String
+    }
+
     let id: String
     let displayName: String
     let shortName: String
@@ -145,6 +172,8 @@ struct ModelRow: Sendable, Identifiable, Equatable {
     let usageNote: String?
     let hooks: ModelHooks.Assignment
     let notes: String
+    let regularization: Regularization?
+    let repa: Repa?
 
     /// The model picker's label: the name and whether the model trains on video too.
     var pickerTitle: String {
@@ -291,6 +320,8 @@ extension ModelRow {
         usageNote = try row.optionalNote("usage_note")
         hooks = try ModelHooks.Assignment(row.child("hooks"))
         notes = try row.string("notes")
+        regularization = try row.childIfPresent("regularization").map(Regularization.init)
+        repa = try row.childIfPresent("repa").map(Repa.init)
     }
 }
 
@@ -414,5 +445,59 @@ extension ModelRow.License {
         url = try object.string("url")
         notice = try object.string("notice")
         showNotice = try object.bool("show_notice")
+    }
+}
+
+extension ModelRow.Regularization {
+    init(_ object: TableObject) throws {
+        defaultOn = try object.bool("default_on")
+        images = try object.int("images")
+        weight = try object.double("weight")
+        let generation = try object.child("generation")
+        generationSteps = try generation.int("steps")
+        guidanceScale = try generation.double("guidance_scale")
+        secondsPerImage = try generation.double("seconds_per_image")
+        note = try object.string("note")
+    }
+}
+
+extension ModelRow.Repa {
+    init(_ object: TableObject) throws {
+        defaultOn = try object.bool("default_on")
+        encoder = try object.string("encoder")
+        encoderDownloadGB = try object.double("encoder_download_gb")
+        blockIndex = try object.int("block_index")
+        weight = try object.double("weight")
+        projector = try object.string("projector")
+        projectorDim = try object.int("projector_dim")
+        encoderResolution = try object.int("encoder_resolution")
+        note = try object.string("note")
+    }
+}
+
+// MARK: - The two training-aid fields
+
+extension ModelRow {
+    /// The architectures the pinned trainer image can align (docs/model-table.md, `repa`); updated together with the
+    /// image's patch series.
+    static let repaArchitectures = ["qwen_image_2", "zimage"]
+
+    /// Checks that `regularization` and `repa` sit on a row that can carry them; `path` names the row in a message.
+    func validateTrainingAids(path: String) throws {
+        if regularization != nil {
+            let field = "\(path).regularization"
+            guard trainer == "aitoolkit" else { throw ModelTableError("\(field) is only for AI Toolkit rows") }
+            guard hooks.generator != nil, hooks.trainerConfig == nil else {
+                throw ModelTableError("\(field) needs a generator hook and no trainer_config hook")
+            }
+        }
+        if repa != nil {
+            let field = "\(path).repa"
+            guard trainer == "aitoolkit" else { throw ModelTableError("\(field) is only for AI Toolkit rows") }
+            guard let arch = architecture.arch, Self.repaArchitectures.contains(arch) else {
+                throw ModelTableError("\(field) needs an architecture the trainer image aligns: "
+                    + Self.repaArchitectures.joined(separator: ", "))
+            }
+        }
     }
 }

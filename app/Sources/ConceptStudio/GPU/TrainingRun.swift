@@ -294,6 +294,7 @@ extension GPUWorkspace {
         batchSize = run.params["batch_size"]?.intValue ?? 1
         accumulation = run.params["gradient_accumulation"]?.intValue ?? 1
         steps = lengthToRepeat(run, row: row)
+        restoreTrainingAids(from: run)
         nativeRecipe = nil
         nativeRecipeOriginal = nil
         initialCheckpoint = nil
@@ -329,11 +330,14 @@ extension GPUWorkspace {
 
     /// A saved run holds optimizer steps. A model that counts epochs shows them as passes over the items
     /// that run trained on (recorded since the model table; older runs fall back to the current items).
+    /// A run with regularisation images spent every other step on them, so only half its steps were passes over the
+    /// person's own images.
     private func lengthToRepeat(_ run: TrainingRun, row: ModelRow) -> Int {
         let items = run.itemCount ?? datasetItemCount
         guard row.recipe.lengthUnit == .epochs, items > 0 else { return run.targetSteps }
         let perStep = Double(max(1, batchSize * accumulation))
-        return max(1, Int((Double(run.targetSteps) * perStep / Double(items)).rounded()))
+        let ownSteps = run.params["regularization"]?.objectValue == nil ? run.targetSteps : run.targetSteps / 2
+        return max(1, Int((Double(ownSteps) * perStep / Double(items)).rounded()))
     }
 
     func resumeRun(

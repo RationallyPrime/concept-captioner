@@ -73,6 +73,20 @@ final class GPUWorkspace {
         set { trainingResolutions = [newValue] }
     }
 
+    /// Regularisation images drawn from the base model and trained beside the person's own (the row's
+    /// `regularization` field). Only meaningful while the selected model offers it.
+    var regularizationOn = false
+    var regularizationImages: Int
+    var regularizationWeight: Double
+    /// The offer the count and strength last followed, to tell a value the person edited from one still at a default.
+    @ObservationIgnored var regularizationAligned: ModelRow.Regularization?
+    /// Representation alignment (the row's `repa` field); off unless a row turns it on by default.
+    var repaOn = false
+    /// The open project's concepts as trigger → class noun. Regularisation images show the class nouns.
+    var conceptClassNouns: [String: String] = [:]
+    /// Set while the pod draws regularisation images, before the trainer reports its first measurement.
+    var regularizationProgress: RegularizationProgress?
+
     /// Sample images during training. Off by default: sample generation is unverified (POD-SPEC 4.2).
     var samplesEnabled = false
     /// Model repos created for results are private unless the user turns this off.
@@ -169,6 +183,10 @@ final class GPUWorkspace {
         checkpointRetention = start.recipe.checkpoints.keep
         checkpointPrecision = modelTable.checkpointPrecision(for: start)
         trainingResolutions = start.resolution.defaults
+        let reference = modelTable.models.lazy.compactMap(\.regularization).first
+        regularizationImages = reference?.images ?? 1
+        regularizationWeight = reference?.weight ?? 1
+        regularizationAligned = reference
         profile = start.captions.imageProfile
         self.transport = transport
         self.preferences = preferences
@@ -280,6 +298,7 @@ final class GPUWorkspace {
             self.runID = ""
             self.trainingState = "Not started"
             self.points = []
+            self.regularizationProgress = nil
             self.logs = ""
             self.elapsedCost = 0
             self.saved = SavedPod(
@@ -438,7 +457,10 @@ extension GPUWorkspace {
         }
     }
 
-    func waitForService(_ name: String, allowStopped: Bool = false) async throws {
+    /// Waits until the service has exited. `whileWaiting` runs after each check that finds it still running.
+    func waitForService(
+        _ name: String, allowStopped: Bool = false, whileWaiting: (() async -> Void)? = nil
+    ) async throws {
         guard let agent else { return }
         while true {
             try Task.checkCancellation()
@@ -452,6 +474,7 @@ extension GPUWorkspace {
                 }
                 return
             }
+            await whileWaiting?()
             try await Task.sleep(for: .seconds(demoMode ? 0.1 : 2))
         }
     }

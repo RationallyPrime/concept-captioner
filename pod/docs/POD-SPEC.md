@@ -218,8 +218,9 @@ enforces no-double-booking, so a user who wants all N GPUs for a train-only run 
 
 ### 2.6 Services
 
-The current catalog (section 3) has nine names: `vllm`, `tensorboard`, `trainer-aitoolkit`,
-`trainer-ltx`, `pull-dataset`, `push-lora`, `generate-aitoolkit`, `generate-ltx`, `cleanup-datasets`.
+The current catalog (section 3) has ten names: `vllm`, `tensorboard`, `trainer-aitoolkit`,
+`trainer-ltx`, `pull-dataset`, `draw-regularization`, `push-lora`, `generate-aitoolkit`,
+`generate-ltx`, `cleanup-datasets`.
 The upload route is not a GPU service. One instance per name at a time; the name is the
 instance key.
 
@@ -453,12 +454,15 @@ Bearer-authenticated, read-only usage of the filesystem mounted at `PODAGENT_WOR
 
 ```json
 {"total_bytes": 214748364800, "used_bytes": 68719476736, "free_bytes": 146028888064,
- "datasets_bytes": 10737418240, "reclaimable_dataset_bytes": 2147483648}
+ "datasets_bytes": 10737418240, "reclaimable_dataset_bytes": 2147483648,
+ "regularization_cache_bytes": 62914560}
 ```
 
 All values are integer bytes. Filesystem totals include other data on this volume;
 `datasets_bytes` counts confined dataset files, not model caches or checkpoints.
 `reclaimable_dataset_bytes` uses exactly the cleanup eligibility/retention policy in 3.7.
+`regularization_cache_bytes` counts `/workspace/regsets`, the reuse cache of generated
+regularisation images (4.3); cleanup never removes it, and symlinks in it are not followed.
 The app labels usage as storage, separately from its estimated GPU spend, and offers the
 explicit `cleanup-datasets` service action. This read never removes anything.
 
@@ -722,6 +726,29 @@ Resume of a pruned Hub dataset uses the source run's saved `dataset-manifest.jso
 re-pulled into the saved dataset path before the trainer starts. Missing pinned source facts
 cause a clear refusal, never a pull of current `main`. Local mode recovery is defined in 3.4.
 
+### 3.8 `draw-regularization` — GPUs 1
+
+Draws the pictures of a generated regularisation set (4.3) before the run, so the app can caption
+them. A fixed service like `generate-aitoolkit`: it exposes no port, takes one GPU, runs in the
+`aitoolkit` interpreter and writes `trainer.log` in its own run directory. Typed
+`DrawRegularizationParams` (extra fields forbidden):
+
+| field | meaning |
+| --- | --- |
+| `run_id` | a new run ID for the drawing's own directory, never the training run's; an existing directory is refused |
+| `dataset` | `{path, caption_ext}` of the subject dataset, under `datasets/` like a trainer's |
+| `base_model` | a Hub id or a path under `models/`; the model table's exact AI Toolkit row must offer `regularization` and have no `trainer_config` hook (the same two answers as 4.1) |
+| `resolution` | int or list; the pictures' area follows its largest value |
+| `regularization` | the `generate` block of 4.1 (`images`, `weight`, `class_nouns`, `generation`) without `captions` |
+
+argv is `[/opt/venvs/aitoolkit/bin/python, /opt/pod/scripts/regularization.py, draw, --run,
+/workspace/runs/<id>]`. `prepare()` creates the run directory and saves the params as
+`regularization-draw.json` (no `run.json`, so dataset retention never treats the directory as a
+training run). The script plans the prompts, draws what `/workspace/regsets` lacks, and hard-links
+the planned pictures (a copy where linking fails) to `output/<image key>.png`, where the file routes of 2.10 serve them. Its log
+prints `[regularization] ready k/N` after each picture, which the app shows as progress. Exit 0 =
+the pictures are in `output/`; 2 = bad input (nothing drawn), 1 = the drawing failed.
+
 ## 4. Run config and the launch wrappers
 
 ### 4.1 `RunConfig` (JSON; the body of a trainer start's `params`)
@@ -768,11 +795,36 @@ cause a clear refusal, never a pull of current `main`. Local mode recovery is de
 | `seed` | no | 42 | |
 | `resume` | no | false | true opts into saved settings/checkpoint validation before service start; it keeps the same run ID and dataset |
 | `initialization` | no | null | AI Toolkit H3 new-run preload: `{name,lora_sha256,recipe_sha256}` identifies the two fixed staged artifacts; never a client filesystem path |
+| `regularization` | no | null | AI Toolkit only (the LTX trainer refuses it). A regularisation (prior-preservation) set trained beside the subject: `{"source": "generate", "images", "weight", "class_nouns", "generation": {"steps", "guidance_scale", "seed"}, "captions"}` (drawn on the pod by `draw-regularization` from the subject captions with each trigger replaced by its class noun; `captions` maps each drawn picture's key to the caption the app's captioner wrote for it) or `{"source": "folder", "path", "weight"}` (images and sidecar captions already under `datasets/`). Explicit values, copied by the app from the model table. Details below |
+| `repa` | no | null | AI Toolkit only. Representation alignment: `{"encoder", "block_index", "weight", "projector", "projector_dim", "encoder_resolution"}`, all six explicit, written one to one as ai-toolkit's `process.repa` block. Details below |
 | `save_every` / `sample_every` | no | 250 / 250 | 0 disables samples |
 | `sample_prompts` | no | `[]` | each should contain a trigger; the wrapper does not enforce it |
 | `hub` | no | null | `repo_id`, `private` (true), `push_on_finish` (false → push is a separate `push-lora` start) |
 | `hf_token` | no | null | secret; env only |
 | `extra` | no | `{}` | deep-merged into the native config last; the escape hatch for trainer options not modelled here. It cannot move the trainer out of the workspace: output/data paths (`training_folder`, `log_dir`, `folder_path`, `output_dir`, `preprocessed_data_root`) must resolve under `/workspace`. Model references follow the rule below. The agent refuses invalid values (`422`) and the wrapper re-checks the merged config |
+
+**`regularization` and `repa`.** Both absent or `null` mean off, so every saved run and Resume
+is unchanged; the agent leaves an unused key out of the `run.json` it writes. Both are in the
+Resume-immutable list (Repeat may change them). Their values (counts, weights, generation
+settings, block, projector, resolution) are the user's and are not range-checked. The agent checks
+the shape pydantic needs (`extra="forbid"`, a union on `source`, numbers typed as numbers) and, in
+a second step, what the model and the layout need:
+
+- `class_nouns` names **every** entry of `triggers` (after trimming) with non-blank text and no
+  other trigger; an `encoder` is a Hub id or a path under the workspace;
+- the model table's exact row for `base_model` must offer the field, else `Generated
+  regularisation images need a supported model. Provide your own images instead.` (a `generate`
+  set) or `Representation alignment is not available for this model.` (`repa`); a row whose
+  `trainer_config` hook rebuilds the datasets (H3) takes no regularisation of either kind
+  (`Regularisation images are not available for this model.`);
+- a `folder` set is any model's, if its `path` resolves under `<workspace>/datasets`, is an
+  existing directory and neither is, holds nor sits inside `dataset.path` (the trainer scans
+  folders recursively, so either would mix the sets); an `encoder` path resolves under the
+  workspace;
+- `trainer-ltx` refuses both: `regularization/repa are not available on the LTX trainer`.
+
+`launch_aitoolkit.py` applies the same rules to its own copy of run.json (the launcher does not
+import `podagent`), so a run started by hand through `podctl` or the script gets the same answers.
 
 **Model references in `extra`: a Hub id where the trainer itself downloads, a workspace path
 where it opens files.** AI Toolkit's `name_or_path` (and `model_source`) take a Hub id or an
@@ -844,9 +896,61 @@ before exiting, so the supervisor never frees GPUs a trainer still holds.
 | `steps`, `learning_rate`, `batch_size`, `gradient_accumulation` | `train.{steps, lr, batch_size, gradient_accumulation_steps}` + `dtype`, `optimizer`, `gradient_checkpointing` from the model's row (FLUX `bf16`, `adamw8bit`, `true`), `noise_scheduler: flowmatch`, `train_text_encoder: false` |
 | `base_model` | `model.name_or_path` (+ the row's `arch`, extra model keys and `quantize` / `quantize_te`; FLUX `arch: flux, is_flux: true, quantize: true`; H3 uses the pinned `minimax_h3` BF16 recipe below) |
 | `sample_every`, `sample_prompts`, `seed` | `sample.{sample_every, prompts, seed, width/height = max(resolution), sampler: flowmatch, guidance_scale: 4, sample_steps: 20}` |
+| `regularization.weight` | `train.reg_weight`, before `extra` merges |
+| `regularization` (a set) | after `extra` merged: `datasets[1] = {**datasets[0], folder_path: <run>/regularization, is_reg: true}`; `extra` defining an `is_reg` dataset is refused |
+| `repa` | `process.repa`, the object one to one, before `extra` merges (`extra.repa.enabled: false` turns it off) |
 | `extra` | deep-merged last |
 
 Command: `/opt/venvs/aitoolkit/bin/python /opt/ai-toolkit/run.py <run>/config.yaml`.
+
+**Regularisation sets and REPA (`regularization.py`, `generate_results.render_base`).** A generated
+set is made in two steps with the app between them, and the launcher only copies the result:
+
+1. `draw-regularization` (3.8) runs before the run. `plan`: the prompts come from the subject
+   captions on the pod (`<dataset>/<stem>.<caption_ext>`, images only, sorted by file name): each
+   exact-token trigger followed by `, ` and an article loses `T, `, each other one becomes `the
+   <class noun>`, a changed caption starts with a capital, and a prompt that would still hold a
+   trigger (or contain `--`, which ai-toolkit reads as an option) is skipped with one log line.
+   `images` are spread over the distinct prompts (floor shares and the remainder to the first
+   prompts, or evenly spaced prompts when there are fewer images than prompts); image *k* of a
+   prompt uses seed `generation.seed + k`; each is drawn at its source image's aspect in multiples
+   of 64 with an area of about `max(resolution)²`. `generate`: the base model loads once through
+   `generate_results.render_base` (the model class ai-toolkit registers for the row's `arch`, no
+   LoRA) and draws what is not cached, in chunks of 8. Each finished image goes to
+   `/workspace/regsets/<model-key>/<image-key>.png` and `.txt` (the prompt) under temporary names,
+   renamed `.png` first; the model key is the hash of the base model, the Hub commits its weights
+   come from (the row's pinned revision, or for an unpinned row the current commit of the base
+   model and of each `source.weight_repos` repo, read at planning; planning fails when the Hub
+   cannot be read), the AI Toolkit pin and the row's `architecture`, the image key of the prompt, seed, size, steps, guidance and
+   sampler. A stopped or crashed drawing keeps every finished image and the next start draws only
+   the missing ones; the cache is never removed by `cleanup-datasets`. The planned pictures are
+   hard-linked to the drawing's `output/<image key>.png`, so a drawing's run adds no second copy.
+2. The app downloads the pictures and has the project's own captioner (the provider, model and
+   endpoint the project captions with) describe each one. The captioner is given the skill, the
+   project's profile, the skill's `references/regularization.md` and the class nouns, and never a
+   trigger. The run then starts with `regularization.captions`, image key to caption; a picture
+   the captioner found unusable has none.
+3. The launcher plans again (the same keys) and `materialize` copies each captioned picture to
+   `<run>/regularization/` (ai-toolkit writes its latent cache into the folder it trains on, so it
+   must be the run's own copy) with its caption in the dataset's caption extension, and
+   `<run>/regularization.json` records the `regularization` block, the model key and each image's
+   prompt, seed, size and key. A copy that already exists for the same block is used as it is, so
+   a restart or Resume does not copy again. `--dry-run` stops after the plan.
+
+A `folder` set skips 1–2: its captions are checked for triggers (`Regularisation caption <file>
+contains the trigger <T>`), every image needs a non-blank caption, and the folder is copied. A
+caption of a generated set is checked the same way (`Regularisation caption of image <key>
+contains the trigger <T>`), and a set in which no image has a caption is refused. Exit codes: 2
+for bad input, 1 when the copy failed; the trainer does not start in either.
+
+`repa` needs no preparation. The launcher's log says where the encoder weights come from
+(`REPA encoder facebook/dinov2-giant: downloaded on first use into the model cache`): the patched
+trainer (`pod/images/patches/ai-toolkit/`) downloads them with `from_pretrained` into `HF_HOME`
+(`/workspace/models/hf-cache`, set by the entrypoint) on its first caching pass, so they persist on
+the volume and `GET /storage` counts them with the model cache. The trainer writes
+`repa_projector.pt` beside `optimizer.pt` in `output/<run>/` and `_repa_cache/` next to the latent
+cache; `push_lora.py` never uploads either (it skips `regularization/` and takes `.safetensors`
+only from the run's own outputs).
 
 
 **H3 quality and exact targets.** `Comfy-Org/MiniMax-H3` selects the pinned registered
@@ -1056,7 +1160,7 @@ and the missing dataset's recovery facts before preparation. Both wrappers use
 starting the trainer. The missing-folder recovery requirement is in 3.7; it does not authorize changing model, dataset revision or
 hyperparameters under Resume.
 
-### 4.4 The model table (`scripts/model_table.py`, `scripts/model-table.json`)
+### 4.4 The model table (`scripts/model_table.py`)
 
 Which models exist, and what each one needs, is one JSON file read by the app, the agent and
 the scripts: `docs/model-table.md` is its format and the checklist for adding a model. The file
@@ -1085,9 +1189,9 @@ What the pod does with a row:
 | --- | --- |
 | `launch_aitoolkit.py` `model_block` | `architecture`: `arch`, `model_extra` (in order), `quantize`, `quantize_text_encoder` (written as `quantize_te` when not null) |
 | `launch_aitoolkit.py` `build_native_config` | for an exact row without a `trainer_config` hook: `train.dtype`, `train.gradient_checkpointing`, `train.optimizer`, `save.dtype` (when not null), `save.max_step_saves_to_keep`, then the row's `trainer_options.process` keys deep-merged, written over the skeleton before `extra` merges (`extra` wins) |
-| `generate_results.py` | the exact row with a `generator` hook, else `Generation supports <display names>`; the row's frame law and cadence; for `aitoolkit_image`, the row's model settings; for `aitoolkit_arch_image`, the saved native config |
+| `generate_results.py` | the exact row with a `generator` hook, else `Generation supports <display names>`; the row's frame law and cadence; for `aitoolkit_image`, the row's model settings; for `aitoolkit_arch_image`, the saved native config; `render_base` (the regularisation images), the row's model settings and `get_model_class` |
 | `push_lora.py` `model_card` | `license`: with `show_notice`, the licence in the front matter (`license: <id>` when `id` is a Hub licence identifier, else `license: other` with `id` as `license_name` and `url` as `license_link`) and a closing `## Licence` section; `usage_note`: the last paragraph of `## Use`; otherwise the card is unchanged |
-| `catalog.py` | the exact row for generation admission (above), external initialization (a `native_recipe` hook), and the `trainer_config` / `generator` hooks' preparation |
+| `catalog.py` | the exact row for generation admission (above), external initialization (a `native_recipe` hook), the `trainer_config` / `generator` hooks' preparation, and the `regularization` / `repa` fields, which admit run.json's blocks of the same names (4.1) and the `draw-regularization` service (3.8) |
 
 **Hooks.** A hook is a named strategy for one concern; the row names it, `model_table.HOOKS`
 registers the names and each consumer keeps its dispatch beside the code that calls it. A name
@@ -1098,7 +1202,7 @@ the registry does not know fails in `hook()`. No other code tests a model's name
 | `trainer_config` | `minimax_h3` | `launch_aitoolkit.TRAINER_CONFIG_HOOKS`: `minimax_h3_trainer_config` (H3 quality recipe, dataset groups, initialization, guidance check, model config) and `minimax_h3_prelaunch` (`h3_recipe.download_assets`); the agent's half is `catalog._minimax_h3_trainer_config` (the effective recipe written into run.json) |
 | `native_recipe` | `minimax_h3` | `catalog._NATIVE_RECIPE_RULES`: external initialization is admitted for the row, read through `h3_recipe.read_initialization` |
 | `generator` | `aitoolkit_image` | `generate_results.flux_generate`: still images through ai-toolkit with the row's model settings |
-| `generator` | `aitoolkit_arch_image` | `generate_results.arch_generate`: still images from the model class `get_model_class` returns for the row's `arch`, with the trained LoRA bound as a network (`bind_h3_network`, the trainer's own construction) from the saved native config; base side at network multiplier 0. The agent requires and captures `native-config.json` |
+| `generator` | `aitoolkit_arch_image` | `generate_results.arch_generate`: still images from the model class `get_model_class` returns for the row's `arch`, with the trained LoRA bound as a network (`bind_h3_network`, the trainer's own construction) from the saved native config; base side at network multiplier 0. The agent requires and captures `native-config.json`. Z-Image and Qwen-Image-2.1 name it; a row's `regularization` field needs a generator hook because `render_base` draws the set with the same model class |
 | `generator` | `ltx_one_stage` | `generate_results.ltx_generate` / `ltx_command` |
 | `generator` | `minimax_h3` | `generate_results.h3_generate` and `h3_manifest`; the agent requires and captures `native-config.json` |
 | `run_extra` | `ltx_video_buckets` | none: the app applies it |
@@ -1206,7 +1310,11 @@ PODAGENT_TOKEN}`, `PODAGENT_WORKSPACE=/workspace`, bind mount `./workspace:/work
   runs/<training-id>/     run.json, dataset-manifest.json, config.yaml, trainer.log, tensorboard/, output/, preprocessed/ (ltx)
   runs/<generation-id>/   generation.json, source-run.json, private selected-checkpoint.safetensors, trainer.log
     output/              comparison.json, pair-NNN-base.png/mp4, pair-NNN-lora.png/mp4
-  models/hf-cache/        HF_HOME for every child (vLLM weights, base models)
+  runs/<training-id>/regularization/       the run's copy of its regularisation set (+ regularization.json)
+  runs/<drawing-id>/      regularization-draw.json, regularization-plan.json, trainer.log
+    output/              <image-key>.png, the pictures the app captions
+  regsets/<model-key>/    generated regularisation images, <image-key>.png + .txt; the reuse cache, never auto-cleaned
+  models/hf-cache/        HF_HOME for every child (vLLM weights, base models, REPA's image encoder)
   models/<dir>/           user-placed local models
   logs/                   vllm.log, tensorboard.log, pull-dataset.log, push-lora.log, podagent.log
 ```
@@ -1300,6 +1408,15 @@ writes `failed`, retains any output files, and returns a nonzero service exit. T
 CLI reports filesystem/value/subprocess failures as one stderr line with exit 1. A captured
 checkpoint or config failure before the inference scope can leave no comparison manifest;
 consumers must never reinterpret that as success.
+
+### 7.5 `regularization.py`
+
+`draw --run DIR`: the `draw-regularization` service (3.8), the first step of a generated
+regularisation set (4.3). `launch_aitoolkit.py` loads the module with `runpy` and
+calls its functions (`plan_generated`, `materialize`, `check_folder`). Standard library at import
+time (`--help` works under `python -I`); Pillow is read for image sizes when importable; `draw`
+loads `generate_results.py` and, through its `render_base`, ai-toolkit. Exit 0 done, 2 bad input,
+1 failed.
 
 ## 8. `podctl`
 

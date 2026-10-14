@@ -18,10 +18,10 @@ struct StudioTermCatalogTests {
 
     @Test func suppliedGlossaryKeepsBothReadingsAliasesAndValidLearningPaths() throws {
         let glossary = StudioGlossaryCatalog.supplied
-        #expect(glossary.entryCount == 177)
+        #expect(glossary.entryCount == 178)
         #expect(glossary.entries.count == glossary.entryCount)
         #expect(glossary.sections.count == 11)
-        #expect(glossary.sources.count == 81)
+        #expect(glossary.sources.count == 82)
         let entryIDs = Set(StudioTerm.allCases.map(\.rawValue))
         let sections = Set(StudioGlossaryCatalog.allSections.map(\.id))
         let sources = Set(glossary.sources.map(\.id))

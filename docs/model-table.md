@@ -43,6 +43,7 @@ apply.
 | `trainer` | `aitoolkit` or `ltx`. |
 | `model_ref` | The `base_model` value in run.json, a Hub id. Unique across the table. |
 | `source.revision` | Pinned Hub revision, or `null` when the trainer resolves the name itself. |
+| `source.weight_repos` | Optional. Other Hub repos the trainer downloads this model's weights from (a repack). With an unpinned revision, cached regularisation images are keyed by the current commit of each. |
 | `source.gated` | The Hub repo needs an accepted licence before a token can download it. |
 | `source.first_download_gb` | Size of the first model download on a fresh volume, decimal GB. Shown in the picker for rows whose licence notice is on. |
 | `source.download_note` | What that size covers. |
@@ -67,6 +68,8 @@ apply.
 | `license` | `id`, `name`, `url`, `notice`, `show_notice`. With `show_notice` the picker shows the notice, a link and the download size, and the pushed model card carries the licence. `id` is the Hub's licence identifier when the Hub lists one (the card says `license: <id>`); otherwise the card says `license: other` with `id` as `license_name`, which the Hub accepts only as lowercase letters, digits, `-` and `.`. |
 | `usage_note` | Optional. A sentence about using a LoRA trained on this model, shown under the picker and in the model card's `## Use` section. |
 | `hooks` | Concern to hook name; an absent concern is the generic behaviour. |
+| `regularization` | Optional. A generated regularisation (prior-preservation) set is offered for this row, with its defaults. See [Regularisation and REPA fields](#regularisation-and-repa-fields). |
+| `repa` | Optional. Representation alignment is offered for this row, with its defaults. See [Regularisation and REPA fields](#regularisation-and-repa-fields). |
 | `notes` | Free text for maintainers. Not displayed. |
 
 Readers keep the order of `architecture.model_extra` and `trainer_options.run_extra`: use an
@@ -101,12 +104,98 @@ error.
 | `trainer_config` | `minimax_h3` | The pod builds H3's whole AI Toolkit config (quality recipe, dataset groups, initialization, guidance check) instead of the generic mapping, and fetches its pinned assets before launch. |
 | `native_recipe` | `minimax_h3` | The app imports a native AI Toolkit recipe and warm-starts a new run from LoRA weights; the guidance rules go with it. The agent admits external initialization only for such a row. |
 | `generator` | `aitoolkit_image` | Comparison stills through AI Toolkit's `StableDiffusion` class, with the row's model settings (FLUX). |
-| `generator` | `aitoolkit_arch_image` | Comparison stills from the model class AI Toolkit registers for the row's `arch`, with the trained LoRA bound as a network; for architectures that are their own class (Z-Image). Needs the source run's saved `native-config.json`. |
+| `generator` | `aitoolkit_arch_image` | Comparison stills from the model class AI Toolkit registers for the row's `arch`, with the trained LoRA bound as a network; for architectures that are their own class (Z-Image, Qwen-Image-2.1). Needs the source run's saved `native-config.json`. |
 | `generator` | `ltx_one_stage` | LTX's official one-stage CLI. |
 | `generator` | `minimax_h3` | H3's registered model with the trained network recipe. Needs the source run's saved `native-config.json`. |
 | `run_extra` | `ltx_video_buckets` | When the inputs contain video, the app sets `preprocess` to `{"buckets_from_media": true, "args": ...}`. |
 
 A row without a `generator` hook does not support comparison generation.
+
+## Regularisation and REPA fields
+
+Two optional row fields, both for AI Toolkit rows only. A row without the field does not offer the
+feature. The app copies the row's values into run.json as explicit values, so a saved run repeats
+the same way after the table changes; the pod reads the field only to admit a run.
+
+### `regularization`
+
+A regularisation (prior-preservation) set trained beside the subject: ordinary pictures of the
+subject's class ("a person"), drawn by the base model before training from the subject's own
+captions with the trigger taken out. The LoRA then learns that the trigger means one subject while
+the class noun keeps meaning any member of the class.
+
+The pod draws the set (`draw-regularization`), the app fetches the pictures and has the project's
+own captioner (the same provider, model and endpoint) describe each one, and the run starts with
+those captions. The captioner is told only the class nouns, with the skill's
+`references/regularization.md`; it never sees a trigger.
+
+```json
+"regularization": {
+  "default_on": true,
+  "images": 40,
+  "weight": 1.0,
+  "generation": {"steps": 40, "guidance_scale": 3.0, "seconds_per_image": 33},
+  "note": "For maintainers."
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `default_on` | Whether a new run starts with regularisation on when this model is selected. App only. |
+| `images` | Default number of images in a generated set; editable in the app. |
+| `weight` | Default `train.reg_weight`: how much a regularisation image counts against one of the subject's. |
+| `generation.steps`, `guidance_scale` | Sampling settings for the generated images. |
+| `generation.seconds_per_image` | Time per image, for the estimate the app shows. Display only. |
+| `note` | Free text for maintainers. Not displayed. |
+
+The row needs a `generator` hook, because the images are drawn through the same model class as
+comparison generation (`generate_results.render_base`), and no `trainer_config` hook, because such
+a hook builds `datasets[]` from its own groups.
+
+run.json carries a top-level `regularization` object: `source: "generate"` with `images`, `weight`,
+`class_nouns` (trigger to class noun), `generation` (`steps`, `guidance_scale`, `seed`) and
+`captions` (picture key to caption, written by the app), or `source: "folder"` with `path` (a
+folder under `datasets/`) and `weight`. The launcher turns it into `train.reg_weight` and a second
+`datasets[]` entry, a copy of the first with `is_reg: true` over the run's copy of the images. Half
+of the trainer's steps then look at a regularisation image, so the app sends twice the steps an
+`epochs` row computes for the subject. Generated images are cached under `<workspace>/regsets` and
+reused.
+
+### `repa`
+
+Representation alignment (REPA; Yu et al., ICLR 2025): an auxiliary loss that aligns one
+transformer block's image tokens with a frozen vision encoder's patch features. The AI Toolkit
+image carries it as a patch series on top of its pin (`pod/images/patches/ai-toolkit/`).
+
+```json
+"repa": {
+  "default_on": false,
+  "encoder": "facebook/dinov2-giant",
+  "encoder_download_gb": 4.4,
+  "block_index": 8,
+  "weight": 0.5,
+  "projector": "mlp",
+  "projector_dim": 2048,
+  "encoder_resolution": 518,
+  "note": "For maintainers."
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `default_on` | Whether a new run starts with REPA on. |
+| `encoder` | The frozen vision encoder. The trainer downloads it into the model cache on the first run. |
+| `encoder_download_gb` | Size of that download, for the sentence the app shows. Display only. |
+| `block_index` | 0-indexed block whose output is aligned. |
+| `weight` | Weight of the alignment term. |
+| `projector`, `projector_dim` | The projector trained beside the LoRA and discarded (it is not part of the LoRA), and its hidden width. |
+| `encoder_resolution` | The pixel side the encoder is run at. |
+| `note` | Free text for maintainers. Not displayed. |
+
+The row's `architecture.arch` must be one the patch series wires (`qwen_image_2`, `zimage`;
+`ModelRow.repaArchitectures` in the app). The app copies the six values after `default_on` into
+run.json's top-level `repa`, and the launcher writes them as AI Toolkit's `process.repa` block
+before `extra` merges (`extra.repa.enabled: false` turns it off).
 
 ## Adding a model
 

@@ -41,6 +41,7 @@ struct AdvancedTrainingControls: View {
             TextField("Gradient accumulation", value: $workspace.accumulation, format: .number.grouping(.never))
             TextField("Learning rate", value: $workspace.learningRate, format: .number)
                 .help("How much the model changes at each step. Keep the default for your first run.")
+            if workspace.usesRegularization { regularizationControls }
             TextField("Triggers", text: $workspace.triggerWords)
             TextField("Caption profile", text: $workspace.profile)
             TextField("Training seed", value: $workspace.seed, format: .number)
@@ -69,6 +70,14 @@ struct AdvancedTrainingControls: View {
                 .trigger,
             ])
         }.formStyle(.columns)
+    }
+
+    /// Shown only while the regularisation toggle is on.
+    @ViewBuilder private var regularizationControls: some View {
+        let standard = workspace.regularizationOffer.map { String(format: "%g", $0.weight) } ?? "1"
+        TextField("Regularisation strength", value: $workspace.regularizationWeight, format: .number)
+            .help("How much each regularisation image counts compared with one of yours. "
+                + "\(standard) is the default for this model.")
     }
 
     @ViewBuilder private var checkpointControls: some View {

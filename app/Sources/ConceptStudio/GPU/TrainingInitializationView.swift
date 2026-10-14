@@ -91,9 +91,10 @@ struct TrainingBudgetView: View {
                 TextField("Budget for the next training run (USD)", value: $workspace.runBudget, format: .number)
                     .disabled(workspace.isBusy)
             }
-            Text("The run budget includes input transfer, preparation and continued training. Reaching either "
-                + "this cap or the whole-computer cap stops the computer. Estimates exclude separately billed "
-                + "storage. Keep this Mac awake with the app open; closing its lid can suspend the checks.")
+            Text("The run budget includes input transfer, preparation, regularisation images and continued training. "
+                + "Reaching either this cap or the whole-computer cap stops the computer. Estimates exclude "
+                + "separately billed storage. Keep this Mac awake with the app open; closing its lid can suspend "
+                + "the checks.")
                 .font(.callout).foregroundStyle(StudioStyle.supportingText)
                 .fixedSize(horizontal: false, vertical: true)
             StudioTermsHelp(terms: [.budget, .gpu, .resume])
