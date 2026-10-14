@@ -92,6 +92,7 @@ struct PreviewRenderTests {
             )
             try await captureStates(of: step, session: session, output: output, filter: filter, captures: &captures)
         }
+        try await captureAdvancedModes(session: session, output: output, filter: filter, captures: &captures)
         try await captureAuxiliaryScreens(session: session, output: output, filter: filter, captures: &captures)
         try await captureNewHelpAndTraining(
             preferences: preferences, output: output, filter: filter, captures: &captures
@@ -176,6 +177,37 @@ struct PreviewRenderTests {
             session.monitorTab = .progress
         default:
             return
+        }
+    }
+
+    private func captureAdvancedModes(
+        session: StudioSession, output: URL, filter: Set<String>, captures: inout [[String: String]]
+    ) async throws {
+        let originalMode = session.advancedUser
+        let originalStep = session.step
+        defer {
+            session.advancedUser = originalMode
+            session.step = originalStep
+        }
+        for enabled in [false, true] {
+            session.advancedUser = enabled
+            let mode = enabled ? "on" : "off"
+            try await capture(
+                "advanced-\(mode)-settings", view: StudioSettingsView(session: session),
+                output: output, filter: filter, captures: &captures,
+                renderSizes: [("window", CGSize(width: 700, height: 680))]
+            )
+            session.step = .concepts
+            try await capture(
+                "advanced-\(mode)-concepts", view: StudioRootView(session: session),
+                output: output, filter: filter, captures: &captures,
+                renderSizes: [("window", CGSize(width: 1240, height: 1100))]
+            )
+            session.step = .training
+            try await capture(
+                "advanced-\(mode)-training", view: StudioRootView(session: session),
+                output: output, filter: filter, captures: &captures
+            )
         }
     }
 

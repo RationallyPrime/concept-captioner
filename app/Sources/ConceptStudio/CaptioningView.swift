@@ -153,6 +153,14 @@ struct CaptioningView: View {
                                 .font(.callout).foregroundStyle(StudioStyle.supportingText)
                         }.padding(.top, 12)
                     }.disabled(session.busy)
+                    if !session.advancedUser {
+                        let overrides = session.advancedCaptionOverrides
+                            + (overwrite ? ["Re-caption existing model captions"] : [])
+                        if !overrides.isEmpty {
+                            StudioNotice("Advanced settings still in force: " + overrides.joined(separator: "; ")
+                                + ". Turn on Advanced user to edit them.")
+                        }
+                    }
                     if session.advancedUser {
                         DisclosureGroup("Advanced model and batch controls") {
                             Form {
@@ -180,7 +188,8 @@ struct CaptioningView: View {
                                 }
                                 Toggle("Re-caption existing model captions", isOn: $overwrite)
                                 Text(
-                                    "Final captions are always protected. Turn this on to replace earlier model captions."
+                                    "Final captions are always protected. "
+                                        + "Turn this on to replace earlier model captions."
                                 )
                                 .font(.caption).foregroundStyle(StudioStyle.supportingText)
                             }.formStyle(.columns).padding(.top, 12)

@@ -40,13 +40,19 @@ struct ConceptsView: View {
                     conceptSummary(concept)
                     Divider()
                 }
+                if !session.advancedUser, !session.advancedConceptOverrides.isEmpty {
+                    StudioNotice("Advanced settings still in force: "
+                        + session.advancedConceptOverrides.joined(separator: "; ")
+                        + ". Turn on Advanced user to edit them.")
+                }
                 if session.advancedUser {
                     DisclosureGroup("Advanced settings") {
                         VStack(alignment: .leading, spacing: 14) {
                             Toggle("Configure multiple concepts in one LoRA", isOn: $multipleConcepts)
                                 .disabled(concepts.count > 1)
                             Text(
-                                "Each concept needs its own trigger. Confirm locations for people, objects and characters; "
+                                "Each concept needs its own trigger. Confirm locations for people, objects "
+                                    + "and characters; "
                                     + "style and motion apply to the whole target automatically. "
                                     + "Use this only when you intend to train the concepts together."
                             )
@@ -168,6 +174,19 @@ struct ConceptEditor: View {
                             "Captions include this exact name. Use it in generation prompts to request the concept."
                         )
                         .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                    }
+                    if !session.advancedUser {
+                        let overrides = (classNoun != target.defaultClassNoun ? ["Class noun: \(classNoun)"] : [])
+                            + (describe != target.defaultDescribedAttributes.joined(separator: "\n")
+                                ? ["Caption details: \(describe)"] : [])
+                            + (!decisions.isEmpty ? ["Boundary exceptions: \(decisions)"] : [])
+                            +
+                            (!TargetConcept.beginnerChoices
+                                .contains(target) ? ["Detailed category: \(target.title)"] : [])
+                        if !overrides.isEmpty {
+                            StudioNotice("Advanced settings still in force: " + overrides.joined(separator: "; ")
+                                + ". Turn on Advanced user to edit them.")
+                        }
                     }
                     if session.advancedUser {
                         DisclosureGroup("Advanced settings") {

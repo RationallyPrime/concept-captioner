@@ -92,7 +92,8 @@ final class GPUWorkspace {
     /// Model repos created for results are private unless the user turns this off.
     var privateResult = true
     var runID = ""
-    var seed = 42
+    static let defaultSeed = 42
+    var seed = GPUWorkspace.defaultSeed
     var datasetRevision = ""
     var datasetContainsVideo = false
     /// How many images and clips the next run trains on; an epochs row turns passes into steps with it.

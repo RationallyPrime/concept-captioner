@@ -116,12 +116,6 @@ struct ModelRow: Sendable, Identifiable, Equatable {
     }
 
     struct License: Sendable, Equatable {
-        enum RecipeStatus: String, Sendable {
-            case verified, unverified
-        }
-
-        let recipeStatus: RecipeStatus
-        let trainingNotice: String?
         let id: String
         let name: String
         let url: String
@@ -156,6 +150,12 @@ struct ModelRow: Sendable, Identifiable, Equatable {
         let note: String
     }
 
+    enum RecipeStatus: String, Sendable {
+        case verified, unverified
+    }
+
+    let recipeStatus: RecipeStatus
+    let trainingNotice: String?
     let id: String
     let displayName: String
     let shortName: String

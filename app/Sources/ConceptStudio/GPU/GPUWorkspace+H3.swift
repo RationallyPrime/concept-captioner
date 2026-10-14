@@ -132,9 +132,12 @@ extension GPUWorkspace {
     }
 
     /// The picker's choices in table order; a model that matches no row is shown last as custom.
-    var trainingModelOptions: [TrainingModelOption] {
-        var options = modelTable.models.map { TrainingModelOption(tag: $0.modelRef, label: $0.pickerTitle) }
-        if modelTable.row(modelRef: baseModel) == nil {
+    func trainingModelOptions(advancedUser: Bool) -> [TrainingModelOption] {
+        var options = modelTable.selectableRows(advancedUser: advancedUser).map { TrainingModelOption(
+            tag: $0.modelRef,
+            label: $0.pickerTitle
+        ) }
+        if advancedUser, modelTable.row(modelRef: baseModel) == nil {
             options.append(TrainingModelOption(tag: baseModel, label: "Custom · \(baseModel)"))
         }
         return options
@@ -154,7 +157,10 @@ extension GPUWorkspace {
         guard let row = exactModelRow, row.license.showNotice else { return nil }
         return TrainingModelDisclosure(
             notice: row.license.notice, licenseName: row.license.name, licenseURL: row.license.url,
-            download: "The first run downloads about \(String(format: "%.1f", row.source.firstDownloadGB)) GB "
+            download: row.recipeStatus == .unverified
+                ? "Repository files total about \(String(format: "%.1f", row.source.firstDownloadGB)) GB. "
+                + row.source.downloadNote
+                : "The first run downloads about \(String(format: "%.1f", row.source.firstDownloadGB)) GB "
                 + "of model files to the computer."
         )
     }

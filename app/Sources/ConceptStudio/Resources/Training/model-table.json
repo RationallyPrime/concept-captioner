@@ -2960,7 +2960,7 @@
         "id": "apache-2.0",
         "name": "Apache 2.0",
         "url": "https://huggingface.co/Boogu/Boogu-Image-0.1-Base",
-        "notice": "Apache 2.0. Read the model card and licence before training or sharing adapters.",
+        "notice": "Apache 2.0. Read the model card and licence before training or sharing adapters. The model card describes this as a research project and warns against production deployment without additional safeguards.",
         "show_notice": true
       },
       "hooks": {},
