@@ -178,13 +178,11 @@ extension GPUWorkspace {
     /// Refuses a computer whose GPUs report less memory than the row's reference. The provider's offers use
     /// decimal GB and the agent reports MiB; a 96 GB class GPU can expose less than 96 GiB after firmware
     /// reservations (the H3 reference reports 97,887 MiB).
-    /// An agent too old to report memory fails the check only when the row requires it (`requireReport`).
-    func verifyGPUMemory(_ agent: any PodAgent, gpus: [Int], row: ModelRow, requireReport: Bool = true) async throws {
+    func verifyGPUMemory(_ agent: any PodAgent, gpus: [Int], row: ModelRow) async throws {
         let inventory: [AgentGPU]
         do {
             inventory = try await agent.gpus()
         } catch is AgentCannotReportGPUMemory {
-            guard requireReport else { return }
             throw StudioError.message(
                 "This agent cannot report GPU memory. Update its training image before using \(row.shortName)."
             )
@@ -206,13 +204,20 @@ extension GPUWorkspace {
     /// Changes the next run's model; an existing computer keeps its installed trainer image.
     func chooseTrainingModel(_ model: String) {
         guard !isBusy, !isTraining, model != baseModel else { return }
-        let neededTrainer = modelTable.row(modelRef: model)?.trainer ?? modelTable.defaultRow.trainer
-        guard !hasRunningPod || trainer == neededTrainer else {
+        let neededRow = modelTable.row(modelRef: model) ?? modelTable.defaultRow
+        guard !hasRunningPod || trainer == neededRow.trainer else {
             message = "This computer has a different trainer. Stop and remove it before choosing this model."
             return
         }
+        // The rental filter used the current model's GPU floor; a running computer may not meet a higher one.
+        // Rows that verify memory on the pod check the actual GPU before training instead.
+        guard !hasRunningPod || neededRow.gpu.verifyOnPod || neededRow.gpu.minVRAMGB <= requiredGPUMemoryGB else {
+            message = "\(neededRow.shortName) needs at least \(neededRow.gpu.minVRAMGB) GB of memory per GPU, "
+                + "more than this computer was chosen for. Stop and remove it before choosing this model."
+            return
+        }
         let previous = effectiveModelRow.recipe
-        trainer = neededTrainer
+        trainer = neededRow.trainer
         baseModel = model
         nativeRecipe = nil
         nativeRecipeOriginal = nil

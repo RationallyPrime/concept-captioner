@@ -66,12 +66,9 @@ extension GPUWorkspace {
             if let hook = self.nativeRecipeHook {
                 try hook.validateGuidance(settings: self.h3RecipeSettings, guidanceLoss: self.guidanceLoss)
             }
-            // The rental filter only covers new computers; a running one may predate a model switch.
-            if let row = self.exactModelRow {
+            if let row = self.exactModelRow, row.gpu.verifyOnPod {
                 let plan = try await agent.plan()
-                try await self.verifyGPUMemory(
-                    agent, gpus: plan.train?.gpus ?? [], row: row, requireReport: row.gpu.verifyOnPod
-                )
+                try await self.verifyGPUMemory(agent, gpus: plan.train?.gpus ?? [], row: row)
             }
             let local = try await self.currentLocalDataset(capture: captureLocal)
             defer { local?.remove() }
