@@ -54,13 +54,15 @@ extension StudioSession {
     var trainingPrerequisites: [TrainingPrerequisite] {
         guard let project else { return [TrainingPrerequisite(missing: "open a project", step: .images)] }
         var missing: [TrainingPrerequisite] = []
-        // A repeat that recorded a published dataset trains on that, not on this project's media or publish;
-        // an epoch-counted model also needs the item count, which runs saved before it was recorded lack.
+        // Training reads a published dataset (this project's recorded publish, or the one a Repeat recorded)
+        // rather than local media. An epoch-counted model still needs an item count: a Repeat that recorded one
+        // supplies it, otherwise it comes from the media included here.
         let repeatsPublishedDataset = gpu.publishedRepeatRun != nil
-        let repeatSuppliesMedia = gpu.publishedRepeatRun.map {
-            $0.itemCount != nil || gpu.effectiveModelRow.recipe.lengthUnit == .steps
-        } ?? false
-        if project.images.isEmpty, !repeatSuppliesMedia {
+        let projectPublished = !gpu.usesLocalDataset && !repoID.isEmpty && !projectState.datasetRevision.isEmpty
+        let countsSteps = gpu.effectiveModelRow.recipe.lengthUnit == .steps
+        let publishedMediaSuffices = gpu.publishedRepeatRun.map { $0.itemCount != nil || countsSteps }
+            ?? (projectPublished && countsSteps)
+        if project.images.isEmpty, !publishedMediaSuffices {
             missing.append(.init(missing: "import images or clips", step: .images))
         }
         if project.job.concepts.isEmpty {
@@ -70,8 +72,7 @@ extension StudioSession {
         if gpu.usesLocalDataset, project.images.contains(where: \.caption.isBlank) {
             missing.append(.init(missing: "caption every included image or clip", step: .captioning))
         }
-        if !gpu.usesLocalDataset, !repeatsPublishedDataset,
-           repoID.isEmpty || projectState.datasetRevision.isEmpty {
+        if !gpu.usesLocalDataset, !repeatsPublishedDataset, !projectPublished {
             missing.append(.init(missing: "publish the training dataset", step: .publish))
         }
         return missing
