@@ -429,8 +429,8 @@
         "batch_size": 1,
         "gradient_accumulation": 1,
         "checkpoints": {
-          "every": 250,
-          "keep": 8,
+          "every": 500,
+          "keep": 40,
           "dtype": "bf16",
           "editable": false
         }
@@ -480,7 +480,7 @@
       "hooks": {
         "generator": "aitoolkit_arch_image"
       },
-      "notes": "AI Toolkit qwen_image_2 (one architecture for text-to-image and editing; this row trains plain text-to-image LoRAs). bf16, no quantisation, no gradient checkpointing, 768 px, AdamW at 1e-4 with a 50-step constant warmup, rank and alpha 32, timestep_type shift (AI Toolkit's own default for this architecture), cached text embeddings (the trainer then unloads the 17.5 GB text encoder from the GPU after caching), batch 1, 400 epochs. Checkpoint cadence is in steps: every 250 steps, newest 8 kept. 1024 px is not offered. Training samples are off. Comparison generation names aitoolkit_arch_image, which builds the model class AI Toolkit registers for qwen_image_2 and binds the trained LoRA as a network; the same model class draws the regularisation images (generate_results.render_base). Weights come from the Comfy-Org repack through AI Toolkit's own resolver, which picks the bf16 files when quantisation is off.",
+      "notes": "AI Toolkit qwen_image_2 (one architecture for text-to-image and editing; this row trains plain text-to-image LoRAs). bf16, no quantisation, no gradient checkpointing, 768 px, AdamW at 1e-4 with a 50-step constant warmup, rank and alpha 32, timestep_type shift (AI Toolkit's own default for this architecture), cached text embeddings (the trainer then unloads the 17.5 GB text encoder from the GPU after caching), batch 1, 400 epochs. Checkpoint cadence is in steps: every 500 steps, newest 40 kept, so a run of up to 20,000 steps keeps its whole curve. 1024 px is not offered. Training samples are off. Comparison generation names aitoolkit_arch_image, which builds the model class AI Toolkit registers for qwen_image_2 and binds the trained LoRA as a network; the same model class draws the regularisation images (generate_results.render_base). Weights come from the Comfy-Org repack through AI Toolkit's own resolver, which picks the bf16 files when quantisation is off.",
       "regularization": {
         "default_on": true,
         "images": 40,
