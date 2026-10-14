@@ -185,6 +185,10 @@ struct ModelTable: Sendable {
         models.first { row in row.captions.profilePrefix.map { profile.hasPrefix($0) } == true } ?? defaultRow
     }
 
+    func selectableRows(advancedUser: Bool) -> [ModelRow] {
+        models.filter { advancedUser || $0.recipeStatus == .verified }
+    }
+
     var videoRows: [ModelRow] {
         models.filter { $0.video != nil }
     }

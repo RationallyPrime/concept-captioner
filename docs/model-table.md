@@ -219,3 +219,24 @@ before `extra` merges (`extra.repa.enabled: false` turns it off).
    (`trainer_options.process` is one for AI Toolkit `process` keys).
 6. **Rebuild the pod images** so they carry the new row, and try the model through the app on a
    rented pod.
+
+## Advanced user recipes
+
+`recipe_status` is `verified` for the five existing recipes and `unverified` for recipes copied
+from AI Toolkit's pinned UI. The app offers unverified rows only while Settings → Advanced user
+is on. Turning it off retains the selected model and all edited values; each affected screen
+reports the overrides still in force. `training_notice` is an optional visible sentence about
+the upstream issue check. An unverified recipe is not a measured training or quality result.
+
+Unverified rows use per-architecture defaults from the `ui.tsx` registrations at
+`AI_TOOLKIT_COMMIT`, layered over `ui/src/app/jobs/new/jobConfig.ts`. `trainer_options.dataset`
+contains dataset defaults; the launcher merges them into each runtime dataset without replacing
+its path or chosen resolutions. `trainer_options.process` supplies the remaining native defaults;
+explicit run settings still win. Samples and comparison stay unavailable until verified.
+
+Their download size is the Hub repository file-size total (including alternate formats), not a
+measured first download. Model-specific dependencies can add files. GPU floors are conservative
+allocations, not evidence that the recipe fits; the pod checks its actual memory before upload.
+
+New rows require rebuilding the pod image before they can train. This change does not rebuild
+or publish images and does not run rented-GPU smoke tests.

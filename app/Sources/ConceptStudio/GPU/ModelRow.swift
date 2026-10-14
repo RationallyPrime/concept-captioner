@@ -116,6 +116,12 @@ struct ModelRow: Sendable, Identifiable, Equatable {
     }
 
     struct License: Sendable, Equatable {
+        enum RecipeStatus: String, Sendable {
+            case verified, unverified
+        }
+
+        let recipeStatus: RecipeStatus
+        let trainingNotice: String?
         let id: String
         let name: String
         let url: String
@@ -178,6 +184,7 @@ struct ModelRow: Sendable, Identifiable, Equatable {
     /// The model picker's label: the name and whether the model trains on video too.
     var pickerTitle: String {
         "\(displayName) · \(video == nil ? "images" : "images and video")"
+            + (recipeStatus == .unverified ? " · Unverified recipe" : "")
     }
 }
 
@@ -298,6 +305,11 @@ struct TableObject {
 
 extension ModelRow {
     init(_ row: TableObject) throws {
+        guard let status = try RecipeStatus(rawValue: row.string("recipe_status")) else {
+            throw ModelTableError("\(row.path).recipe_status must be verified or unverified")
+        }
+        recipeStatus = status
+        trainingNotice = try row.optionalNote("training_notice")
         id = try row.string("id")
         displayName = try row.string("display_name")
         shortName = try row.string("short_name")
