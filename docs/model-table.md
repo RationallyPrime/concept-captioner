@@ -240,3 +240,7 @@ allocations, not evidence that the recipe fits; the pod checks its actual memory
 
 New rows require rebuilding the pod image before they can train. This change does not rebuild
 or publish images and does not run rented-GPU smoke tests.
+
+Models a strictly better successor has replaced get no row (owner decision, 2026-10-14):
+Qwen-Image and Qwen-Image-2512 (Qwen-Image-2.1), Qwen-Image-Edit, -2509 and -2511, Wan 2.1,
+HiDream-I1 (HiDream-O1) and Flex.1 (Flex.2).
