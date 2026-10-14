@@ -55,7 +55,7 @@ struct StudioSessionTests {
         let expected = if let saved, !saved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             saved.replacingOccurrences(of: "{trainer}", with: trainer)
         } else {
-            "ghcr.io/rationallyprime/concept-captioner-pod-\(trainer):v0.3.2-20261014"
+            "ghcr.io/rationallyprime/concept-captioner-pod-\(trainer):v0.3.3-20261014"
         }
         #expect(await transport.createdImages == [expected])
         await session.gpu.stopEverything()
