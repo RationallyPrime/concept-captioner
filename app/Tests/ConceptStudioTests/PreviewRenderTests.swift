@@ -408,7 +408,6 @@ struct PreviewRenderTests {
     }
 }
 
-// Advanced-mode captures use the same native rendering path.
 extension PreviewRenderTests {
     private func captureAdvancedModes(
         session: StudioSession, output: URL, filter: Set<String>, captures: inout [[String: String]]
