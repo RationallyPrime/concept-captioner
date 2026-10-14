@@ -147,7 +147,7 @@ struct GPUWorkflowTests {
         let saved = SavedPod(
             pod: RentedPod(id: "test", status: "RUNNING", cost: 1, gpu: .init(count: 1)),
             started: Date().addingTimeInterval(-7200), hourlyRate: 1, budget: 1,
-            trainer: "aitoolkit", runID: "previous-run", outputRepo: "test/model"
+            trainer: "aitoolkit", runID: "previous-run"
         )
         try preferences.set(JSONEncoder().encode(saved), forKey: GPUWorkspace.activePodKey)
         let transport = UnreachableAgentTransport()
@@ -243,8 +243,7 @@ struct GPUWorkflowTests {
         await workspace.refresh()
         #expect(workspace.plan?.mode == "concurrent")
         #expect(workspace.plan?.train?.gpus == [1])
-        workspace.outputRepo = "demo/result"
-        await workspace.train(datasetRepo: "demo/images")
+        await workspace.train(datasetRepo: "demo/images", output: HubDestination(repo: "demo/result"))
         #expect(!workspace.runID.isEmpty)
         for _ in 0 ..< 10 {
             await workspace.refresh()
@@ -256,8 +255,6 @@ struct GPUWorkflowTests {
         #expect(workspace.runHistory.last?.params["seed"] == .int(42))
         workspace.projectFolder = nil // the view's initial destination hook also assigns nil in the demo
         #expect(workspace.runHistory.count == 1)
-        await workspace.publishResult()
-        #expect(workspace.message.contains("uploaded"))
         await workspace.stopEverything()
         #expect(!workspace.hasRunningPod)
         #expect(await transport.requests.isEmpty)

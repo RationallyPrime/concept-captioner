@@ -49,8 +49,11 @@ extension GPUWorkspace {
         captionServerActive = services.contains { $0.name == "vllm" && $0.active }
     }
 
+    /// Starts a run on the rented computer. `output` is the open project's training destination: a
+    /// non-empty repo with a Hub token pushes the LoRA there on finish; otherwise it is saved to the project.
     func train(
         datasetRepo: String,
+        output: HubDestination = HubDestination(),
         captureLocal: (@MainActor () async throws -> LocalTrainingDataset)? = nil,
         regularizationCaptioning: (@MainActor ([String]) throws -> RegularizationCaptioning)? = nil
     ) async {
@@ -78,13 +81,13 @@ extension GPUWorkspace {
                 throw StudioError.message("The training model changed during input preparation. "
                     + "Check the selected model and start again; no training was submitted.")
             }
-            let repeated = self.runHistory.first { $0.runID == self.repeatSourceRunID }
+            let repeated = self.publishedRepeatRun
             let repo = repeated?.datasetRepo ?? datasetRepo
             let revision = repeated.map(\.datasetRevision)
                 ?? (self.datasetRevision.isEmpty ? nil : self.datasetRevision)
             let containsVideo = local?.containsVideo ?? repeated?.datasetContainsVideo ?? self.datasetContainsVideo
             let inputFacts = (profile: self.profile, triggers: self.triggerWords, video: containsVideo)
-            let items = local?.itemCount ?? repeated?.itemCount ?? self.datasetItemCount
+            let items = local?.itemCount ?? self.publishedRepeatItemCount ?? self.datasetItemCount
             try self.validateTrainingSettings(
                 local: local != nil, repo: repo, containsVideo: containsVideo, items: items
             )
@@ -100,9 +103,9 @@ extension GPUWorkspace {
             }
             let plan = try await agent.plan()
             self.plan = plan
-            params = await self.admitNewRun(
+            params = self.admitNewRun(
                 dataset, params: params, repo: repo, local: local, revision: revision,
-                cap: cap, baseline: baseline, inputs: (containsVideo, items)
+                budget: (cap, baseline), inputs: (containsVideo, items), output: output
             )
             let destination = self.result?.destination ?? .download
             var trainerStartAttempted = false
@@ -131,7 +134,7 @@ extension GPUWorkspace {
             self.trainingState = "running"
             self.lastActivity = Date()
             self.message = destination == .hub
-                ? "Training started. When it finishes, the LoRA is pushed to \(self.outputRepo)."
+                ? "Training started. When it finishes, the LoRA is pushed to \(output.repo)."
                 : "Training started. When it finishes, the LoRA is saved into this project’s results folder."
         }
     }
@@ -181,15 +184,14 @@ extension GPUWorkspace {
 
     private func admitNewRun(
         _ id: String, params: JSONObject, repo: String, local: LocalTrainingDataset?, revision: String?,
-        cap: Double, baseline: Double, inputs: (containsVideo: Bool, items: Int)
-    ) async -> JSONObject {
+        budget: (cap: Double, baseline: Double), inputs: (containsVideo: Bool, items: Int), output: HubDestination
+    ) -> JSONObject {
         var params = params
         runID = id
-        await defaultOutputRepo()
-        let destination: TrainingResult.Destination = canPushToHub && !outputRepo.isEmpty ? .hub : .download
+        let destination: TrainingResult.Destination = canPushToHub && !output.repo.isEmpty ? .hub : .download
         if destination == .hub {
             params["hub"] = .object([
-                "repo_id": .string(outputRepo), "private": .bool(privateResult), "push_on_finish": .bool(true),
+                "repo_id": .string(output.repo), "private": .bool(output.isPrivate), "push_on_finish": .bool(true),
             ])
         }
         points = []
@@ -198,7 +200,8 @@ extension GPUWorkspace {
         datasetRevision = local == nil ? (revision ?? "") : ""
         result = TrainingResult(
             runID: id,
-            outputRepo: outputRepo,
+            outputRepo: output.repo,
+            isPrivate: output.isPrivate,
             destination: destination,
             volumeID: currentVolumeID,
             state: .training
@@ -210,26 +213,29 @@ extension GPUWorkspace {
             resumed: false,
             localInputDigest: local?.digest,
             itemCount: inputs.items,
-            budget: cap,
-            baseline: baseline
+            budget: budget.cap,
+            baseline: budget.baseline
         )
         persist()
         persistResult()
         return params
     }
 
-    /// Signed in to Hugging Face with no output repo chosen: push to `<account>/<project>-lora`
-    /// (private unless the user turned that off). If the account cannot be read, the result is
-    /// downloaded into the project instead, as for a user without a Hub account.
-    func defaultOutputRepo() async {
-        guard !demoMode, !hubToken.isEmpty, outputRepo.isEmpty,
-              let url = URL(string: "https://huggingface.co/api/whoami-v2") else { return }
+    /// The default destination for a project signed in to Hugging Face with none chosen:
+    /// `<account>/<project>-lora`. Nil without a token or when the account cannot be read; the result
+    /// is then downloaded into the project, as for a user without a Hub account.
+    func suggestedOutputRepo() async -> String? {
+        guard !demoMode, !hubToken.isEmpty, let projectFolder,
+              let url = URL(string: "https://huggingface.co/api/whoami-v2") else { return nil }
+        // Asked as Start is pressed: the idle stop must not take the computer while this answers.
+        beginAppWork()
+        defer { endAppWork() }
         var request = URLRequest(url: url, timeoutInterval: 20)
         request.setValue("Bearer \(hubToken)", forHTTPHeaderField: "Authorization")
         guard let response = try? await transport.send(request), response.status == 200,
               let account = try? JSONValue(parsing: response.body).objectValue?["name"]?.stringValue,
-              !account.isEmpty, !account.contains("/") else { return }
-        outputRepo = "\(account)/\(Self.repoName(project: projectFolder?.lastPathComponent ?? ""))"
+              !account.isEmpty, !account.contains("/") else { return nil }
+        return "\(account)/\(Self.repoName(project: projectFolder.lastPathComponent))"
     }
 
     /// A Hub model name from the project folder: letters, digits, `-`, `_` and `.`, ending in `-lora`.
@@ -311,23 +317,6 @@ extension GPUWorkspace {
             params["extra"] = .object(extra)
         }
         return params
-    }
-
-    func publishResult() async {
-        await perform {
-            guard let agent = self.agent, !self.outputRepo.isEmpty, !self.runID.isEmpty else {
-                throw StudioError.message("Enter a destination model repository and finish a training run first.")
-            }
-            try await agent.start("push-lora", gpus: [], params: [
-                "run_id": .string(self.runID), "repo_id": .string(self.outputRepo),
-                "private": .bool(self.privateResult),
-            ])
-            try await self.waitForService("push-lora")
-            if self.result?.runID == self.runID {
-                self.updateResult(.pushed(repo: self.outputRepo))
-            }
-            self.message = "Your LoRA was uploaded to your model repository. You can now stop the computer."
-        }
     }
 
     func startCaptioning() async -> Bool {

@@ -223,7 +223,10 @@ struct PodAgentClient: PodAgent {
     }
 
     func latest(runID: String) async throws -> TrainingPoint? {
-        let json = try await JSONValue(parsing: call("runs/\(runID)/events"))
+        // 404 until the trainer creates the run's directory: no measurement yet, not a failure.
+        let reply = try await response("runs/\(runID)/events", accepting: [404])
+        guard reply.status != 404 else { return nil }
+        let json = try JSONValue(parsing: reply.body)
         let scalars = json.objectValue?["scalars"]?.objectValue
         let loss = scalars?["loss"]?.objectValue ?? scalars?["scraped/loss"]?.objectValue
         guard let step = loss?["step"]?.intValue, let value = loss?["value"]?.doubleValue else { return nil }
@@ -277,6 +280,13 @@ struct PodAgentClient: PodAgent {
     private func call(
         _ path: String, method: String = "GET", body: JSONObject? = nil, query: [URLQueryItem] = []
     ) async throws -> Data {
+        try await response(path, method: method, body: body, query: query).body
+    }
+
+    private func response(
+        _ path: String, method: String = "GET", body: JSONObject? = nil, query: [URLQueryItem] = [],
+        accepting accepted: Set<Int> = []
+    ) async throws -> (status: Int, body: Data) {
         var url = baseURL.appendingPathComponent(path)
         if !query.isEmpty, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
             components.queryItems = query
@@ -290,8 +300,10 @@ struct PodAgentClient: PodAgent {
             request.httpBody = JSONValue.object(body).pythonDumpsData()
         }
         let response = try await transport.send(request)
-        guard (200 ..< 300).contains(response.status) else { throw Self.failure(response.status) }
-        return response.body
+        guard (200 ..< 300).contains(response.status) || accepted.contains(response.status) else {
+            throw Self.failure(response.status)
+        }
+        return (response.status, response.body)
     }
 
     private static func failure(_ status: Int) -> StudioError {

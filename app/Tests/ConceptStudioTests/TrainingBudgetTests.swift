@@ -79,7 +79,6 @@ struct TrainingBudgetTests {
             budget: 20,
             trainer: prior.trainer,
             runID: prior.runID,
-            outputRepo: prior.outputRepo,
             volumeID: prior.volumeID
         )
         await agent.release()
@@ -153,7 +152,6 @@ struct TrainingBudgetTests {
             budget: 20,
             trainer: "aitoolkit",
             runID: result.runID,
-            outputRepo: "",
             volumeID: "storage",
             result: result,
             run: run

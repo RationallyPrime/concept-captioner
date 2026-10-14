@@ -278,7 +278,25 @@ extension GPUWorkspace {
         }
     }
 
+    /// The run selected for Repeat when it recorded a published dataset that training will read: the dataset the
+    /// repeat trains on. A direct-upload run supplies settings only, and without a Hugging Face token training
+    /// uploads this project's own inputs, so in either case the repeat trains on the project's dataset.
+    var publishedRepeatRun: TrainingRun? {
+        guard !usesLocalDataset else { return nil }
+        return runHistory.first { $0.runID == repeatSourceRunID && !$0.datasetRepo.isEmpty }
+    }
+
     /// Prefills editable settings; it never starts billing or submits training.
+    /// Whether the next run's dataset holds video: the repeated run's published dataset, else this project's.
+    var trainingDatasetContainsVideo: Bool {
+        publishedRepeatRun?.datasetContainsVideo ?? datasetContainsVideo
+    }
+
+    /// The next run's item count from a repeated run's published dataset, when it recorded a usable one.
+    var publishedRepeatItemCount: Int? {
+        publishedRepeatRun?.itemCount.flatMap { $0 > 0 ? $0 : nil }
+    }
+
     func repeatSettings(from run: TrainingRun) {
         guard !isBusy,
               !isTraining else { message = "Finish the active action before selecting saved settings."; return }
@@ -320,8 +338,8 @@ extension GPUWorkspace {
         profile = run.params["profile"]?.stringValue ?? modelTable.defaultRow.captions.imageProfile
         seed = run.params["seed"]?.intValue ?? 42
         if let cap = run.gpuBudgetUSD { runBudget = cap }
-        datasetContainsVideo = run.datasetContainsVideo
-        datasetRevision = run.datasetRevision ?? ""
+        // The project's dataset revision and media kind stay as the project recorded them: a run that recorded a
+        // published dataset supplies its own through `publishedRepeatRun`, and one that did not trains on these.
         repeatSourceRunID = run.runID
         selectedHistoryRunID = run.runID
         message = "Saved settings loaded. Change them in Training, then start a new run. "

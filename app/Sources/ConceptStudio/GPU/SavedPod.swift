@@ -10,7 +10,6 @@ struct SavedPod: Codable {
     var budget: Double
     var trainer: String
     var runID: String
-    var outputRepo: String
     var idleMinutes = 15
     var volumeID = ""
     /// The RunPod secret holding this pod's agent bearer; deleted when the pod is removed.
@@ -31,7 +30,6 @@ extension SavedPod {
         budget = try values.decode(Double.self, forKey: .budget)
         trainer = try values.decode(String.self, forKey: .trainer)
         runID = try values.decode(String.self, forKey: .runID)
-        outputRepo = try values.decode(String.self, forKey: .outputRepo)
         idleMinutes = try values.decodeIfPresent(Int.self, forKey: .idleMinutes) ?? 15
         volumeID = try values.decodeIfPresent(String.self, forKey: .volumeID) ?? ""
         agentSecret = try values.decodeIfPresent(String.self, forKey: .agentSecret) ?? ""

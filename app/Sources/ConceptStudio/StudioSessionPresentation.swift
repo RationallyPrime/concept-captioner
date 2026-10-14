@@ -38,6 +38,45 @@ extension StudioSession {
         set { updateProjectState { $0.trainingOutput.isPrivate = newValue } }
     }
 
+    /// Gives a project with no training destination its own default, `<account>/<project>-lora`, when
+    /// signed in to Hugging Face. Without an account it stays empty and the result is saved to the project.
+    func fillDefaultTrainingOutput() async {
+        guard trainingOutputRepo.isEmpty, let directory = project?.directory,
+              let suggested = await gpu.suggestedOutputRepo() else { return }
+        // The open project, or its destination, may have changed while the account was read.
+        guard project?.directory == directory, trainingOutputRepo.isEmpty else { return }
+        trainingOutputRepo = suggested
+    }
+
+    /// What is still to do before this project can train, in order, each with the step that does it. A dataset
+    /// counts as published once this project has recorded a publish. Shown before renting: a rented computer
+    /// bills while it waits for these.
+    var trainingPrerequisites: [TrainingPrerequisite] {
+        guard let project else { return [TrainingPrerequisite(missing: "open a project", step: .images)] }
+        var missing: [TrainingPrerequisite] = []
+        // A Repeat that recorded a published dataset trains on it, with the media kind it recorded; an
+        // epoch-counted model also needs the positive item count it recorded. This project's own publish does
+        // not stand in for media: its record has no media kind, which comes from the media included here.
+        let repeatsPublishedDataset = gpu.publishedRepeatRun != nil
+        let projectPublished = !gpu.usesLocalDataset && !repoID.isEmpty && !projectState.datasetRevision.isEmpty
+        let repeatSuppliesMedia = repeatsPublishedDataset
+            && (gpu.publishedRepeatItemCount != nil || gpu.effectiveModelRow.recipe.lengthUnit == .steps)
+        if project.images.isEmpty, !repeatSuppliesMedia {
+            missing.append(.init(missing: "import images or clips", step: .images))
+        }
+        if project.job.concepts.isEmpty {
+            missing.append(.init(missing: "define a concept and its trigger", step: .concepts))
+        }
+        // Direct upload sends the saved captions and refuses an included item without one.
+        if gpu.usesLocalDataset, project.images.contains(where: \.caption.isBlank) {
+            missing.append(.init(missing: "caption every included image or clip", step: .captioning))
+        }
+        if !gpu.usesLocalDataset, !repeatsPublishedDataset, !projectPublished {
+            missing.append(.init(missing: "publish the training dataset", step: .publish))
+        }
+        return missing
+    }
+
     /// Change the project's app-only settings and save them with the project (not in demo mode).
     func updateProjectState(_ change: (inout ProjectAppState) -> Void) {
         var state = projectState
@@ -58,8 +97,10 @@ extension StudioSession {
         SessionKeyStore(secrets: secrets, vllmBaseURL: customBaseURL.isEmpty ? nil : customBaseURL)
     }
 
+    /// Called when the Hugging Face key changes; the GPU workspace's copy follows wherever the user is.
     func providerCredentialsDidChange() {
         providerCredentialRevision &+= 1
+        preparePublishing()
     }
 
     func providerModelCacheKey(for kind: String) -> ProviderModelCacheKey {
@@ -94,4 +135,10 @@ extension StudioSession {
     var canUndoMappingChange: Bool {
         !mappingUndo.isEmpty
     }
+}
+
+struct TrainingPrerequisite: Equatable {
+    /// Completes "Before training, …".
+    let missing: String
+    let step: StudioStep
 }

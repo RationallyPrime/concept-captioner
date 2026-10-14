@@ -31,7 +31,7 @@ struct GPUJourneyView: View {
         self.showsSpendControls = showsSpendControls
     }
 
-    private var datasetRepo: String {
+    var datasetRepo: String {
         session.repoID
     }
 
@@ -195,6 +195,7 @@ struct GPUJourneyView: View {
                 Text("Choose an available computer to see its price.")
                     .font(.callout).foregroundStyle(StudioStyle.supportingText)
             }
+            if !workspace.hasRunningPod { prerequisitesNotice(beforeBilling: true) }
             Button(workspace.quotedHourlyRate > 0
                 ? "Rent computer · \(StudioMoney.perHour(workspace.quotedHourlyRate))"
                 : "Choose a computer first") {
@@ -209,6 +210,7 @@ struct GPUJourneyView: View {
                         + StudioMoney.perHour(workspace.saved?.hourlyRate ?? 0)) {
                             Task { await workspace.startStoppedComputer() }
                         }.disabled(workspace.isBusy)
+                    if workspace.restartBlockedByHost { restartBlockedNotice }
                     Text(workspace.outputCustodyExplanation)
                         .font(.callout).foregroundStyle(StudioStyle.supportingText)
                 }
@@ -222,7 +224,10 @@ struct GPUJourneyView: View {
                     .disabled(workspace.isBusy)
                     .help("Deletes the pod disk with the outputs that were never pushed or saved.")
                 } else {
-                    Button("Remove computer…", role: .destructive) { confirmTermination = true }
+                    Button(
+                        workspace.restartBlockedByHost ? "Remove it to rent a new one…" : "Remove computer…",
+                        role: .destructive
+                    ) { confirmTermination = true }
                         .disabled(workspace.hasUndeliveredPodOutputs)
                         .help("Push or save outputs from a pod disk before removing its computer.")
                 }
@@ -280,18 +285,15 @@ struct GPUJourneyView: View {
                             .help("Base diffusion model to train. Choose a compatible model for these images or clips.")
                             .disabled(workspace.isBusy || workspace.isTraining)
                     }
-                    TextField(
-                        "Save trained model to",
-                        text: $workspace.outputRepo,
-                        prompt: Text("your-name/model-name")
-                    )
-                    Toggle("Keep the trained model private", isOn: $workspace.privateResult)
+                    trainingDestinationFields
                 }.formStyle(.columns)
-                Text("With a Hugging Face token in Settings, the trained model is uploaded to this repository when "
-                    + "training finishes. Without one, it is saved in this project's results folder on your Mac.")
+                Text("This project's own destination. With a Hugging Face token in Settings, the trained model is "
+                    + "uploaded to this repository when training finishes. Without one, it is saved in this "
+                    + "project's results folder on your Mac.")
                     .font(.callout).foregroundStyle(StudioStyle.supportingText)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .task(id: session.project?.directory) { await session.fillDefaultTrainingOutput() }
             Divider()
             TrainingInitializationView(workspace: workspace)
             Divider()
@@ -303,6 +305,7 @@ struct GPUJourneyView: View {
                         .disabled(workspace.isBusy || workspace.isTraining)
                 }.formStyle(.columns)
                 TrainingBudgetView(session: session, workspace: workspace)
+                prerequisitesNotice(beforeBilling: false)
                 if !session.advancedUser {
                     let overrides = workspace.advancedTrainingOverrides + workspace.advancedInputOverrides(
                         expectedTriggers: (session.project?.job.concepts ?? []).map(\.trigger).joined(separator: ","),
@@ -322,8 +325,10 @@ struct GPUJourneyView: View {
                 }
                 Button("Start training", systemImage: "play.fill") {
                     Task {
+                        await session.fillDefaultTrainingOutput()
                         await workspace.train(
-                            datasetRepo: datasetRepo, captureLocal: session.captureTrainingInputs,
+                            datasetRepo: datasetRepo, output: session.projectState.trainingOutput,
+                            captureLocal: session.captureTrainingInputs,
                             regularizationCaptioning: session.regularizationCaptioning
                         )
                     }
@@ -333,15 +338,10 @@ struct GPUJourneyView: View {
                 .help("Start training (⌘↩)")
                 .disabled(workspace.isBusy || workspace.isTraining || !workspace
                     .hasRunningPod || session.busy || session
-                    .editing || (!workspace.usesLocalDataset && datasetRepo.isEmpty))
+                    .editing || (!workspace.usesLocalDataset && trainingDatasetRepo.isEmpty))
             }
             if !workspace.repeatSourceRunID.isEmpty {
-                StudioNotice(workspace.usesLocalDataset
-                    ? "Saved settings are loaded. Training captures the current included media and saved captions."
-                    : repeatedRun?.datasetRevision == nil
-                    ? "Saved settings are loaded. This run did not record a dataset revision; "
-                    + "the current remote dataset will be used."
-                    : "The next run repeats a saved dataset revision. Settings above remain editable.")
+                StudioNotice(repeatNotice)
                 Button("Use this project's current dataset instead") {
                     session.useCurrentTrainingDataset()
                 }
@@ -349,19 +349,6 @@ struct GPUJourneyView: View {
             Divider()
             RunHistoryView(session: session, workspace: workspace)
         }
-    }
-
-    private var repeatedRun: TrainingRun? {
-        workspace.runHistory.first { $0.runID == workspace.repeatSourceRunID }
-    }
-
-    private var trainingDatasetRepo: String {
-        repeatedRun?.datasetRepo ?? datasetRepo
-    }
-
-    private var trainingDatasetRevision: String? {
-        if let repeatedRun { return repeatedRun.datasetRevision }
-        return workspace.datasetRevision.isEmpty ? nil : workspace.datasetRevision
     }
 
     // MARK: Monitor

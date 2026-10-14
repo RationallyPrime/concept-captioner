@@ -89,8 +89,6 @@ final class GPUWorkspace {
 
     /// Sample images during training. Off by default: sample generation is unverified (POD-SPEC 4.2).
     var samplesEnabled = false
-    /// Model repos created for results are private unless the user turns this off.
-    var privateResult = true
     var runID = ""
     static let defaultSeed = 42
     var seed = GPUWorkspace.defaultSeed
@@ -103,7 +101,6 @@ final class GPUWorkspace {
     var repeatSourceRunID = ""
     var generations: [GeneratedComparison] = []
     var generation: GeneratedComparison?
-    var outputRepo = ""
     var triggerWords = "NORA7"
     var profile: String
     var keepCaptionServer = false
@@ -135,10 +132,18 @@ final class GPUWorkspace {
     @ObservationIgnored let sleepGuard: SleepAssertion
     @ObservationIgnored var provider: (any GPUProvider)?
     @ObservationIgnored var agent: (any PodAgent)?
-    @ObservationIgnored var hubToken = ""
+    /// Observed: whether training reads a published dataset or uploads directly depends on it.
+    var hubToken = ""
     @ObservationIgnored var imageName = ""
     @ObservationIgnored var saved: SavedPod?
     @ObservationIgnored var lastActivity = Date()
+    /// The status line a failed refresh wrote; the next refresh that succeeds clears it.
+    @ObservationIgnored var refreshFailureMessage: String?
+    /// Work the app does for the computer outside `perform`, such as publishing the dataset it trains on.
+    /// The idle stop waits for it and counts idle time from when it ends.
+    @ObservationIgnored var appWorkInFlight = 0
+    /// The stopped computer's host had no free GPU when asked to start; Remove and rent is the way out.
+    var restartBlockedByHost = false
     @ObservationIgnored var monitorTask: Task<Void, Never>?
     @ObservationIgnored var operationTask: Task<Void, Never>?
     @ObservationIgnored var refreshTask: Task<Void, Never>?
@@ -221,7 +226,6 @@ final class GPUWorkspace {
             budget = previous.budget
             if repeatSourceRunID.isEmpty, previous.pod.isRunning { trainer = previous.trainer }
             runID = previous.runID
-            outputRepo = previous.outputRepo
             points = previous.points
             result = previous.result ?? result
             // The loaded project record owns history. The global pod record owns billing
@@ -304,7 +308,7 @@ final class GPUWorkspace {
             self.elapsedCost = 0
             self.saved = SavedPod(
                 pod: created, started: started, hourlyRate: max(created.cost, self.quotedHourlyRate),
-                budget: self.budget, trainer: self.trainer, runID: "", outputRepo: self.outputRepo,
+                budget: self.budget, trainer: self.trainer, runID: "",
                 idleMinutes: self.idleMinutes, volumeID: volume?.id ?? "pod:" + created.id,
                 agentSecret: credentials.agentSecret
             )
@@ -340,13 +344,14 @@ final class GPUWorkspace {
         var agentAnswered = false
         do {
             try await enforceLimits()
-            guard hasRunningPod else { return }
+            // A pod found stopped ends the polling, so a resolved error must clear here too.
+            guard hasRunningPod else { clearRefreshFailure(); return }
             let currentStatus = try await provider.status(id: current.id)
             if !currentStatus.isRunning { freezePodCost() }
             updateHourlyRate(currentStatus)
             pod = currentStatus
             persist()
-            guard hasRunningPod else { return }
+            guard hasRunningPod else { clearRefreshFailure(); return }
             guard let agent else {
                 throw StudioError.message("Open Settings to restore this computer’s saved connection.")
             }
@@ -372,15 +377,17 @@ final class GPUWorkspace {
             ) }
             if settlementRevision == operationRevision,
                !isBusy { try await settleGeneration(agent, services: services) }
+            clearRefreshFailure()
         } catch is CancellationError {
             return
         } catch {
             message = error.localizedDescription
+            refreshFailureMessage = message
         }
         // A failed agent/proxy request must not suppress the provider-level idle stop, but a
         // finished LoRA that is neither pushed nor downloaded keeps the computer up, and so does a
         // run the agent still answers for whose result has not been settled yet.
-        if hasRunningPod, !isBusy, !resultNeedsSaving, !(agentAnswered && resultUnsettled),
+        if hasRunningPod, !isBusy, appWorkInFlight == 0, !resultNeedsSaving, !(agentAnswered && resultUnsettled),
            Date().timeIntervalSince(lastActivity) >= Double(idleMinutes * 60) {
             await stopEverything()
             if !hasRunningPod { message = "Stopped the idle computer to avoid further GPU charges." }
@@ -405,7 +412,6 @@ final class GPUWorkspace {
             saved.pod = pod
             saved.trainer = trainer
             saved.runID = runID
-            saved.outputRepo = outputRepo
             saved.idleMinutes = idleMinutes
             saved.points = points
             saved.result = result
@@ -425,7 +431,11 @@ final class GPUWorkspace {
         operationRevision += 1
         isBusy = true
         let work = Task {
-            defer { self.isBusy = false }
+            defer {
+                self.isBusy = false
+                // Waiting on the app's own work (an upload, a download) is not idle time.
+                self.noteActivity()
+            }
             do {
                 try await action()
             } catch is CancellationError {

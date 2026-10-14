@@ -17,7 +17,6 @@ struct GPURunHistoryTests {
             budget: 10,
             trainer: "aitoolkit",
             runID: "",
-            outputRepo: "",
             volumeID: "storage"
         )
         workspace.agent = agent
@@ -31,7 +30,7 @@ struct GPURunHistoryTests {
         return folder
     }
 
-    private func fixtureRun(trainer: String = "aitoolkit") -> TrainingRun {
+    private func fixtureRun(trainer: String = "aitoolkit", datasetRepo: String = "me/old-data") -> TrainingRun {
         var params: JSONObject = [
             "run_id": .string("saved-run"), "dataset": .object(["path": .string("/workspace/datasets/saved-run")]),
             "base_model": .string("black-forest-labs/FLUX.1-dev"), "steps": .int(200), "rank": .int(16),
@@ -46,7 +45,7 @@ struct GPURunHistoryTests {
             ])
         }
         return TrainingRun(
-            runID: "saved-run", trainer: trainer, datasetRepo: "me/old-data", datasetRevision: "old-sha",
+            runID: "saved-run", trainer: trainer, datasetRepo: datasetRepo, datasetRevision: "old-sha",
             datasetContainsVideo: trainer == "ltx", paramsJSON: JSONValue.object(params).pythonDumpsData(),
             volumeID: "storage",
             startedAt: Date(), updatedAt: Date(), result: TrainingResult(
@@ -64,7 +63,8 @@ struct GPURunHistoryTests {
         defer { preferences.removePersistentDomain(forName: suite) }
         let project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
-        let secrets = MemorySecretStore()
+        // Signed in to Hugging Face, so the repeated run's published dataset is the one training reads.
+        let secrets = MemorySecretStore(["huggingface": "fixture-hub"])
         let session = StudioSession(preferences: preferences, secrets: secrets)
         session.project = project
         session.projectState.datasetRevision = "different-current-sha"
@@ -86,8 +86,9 @@ struct GPURunHistoryTests {
             #expect(session.gpu.rank == 8)
             #expect(session.gpu.learningRate == 0.0001)
             #expect(session.gpu.resolution == 512)
-            #expect(session.gpu.datasetContainsVideo)
-            #expect(session.gpu.datasetRevision == "old-sha")
+            #expect(session.gpu.publishedRepeatRun?.runID == run.runID)
+            #expect(session.gpu.publishedRepeatRun?.datasetRevision == "old-sha")
+            #expect(session.gpu.trainingDatasetContainsVideo)
         }
         #expect(secrets.readAccounts.count(where: { $0 == "runpod" }) == 1)
     }
@@ -201,7 +202,7 @@ struct GPURunHistoryTests {
         let saved = SavedPod(
             pod: RentedPod(id: "old-pod", status: "EXITED", cost: 1, gpu: .init(count: 1)),
             started: Date(), hourlyRate: 1, budget: 10, trainer: run.trainer,
-            runID: run.runID, outputRepo: "", volumeID: run.volumeID,
+            runID: run.runID, volumeID: run.volumeID,
             result: run.result, run: run, generation: comparison
         )
         try preferences.set(JSONEncoder().encode(saved), forKey: GPUWorkspace.activePodKey)
@@ -513,5 +514,25 @@ extension GPURunHistoryTests {
         await workspace.downloadRun(selected)
         #expect(workspace.message.contains("saved storage"))
         #expect(await agent.listedRunIDs.isEmpty)
+    }
+}
+
+extension GPURunHistoryTests {
+    @MainActor @Test
+    func repeatOfADirectUploadRunTrainsOnTheProjectsPublishedDataset() async throws {
+        let (preferences, suite) = try temporaryPreferences()
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let folder = try temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let agent = HistoryAgent()
+        let workspace = connected(folder, preferences: preferences, agent: agent)
+        let run = fixtureRun(datasetRepo: "") // recorded by a direct upload: settings only
+        workspace.runHistory = [run]
+        workspace.datasetRevision = "project-sha" // the project's publish, loaded before Repeat is chosen
+        workspace.repeatSettings(from: run)
+        await workspace.train(datasetRepo: "me/current-data")
+        let pull = try #require(await agent.starts.first { $0.service == "pull-dataset" })
+        #expect(pull.params["repo_id"]?.stringValue == "me/current-data")
+        #expect(pull.params["revision"]?.stringValue == "project-sha")
     }
 }

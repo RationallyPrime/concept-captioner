@@ -89,12 +89,29 @@ extension GPUWorkspace {
         }
     }
 
+    func beginAppWork() {
+        appWorkInFlight += 1
+        noteActivity()
+    }
+
+    func endAppWork() {
+        appWorkInFlight = max(0, appWorkInFlight - 1)
+        noteActivity()
+    }
+
+    /// A refresh that succeeded clears the error an earlier one left on the status line.
+    func clearRefreshFailure() {
+        if let refreshFailureMessage, message == refreshFailureMessage { message = "" }
+        refreshFailureMessage = nil
+    }
+
     /// Drops every local trace of `pod`: the record, its agent token and its agent secret.
     private func forgetPod(_ pod: RentedPod) async {
         let agentSecret = saved?.agentSecret ?? ""
         self.pod = nil
         saved = nil
         agent = nil
+        restartBlockedByHost = false
         if !demoMode {
             preferences.removeObject(forKey: Self.activePodKey)
             try? deleteAgentToken("pod.\(pod.id)")

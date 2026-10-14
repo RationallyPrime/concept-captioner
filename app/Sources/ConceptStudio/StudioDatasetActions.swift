@@ -59,11 +59,22 @@ extension StudioSession {
         do { gpu.hubToken = try keyStore.read("huggingface") ?? "" } catch { errorMessage = Self.describe(error) }
     }
 
+    /// The revision Publish produced: the project's record of it, and the revision the next run trains on.
+    func recordPublishedRevision(_ revision: String) {
+        gpu.datasetRevision = revision
+        updateProjectState { $0.datasetRevision = revision }
+    }
+
     func publish() {
         let publishID = UUID()
         perform("Preparing your training dataset…") {
             self.activePublishID = publishID
-            defer { if self.activePublishID == publishID { self.activePublishID = nil } }
+            // A rented computer waiting for this dataset is not idle.
+            self.gpu.beginAppWork()
+            defer {
+                self.gpu.endAppWork()
+                if self.activePublishID == publishID { self.activePublishID = nil }
+            }
             // Captured before any check can throw, so a refusal is reported rather than read as a switch.
             let publishingDirectory = self.project?.directory.standardizedFileURL
             do {
@@ -83,6 +94,8 @@ extension StudioSession {
                         self.completed = index + 1
                     }
                     try self.ensurePublishIsCurrent(publishID, projectDirectory: project.directory)
+                    // A stand-in revision, so the demo's training plan and to-do list read it as published.
+                    self.recordPublishedRevision("demo")
                     self.message = "Demo dataset prepared: photos, captions, response records and job file. "
                         + "No upload or money spent."
                 } else if self.gpu.usesLocalDataset {
@@ -121,8 +134,7 @@ extension StudioSession {
                     }
                     try self.ensurePublishIsCurrent(publishID, projectDirectory: project.directory)
                     self.message = "Dataset published. " + commit.commitURL
-                    self.gpu.datasetRevision = commit.commitOID
-                    self.updateProjectState { $0.datasetRevision = commit.commitOID }
+                    self.recordPublishedRevision(commit.commitOID)
                 }
                 self.rememberChoices()
             } catch is CancellationError {

@@ -24,6 +24,8 @@ struct TrainingResult: Codable, Equatable {
 
     let runID: String
     var outputRepo: String
+    /// The repository privacy chosen when the run started; nil in records written before it was kept.
+    var isPrivate: Bool?
     var destination: Destination
     /// The network volume holding `/workspace/runs/<run-id>`.
     let volumeID: String
@@ -103,7 +105,7 @@ enum RunArtifacts {
 /// The app-only training file inside a project folder, `<project>/.conceptstudio/training.json`:
 /// the project's training results only. It is never published and is not part of job.yaml. The
 /// output repo and its privacy live in the project's app state (`ProjectAppState.trainingOutput`),
-/// which the session hands to `outputRepo` and `privateResult`.
+/// which the session passes to `train(output:)`; each run keeps the destination it started with.
 struct ProjectTrainingRecord: Codable, Equatable {
     var results: [TrainingResult] = []
     var runs: [TrainingRun] = []
@@ -228,7 +230,7 @@ extension GPUWorkspace {
         if pod == nil, let adopted = running.first {
             saved = SavedPod(
                 pod: adopted, started: Date(), hourlyRate: adopted.cost, budget: budget, trainer: trainer,
-                runID: "", outputRepo: outputRepo, idleMinutes: idleMinutes,
+                runID: "", idleMinutes: idleMinutes,
                 volumeID: adopted.volumeID ?? "pod:" + adopted.id
             )
             pod = adopted
@@ -357,7 +359,7 @@ extension GPUWorkspace {
                 message = "Pushing the LoRA to \(result.outputRepo)…"
                 try await agent.start("push-lora", gpus: [], params: [
                     "run_id": .string(result.runID), "repo_id": .string(result.outputRepo),
-                    "private": .bool(privateResult),
+                    "private": .bool(result.isPrivate ?? true),
                 ])
                 try await waitForService("push-lora")
                 updateResult(.pushed(repo: result.outputRepo))

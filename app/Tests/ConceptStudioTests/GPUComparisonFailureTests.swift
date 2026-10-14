@@ -18,7 +18,7 @@ struct GPUComparisonFailureTests {
         workspace.pod = pod
         workspace.saved = SavedPod(
             pod: pod, started: Date(), hourlyRate: 1, budget: 10, trainer: "aitoolkit",
-            runID: "source", outputRepo: "", volumeID: "pod:offline"
+            runID: "source", volumeID: "pod:offline"
         )
         workspace.agent = agent
         workspace.runHistory = [TrainingRun(

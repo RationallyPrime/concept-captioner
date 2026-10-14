@@ -61,6 +61,23 @@ extension GPUWorkspace {
             + "\(StudioMoney.format(monthly)) a month (estimated)."
     }
 
+    /// RunPod's refusal to start a stopped pod whose host machine has no GPU free for it.
+    nonisolated static func hostHasNoFreeGPU(_ error: any Error) -> Bool {
+        let text = error.localizedDescription.lowercased()
+        return ["not enough free gpu", "no free gpu", "no longer any instances available", "not enough gpus"]
+            .contains { text.contains($0) }
+    }
+
+    /// What removing this computer to rent another would cost on its disk.
+    var removalLossExplanation: String {
+        guard currentVolumeID.hasPrefix("pod:") else {
+            return "Its files are on network storage, which stays; rent the new computer on that storage."
+        }
+        let lost = undeliveredPodOutputs
+        return "Removing it deletes its pod disk: the uploaded dataset copies, downloaded models and checkpoints"
+            + (lost.isEmpty ? "." : ", including " + lost.joined(separator: ", ") + ", which were never saved.")
+    }
+
     var outputCustodyExplanation: String {
         currentVolumeID.hasPrefix("pod:")
             ? "Your files stay on this computer's pod disk while stopped. Start this same computer to retrieve "
@@ -90,7 +107,16 @@ extension GPUWorkspace {
             guard self.budget.isFinite, self.budget > saved.accruedGPUCostUSD else {
                 throw StudioError.message("Set a whole-computer budget above its GPU cost so far before starting it.")
             }
-            try await provider.start(id: pod.id)
+            // Only the latest attempt's refusal describes the host.
+            self.restartBlockedByHost = false
+            do {
+                try await provider.start(id: pod.id)
+            } catch {
+                guard Self.hostHasNoFreeGPU(error) else { throw error }
+                self.restartBlockedByHost = true
+                throw StudioError.message("This computer's host has no free GPU, so it cannot start now. "
+                    + "Try again later, or remove it and rent a new one.")
+            }
             saved.started = Date()
             saved.budget = self.budget
             self.saved = saved
