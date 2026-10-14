@@ -48,12 +48,7 @@ selected trainer and model. Where a model genuinely differs the row names a hook
 H3 native recipe, its guidance rules and the LTX video-bucket change to the trainer settings. No code
 outside a hook tests a model's name; the trainer (`aitoolkit`, `ltx`) is still branched on.
 
-The table has five rows: FLUX.1-dev, LTX-2, MiniMax H3, Z-Image and Qwen-Image-2.1. Z-Image and
-Qwen-Image-2.1 count their training length in epochs (the app sends steps) and show their licence
-notice and first-download size under the picker. Z-Image compares through the
-`aitoolkit_arch_image` generator hook, and its picker note says a Z-Image LoRA works on Z-Image-Turbo
-at about twice the strength. Qwen-Image-2.1 is offered only on GPUs with at least 80 GB and has no
-comparison generator.
+The table has three rows: FLUX.1-dev, LTX-2 and MiniMax H3.
 
 ## Implemented
 
