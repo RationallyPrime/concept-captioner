@@ -30,8 +30,8 @@ would double-book a GPU.
 ## Run the fake agent and podctl locally (no GPU, no Docker)
 
 ```bash
-cd pod/agent  && uv venv && uv pip install -e ".[dev]"
-cd ../podctl  && uv venv && uv pip install -e ".[dev]"
+cd pod/agent  && uv sync
+cd ../podctl  && uv sync
 
 # terminal 1: two fake GPUs, services replaced by podagent.fakeservice stand-ins
 cd pod/agent && PODAGENT_TOKEN=local-dev-token-0123 PODAGENT_FAKE_GPUS=2 \
@@ -52,9 +52,10 @@ cd pod/podctl && export PODCTL_URL=http://127.0.0.1:8800 PODAGENT_TOKEN=local-de
 With Docker: `PODAGENT_TOKEN=local-dev-token-0123 docker compose -f pod/images/compose.fake.yaml up --build`
 (run from the repo root; the compose build context is the repo root).
 
-Tests and lint, each tree on its own: `pytest -q && ruff check . && ruff format --check .` in
-`agent/` and `podctl/`; `scripts/` is tested from the agent venv with `huggingface_hub datasets
-Pillow` installed (`../agent/.venv/bin/python -m pytest tests -q`). Everything runs without a
+Tests and lint, each tree on its own: `uv run pytest && ruff check . && ruff format --check . &&
+ty check` in `agent/` and `podctl/`; `scripts/` is tested from the agent venv with the `pod` extra
+(`uv sync --extra pod` in `agent/`, then `../agent/.venv/bin/python -m pytest tests -q` and the same
+three checks). Tool versions come from the repository's `mise.toml`. Everything runs without a
 GPU, Docker or the network. Counts are in `docs/POD-STATUS.md`.
 
 ## How the app creates a pod against these images

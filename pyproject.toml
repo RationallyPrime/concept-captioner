@@ -34,7 +34,10 @@ dependencies = [
 
 [project.optional-dependencies]
 hf = ["datasets>=4.8.5,<5", "huggingface_hub>=0.25,<2"]
-dev = ["pytest>=8.4,<10", "pytest-asyncio>=0.24,<2", "ruff>=0.12,<1"]
+
+[dependency-groups]
+# ruff and ty come from mise.toml.
+dev = ["pytest>=8.4,<10", "pytest-asyncio>=0.24,<2"]
 
 [project.scripts]
 concept-captioner = "concept_captioner.cli:main"
@@ -63,3 +66,7 @@ exclude = ["*.md"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 ignore = ["E501", "RUF001", "RUF012"]
+
+[tool.ty.src]
+# Tests are not type-checked.
+include = ["src"]

@@ -130,11 +130,10 @@ rows and, when `datasets` is installed, on an in-memory `datasets.Dataset` (skip
 Fixtures use the `NORA7` / `IVAN9` triggers only.
 
 ```sh
-cd pod/agent
-uv venv && uv pip install -e ".[dev]"                      # the agent venv
-uv pip install huggingface_hub datasets Pillow             # or: -e ".[dev,pod]" (adds tensorboard)
-.venv/bin/python -m pytest ../scripts/tests -q
-.venv/bin/ruff check ../scripts && .venv/bin/ruff format --check ../scripts
+cd pod/agent && uv sync --extra pod                         # the agent venv
+cd ../scripts
+../agent/.venv/bin/python -m pytest tests -q
+ruff check . && ruff format --check . && ty check            # ty.toml: tests excluded
 ```
 
 ## The model table
