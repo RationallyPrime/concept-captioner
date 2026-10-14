@@ -89,10 +89,34 @@ extension GPUWorkspace {
         }
     }
 
+    /// Drops every local trace of `pod`: the record, its agent token and its agent secret.
+    private func forgetPod(_ pod: RentedPod) async {
+        let agentSecret = saved?.agentSecret ?? ""
+        self.pod = nil
+        saved = nil
+        agent = nil
+        if !demoMode {
+            preferences.removeObject(forKey: Self.activePodKey)
+            try? deleteAgentToken("pod.\(pod.id)")
+        }
+        // A secret left behind is harmless once the pod is gone; launch pruning removes it.
+        if !agentSecret.isEmpty, let provider { try? await provider.deleteSecret(name: agentSecret) }
+    }
+
     /// Removes the computer. Outputs only on its pod disk block removal unless the user has confirmed
     /// `discardingUndeliveredOutputs`, which deletes them with the disk.
     func terminate(discardingUndeliveredOutputs: Bool = false) async {
         let lost = undeliveredPodOutputs
+        // A pod removed outside the app (RunPod console, another tool) cannot be stopped or deleted here, and
+        // the stale record would keep Rent disabled. A 404 under the current key is not proof of deletion: the
+        // key may belong to another account now, so the message says where it may still be.
+        if !demoMode, let provider, let pod, await (try? provider.exists(id: pod.id)) == false {
+            await forgetPod(pod)
+            message = "RunPod has no computer \(pod.id) under the current key, so this app no longer tracks it"
+                + (lost.isEmpty ? "" : " (with " + lost.joined(separator: ", ") + ")")
+                + ". If you changed RunPod accounts, it may still exist, and bill storage, in the other account."
+            return
+        }
         guard lost.isEmpty || discardingUndeliveredOutputs else {
             message = "This computer holds outputs that have not been pushed or saved. "
                 + "Start this same computer and retrieve them before removing it. " + stoppedPodDiskCostExplanation
@@ -103,16 +127,7 @@ extension GPUWorkspace {
         guard !hasRunningPod, let provider, let pod else { return }
         await perform {
             try await provider.terminate(id: pod.id)
-            let agentSecret = self.saved?.agentSecret ?? ""
-            self.pod = nil
-            self.saved = nil
-            self.agent = nil
-            if !self.demoMode {
-                self.preferences.removeObject(forKey: Self.activePodKey)
-                try self.deleteAgentToken("pod.\(pod.id)")
-            }
-            // A secret left behind is harmless once the pod is gone; launch pruning removes it.
-            if !agentSecret.isEmpty { try? await provider.deleteSecret(name: agentSecret) }
+            await self.forgetPod(pod)
             self.message = lost.isEmpty
                 ? "Computer removed. Its pod disk was deleted; separate network storage remains in RunPod."
                 : "Computer removed. Its pod disk was deleted with "
