@@ -1,5 +1,6 @@
 # concept-captioner pod image with ostris/ai-toolkit (the MiniMax H3 / FLUX path). POD-SPEC §6.1.
-# Build context: the repository root (nothing is copied from it; the base image carries everything).
+# Build context: the repository root. Only pod/images/patches/ai-toolkit/*.patch is copied from it (the
+# local patch series below); the base image carries everything else.
 #
 #   docker buildx build --platform=linux/amd64 -f pod/images/Dockerfile.aitoolkit \
 #       --build-arg BASE_IMAGE=concept-captioner-pod-base:dev \
@@ -49,6 +50,16 @@ RUN git init -q /opt/ai-toolkit \
  && git -C /opt/ai-toolkit log -1 --format='ai-toolkit %H %cs %s' \
  && test -f /opt/ai-toolkit/run.py \
  && test -f /opt/ai-toolkit/requirements.txt
+
+# --- local patches on top of the pin (pod/images/patches/ai-toolkit/README.md) --------------------
+# REPA (representation alignment), carried as a patch series; applied with git am so the image's
+# git log shows exactly what sits on top of AI_TOOLKIT_COMMIT. Remove when the pin includes it.
+# `git am --3way` stops at the first patch that does not fit the pin, so the build fails here, loudly
+# and before the long dependency install; the COPY itself fails if the directory holds no *.patch.
+COPY pod/images/patches/ai-toolkit/*.patch /opt/ai-toolkit-patches/
+RUN git -C /opt/ai-toolkit -c user.name=concept-captioner -c user.email=pod@concept-captioner.invalid \
+      am --3way --committer-date-is-author-date /opt/ai-toolkit-patches/*.patch \
+ && git -C /opt/ai-toolkit log --oneline "${AI_TOOLKIT_COMMIT}..HEAD"
 
 # Same order as upstream: torch first, then the requirements with torch held at the pin (otherwise
 # a transitive `torch` from timm/peft/accelerate can backtrack it), then setuptools, then the

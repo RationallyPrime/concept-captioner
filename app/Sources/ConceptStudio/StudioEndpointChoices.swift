@@ -42,7 +42,7 @@ enum ProviderChoices {
 @MainActor
 extension StudioSession {
     static let defaultPodImageName =
-        "ghcr.io/rationallyprime/concept-captioner-pod-{trainer}:v0.3.0-20261014"
+        "ghcr.io/rationallyprime/concept-captioner-pod-{trainer}:v0.3.3-20261014"
 
     /// Builds before 2026-10-12 saved the shipped default image as the training-image preference,
     /// where it read as a manual override. Once per install, a stored value that is exactly such a
@@ -249,6 +249,9 @@ extension StudioSession {
     func updateTrainingProjectDefaults(preservingTrainer: Bool = false) {
         guard gpu.repeatSourceRunID.isEmpty else { return }
         gpu.triggerWords = project?.job.triggers.joined(separator: ",") ?? ""
+        gpu.conceptClassNouns = Dictionary(
+            (project?.job.concepts ?? []).map { ($0.trigger, $0.classNoun) }, uniquingKeysWith: { first, _ in first }
+        )
         gpu.profile = project?.job.profile ?? gpu.modelTable.defaultRow.captions.imageProfile
         gpu.datasetRevision = projectState.datasetRevision
         gpu.datasetContainsVideo = project?.images.contains { Sources.isVideo(Sources.suffix(of: $0.id)) } ?? false

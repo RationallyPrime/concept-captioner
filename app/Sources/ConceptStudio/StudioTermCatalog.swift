@@ -123,6 +123,9 @@ struct StudioTerm: RawRepresentable, Hashable, Identifiable, CaseIterable, Senda
     static let trainingRecipe = Self("training-recipe")
     static let dataset = Self("dataset")
     static let guidancePreservation = Self("guidance-preservation")
+    static let regularizationImages = Self("regularization-images")
+    static let priorPreservation = Self("prior-preservation")
+    static let representationAlignment = Self("representation-alignment")
 
     static let introductory: [Self] = [
         .train, .diffusionModels, .baseModel, .concept, .trainingData,

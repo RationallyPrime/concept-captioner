@@ -1,0 +1,1055 @@
+From 55620adbda4879a6f4d13f0fe1051c9131b39ef0 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?H=C3=A1kon=20Freyr=20Gunnarsson?=
+ <rationallyprime@gmail.com>
+Date: Wed, 14 Oct 2026 00:10:10 +0000
+Subject: [PATCH] REPA: representation alignment loss for DiT training
+ (Qwen-Image-2.1)
+
+Adds REPA (Yu et al., ICLR 2025, github.com/sihyun-yu/REPA) as an optional
+auxiliary loss. A small trainable projector maps one early block's image
+tokens onto the patch features a frozen DINOv2 produces for the clean
+training image; the negative cosine similarity, averaged over tokens, is
+added to the denoising loss. Off unless the process config has a `repa:`
+block (toolkit/config_modules.py RepaConfig).
+
+- toolkit/repa.py: RepaRegularizer and the pure helpers. The encoder is fed
+  the exact pre-VAE pixels (the existing require_pixel_tensor_cache flag, as
+  MiniMax H3 uses), at the token grid's aspect ratio so each DiT token is
+  compared with the encoder patches over the same pixels. With cached
+  latents the encoder features are computed once, stored beside the latent
+  cache and the encoder is freed; without, it stays resident.
+- The block output is captured by a forward hook registered lazily on the
+  first primary prediction (so it sits on a block_compile wrapper). Only the
+  primary prediction captures. It fails with a message when nothing was
+  captured, the block ran twice, nothing trainable is upstream of it, or the
+  setup cannot work (unsupported arch, guided loss, mean_flow, video, ...).
+- The projector is its own optimizer group, initialised as in the paper from
+  its own RNG so a REPA run and its control share noise and timesteps, and
+  saved as repa_projector.pt beside optimizer.pt (outside the LoRA, the Hub
+  push and checkpoint cleanup) so a resume continues with it.
+- BaseModel gains get_repa_token_grid / get_repa_target_tokens /
+  get_repa_hidden_size / get_repa_blocks; Qwen-Image-2.1 implements the first
+  two. SDTrainer gets five small integration points.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ README.md                                     |  86 +++
+ .../qwen_image_2/qwen_image_2.py              |  11 +
+ extensions_built_in/sd_trainer/SDTrainer.py   |  93 ++-
+ toolkit/config_modules.py                     |  32 +
+ toolkit/models/base_model.py                  |  46 +-
+ toolkit/repa.py                               | 616 ++++++++++++++++++
+ 6 files changed, 869 insertions(+), 15 deletions(-)
+ create mode 100644 toolkit/repa.py
+
+diff --git a/README.md b/README.md
+index 14823bc..c91db97 100644
+--- a/README.md
++++ b/README.md
+@@ -362,6 +362,92 @@ To learn more about LoKr, read more about it at [KohakuBlueleaf/LyCORIS](https:/
+ Everything else should work the same including layer targeting.
+ 
+ 
++## REPA (representation alignment)
++
++[REPA](https://github.com/sihyun-yu/REPA) (Yu et al., *Representation Alignment for Generation: Training Diffusion
++Transformers Is Easier Than You Think*, ICLR 2025) is an optional extra loss for transformer models. A small trainable
++projector maps the image tokens of one early transformer block onto the patch features a frozen vision encoder
++(DINOv2) produces for the clean training image, and the negative cosine similarity between the two, averaged over
++tokens, is added to the denoising loss:
++
++```
++loss = denoise_loss + weight * mean_tokens(-cos(proj(h_block), encoder(x)))
++```
++
++It is off unless the process config has a `repa` block, next to `train`, `model` and `datasets`. These are the defaults:
++
++```yaml
++    repa:
++      enabled: true                    # true when the block is present; false switches it off without deleting it
++      weight: 0.5                      # lambda on the alignment term
++      block_index: 8                   # 0-indexed: the output of this block of the model's block list
++      encoder: facebook/dinov2-giant   # a Hugging Face ViT whose last_hidden_state ends with the patch grid
++      encoder_resolution: 518          # the pixel side the encoder is aimed at, see below
++      projector: mlp                   # mlp (the paper's: Linear-SiLU-Linear-SiLU-Linear) or linear (LayerNorm + Linear)
++      projector_dim: 2048              # hidden width of the mlp projector
++```
++
++Supported models: Qwen-Image-2.1. The values above are SimpleTuner's Qwen-Image-2.1 preset (DINOv2 ViT-g/14,
++block 8, lambda 0.5) with the paper's projector. Other models are added with two methods on their model class
++(`get_repa_token_grid` and `get_repa_target_tokens` in `toolkit/models/base_model.py`) and a
++`get_transformer_block_names` entry. A model without them fails at setup with a message saying so.
++
++`block_index` counts from 0 and aligns the output of that block, as SimpleTuner does. The paper's `encoder_depth=8`
++is the output of the 8th block, which is `block_index: 7`.
++
++### What it does when you train
++
++- **Pixels.** REPA turns on the same switch MiniMax H3 uses (`cache_tensors_to_disk`, forced on for the datasets that
++  cache latents), so the exact image each latent was encoded from is stored in the latent cache and handed to the
++  encoder. There is no VAE decode. A latent cache made without it is encoded once more on the first REPA run.
++- **Alignment is token for token.** The encoder sees the image at the aspect ratio of the token grid, resized so its
++  patch grid is a whole multiple of it (a 768 px Qwen-Image-2.1 image is 48 x 48 tokens and goes to the encoder at
++  672 px, one patch per token), and the encoder features are average-pooled onto the token grid. The encoder never
++  sees more than twice `encoder_resolution` on a side; larger images are encoded at that size and the features
++  are interpolated onto the token grid.
++- **With cached latents (`cache_latents_to_disk`, the usual case).** Before training, one pass computes the encoder
++  features of every image, regularization sets included, and stores them as fp16 beside the latent cache
++  (`_repa_cache`, about 7 MB per 768 px image and 12.6 MB per 1024 px image with ViT-g, so 100 images take about
++  0.7 GB). Then the encoder is freed. A later run on the same data finds them and does not load the encoder at all.
++  Delete the folder to reclaim the space. The features are keyed by the latent cache entry, the encoder and
++  `encoder_resolution`, so changing any of them makes new files. With `cache_latents` alone the features stay in memory.
++- **Without cached latents.** The encoder stays on the GPU and runs on every step, on the pixels of the batch: about
++  4.5 GB for `dinov2-giant`, 1.2 GB for `dinov2-large` and 0.35 GB for `dinov2-base`. Use `dinov2-base` on small
++  cards. Whatever augmentation the dataset applies is what the encoder sees.
++- **The projector** is a parameter group of its own at `train.lr`, initialised as in the paper. It exists for
++  training only and never enters the LoRA. It is saved as `repa_projector.pt` beside `optimizer.pt` and restored
++  when you resume, and it is skipped by the Hugging Face push and by old-checkpoint cleanup. A resumed run with a
++  different encoder, block or projector size starts the projector from scratch and says so.
++- **Turning REPA on or off between a save and a resume** changes the optimizer's parameter groups, so `optimizer.pt`
++  cannot be loaded and the optimizer starts fresh. REPA prints a warning when it sees this.
++- **Reproducibility.** The projector is initialised from `training_seed` (0 if unset) and REPA does not touch the
++  global random streams, so a run with REPA and a run without it that share a `training_seed` draw the same noise,
++  timesteps and data order.
++- **Logs.** `loss/repa` (weighted), `repa/cos` (the mean cosine similarity, 1 is perfect alignment) and `loss/denoise`
++  go to the usual loggers at `logging.log_every`. The total loss goes negative as alignment improves, so compare runs
++  on `loss/denoise`.
++
++Only the primary prediction is aligned. REPA fails with an explanation at setup, or on the first step, rather than
++doing nothing: for an unsupported model, `train_unet: false`, a trainable set that does not reach the block, a block
++that runs twice in one prediction, and the loss paths that bypass the single prediction (guided loss,
++`loss_type: mean_flow`, `unconditional_path`, `short_and_long_captions`, video and audio datasets).
++
++| Feature | With REPA |
++|---|---|
++| Gradient checkpointing | supported |
++| `block_compile` | supported: the capture hook sits on the compiled block's wrapper, outside the compiled graph |
++| Whole-model `compile` | not verified |
++| Quantization, `low_vram`, layer offloading | supported |
++| Multiple GPUs (accelerate) | supported: accelerate prepares the projector and features are cached on the main process |
++| Regularization datasets (`is_reg`, `reg_weight`) | aligned like the others and scaled by `reg_weight` with the rest of the loss |
++| Differential output preservation, blank prompt preservation | supported: their extra predictions are not aligned |
++| Gradient accumulation, batch size above 1, buckets, flips, `num_repeats` | supported |
++| Reference images (Qwen-Image-2.1 edit-style datasets) | supported: only the target image's tokens are aligned |
++| Masks (`mask_path`, alpha masks) | masks weight the denoising loss only, REPA is not masked |
++
++REPA is experimental. `repa/cos` rising over a run shows the projector learning to match the encoder.
++
++
+ ## Support My Work
+ 
+ If you enjoy my projects or use them commercially, please consider sponsoring me. Every bit helps! 💖
+diff --git a/extensions_built_in/diffusion_models/qwen_image_2/qwen_image_2.py b/extensions_built_in/diffusion_models/qwen_image_2/qwen_image_2.py
+index d9cb84b..a0636b2 100644
+--- a/extensions_built_in/diffusion_models/qwen_image_2/qwen_image_2.py
++++ b/extensions_built_in/diffusion_models/qwen_image_2/qwen_image_2.py
+@@ -721,6 +721,17 @@ class QwenImage2Model(BaseModel):
+     def get_transformer_block_names(self) -> Optional[List[str]]:
+         return ["transformer_blocks"]
+ 
++    def get_repa_token_grid(self, latent_height: int, latent_width: int):
++        # 2.1 consumes latents unpatched: one token per latent pixel
++        return latent_height, latent_width
++
++    def get_repa_target_tokens(self, block_output, latents: torch.Tensor) -> torch.Tensor:
++        # the target image closes the joint sequence (reference images and text come
++        # before it), row-major, so its tokens are the last h * w
++        batch_size, _, height, width = latents.shape
++        hidden = block_output[0] if isinstance(block_output, (tuple, list)) else block_output
++        return hidden[:, -height * width :].reshape(batch_size, height, width, -1)
++
+     def get_quantization_exclude_modules(self):
+         return QwenImage21Transformer2DModel.get_quantization_exclude_modules()
+ 
+diff --git a/extensions_built_in/sd_trainer/SDTrainer.py b/extensions_built_in/sd_trainer/SDTrainer.py
+index d464d3d..0b48018 100644
+--- a/extensions_built_in/sd_trainer/SDTrainer.py
++++ b/extensions_built_in/sd_trainer/SDTrainer.py
+@@ -1,6 +1,7 @@
+ import os
+ import random
+ from collections import OrderedDict
++from contextlib import nullcontext
+ from typing import Union, Literal, List, Optional
+ 
+ import numpy as np
+@@ -13,7 +14,7 @@ from torch.utils.data import DataLoader, ConcatDataset
+ from toolkit import train_tools
+ from toolkit.basic import value_map, adain, get_mean_std
+ from toolkit.clip_vision_adapter import ClipVisionAdapter
+-from toolkit.config_modules import GenerateImageConfig
++from toolkit.config_modules import GenerateImageConfig, RepaConfig
+ from toolkit.data_loader import get_dataloader_datasets
+ from toolkit.data_transfer_object.data_loader import DataLoaderBatchDTO, FileItemDTO
+ from toolkit.dto import DTO
+@@ -25,6 +26,7 @@ from toolkit.memory_management import sync_grad_transfers
+ from toolkit.print import print_acc
+ from toolkit.prompt_utils import PromptEmbeds, concat_prompt_embeds
+ from toolkit.reference_adapter import ReferenceAdapter
++from toolkit.repa import RepaRegularizer, validate_repa_setup
+ from toolkit.stable_diffusion_model import StableDiffusion, BlankNetwork
+ from toolkit.train_tools import get_torch_dtype, apply_snr_weight, add_all_snr_to_noise_scheduler, \
+     apply_learnable_snr_gos, LearnableSNRGamma
+@@ -58,6 +60,8 @@ class SDTrainer(BaseSDTrainProcess):
+         self.do_long_prompts = False
+         self.do_guided_loss = False
+         self.taesd: Optional[AutoencoderTiny] = None
++        # representation alignment, built from the process's `repa` block (toolkit/repa.py)
++        self.repa: Optional[RepaRegularizer] = None
+ 
+         self._clip_image_embeds_unconditional: Union[List[str], None] = None
+         self.negative_prompt_pool: Union[List[str], None] = None
+@@ -305,6 +309,36 @@ class SDTrainer(BaseSDTrainProcess):
+             self.taesd.eval()
+             self.taesd.requires_grad_(False)
+ 
++    def hook_add_extra_train_params(self, params):
++        params = super().hook_add_extra_train_params(params)
++        repa_raw = self.get_conf('repa', None)
++        if repa_raw is None:
++            return params
++        repa_config = RepaConfig(**repa_raw)
++        if not repa_config.enabled:
++            RepaRegularizer.warn_about_resume(self.save_root, False)
++            return params
++        validate_repa_setup(
++            self.sd,
++            self.train_config,
++            self.dataset_configs,
++            do_guided_loss=self.do_guided_loss,
++            job_name=self.job.name,
++        )
++        self.repa = RepaRegularizer(repa_config, self.sd, self.device_torch, self.training_seed)
++        # the encoder is fed the same pixels the latents were encoded from, so the trainer
++        # keeps each image's pixel tensor beside its latent (read after this hook)
++        self.sd.require_pixel_tensor_cache = True
++        RepaRegularizer.warn_about_resume(self.save_root, True)
++        self.repa.load(self.save_root)
++        # the projector trains with the network, in its own param group, and is not part of the saved weights
++        params.append({'params': list(self.repa.parameters()), 'lr': self.train_config.lr})
++        print_acc(
++            f"REPA: aligning the output of block {repa_config.block_index} to {repa_config.encoder}, "
++            f"weight {repa_config.weight}, {repa_config.projector} projector"
++        )
++        return params
++
+     def hook_before_train_loop(self):
+         super().hook_before_train_loop()
+         if self.is_caching_text_embeddings:
+@@ -446,6 +480,20 @@ class SDTrainer(BaseSDTrainProcess):
+                 except:
+                     pass
+ 
++        if self.repa is not None:
++            # last, so the vae is offloaded and the text encoder is gone before the encoder loads
++            self.repa.prepare(self.accelerator)
++            self.repa.drop_stale_optimizer_state(self.optimizer)
++            if self.is_latents_cached:
++                # one pass over every image, regularization sets included, then the encoder is freed
++                datasets = []
++                for data_loader in (self.data_loader, self.data_loader_reg):
++                    if data_loader is not None:
++                        datasets += get_dataloader_datasets(data_loader)
++                self.repa.cache_features(datasets, self.accelerator)
++            else:
++                self.repa.load_encoder()
++
+ 
+     def process_output_for_turbo(self, pred, noisy_latents, timesteps, noise, batch):
+         # to process turbo learning, we make one big step from our current timestep to the end
+@@ -1420,19 +1468,22 @@ class SDTrainer(BaseSDTrainProcess):
+         guidance_embedding_scale = self.train_config.cfg_scale
+         if self.train_config.do_guidance_loss:
+             guidance_embedding_scale = self._guidance_loss_target_batch
+-        return self.sd.predict_noise(
+-            latents=noisy_latents.to(self.device_torch, dtype=dtype),
+-            conditional_embeddings=conditional_embeds.to(self.device_torch, dtype=dtype),
+-            unconditional_embeddings=unconditional_embeds,
+-            timestep=timesteps,
+-            guidance_scale=self.train_config.cfg_scale,
+-            guidance_embedding_scale=guidance_embedding_scale,
+-            detach_unconditional=False,
+-            rescale_cfg=self.train_config.cfg_rescale,
+-            bypass_guidance_embedding=self.train_config.bypass_guidance_embedding,
+-            batch=batch,
+-            **kwargs
+-        )
++        # REPA reads a block of the primary prediction only, never of DOP/BPP or prior passes
++        capture = self.repa.capture(is_primary_pred) if self.repa is not None else nullcontext()
++        with capture:
++            return self.sd.predict_noise(
++                latents=noisy_latents.to(self.device_torch, dtype=dtype),
++                conditional_embeddings=conditional_embeds.to(self.device_torch, dtype=dtype),
++                unconditional_embeddings=unconditional_embeds,
++                timestep=timesteps,
++                guidance_scale=self.train_config.cfg_scale,
++                guidance_embedding_scale=guidance_embedding_scale,
++                detach_unconditional=False,
++                rescale_cfg=self.train_config.cfg_rescale,
++                bypass_guidance_embedding=self.train_config.bypass_guidance_embedding,
++                batch=batch,
++                **kwargs
++            )
+     
+ 
+     def train_llm_accumulation(self, batch: DataLoaderBatchDTO, accum_scale: float = 1.0):
+@@ -2276,6 +2327,15 @@ class SDTrainer(BaseSDTrainProcess):
+                             mask_multiplier=mask_multiplier,
+                             prior_pred=prior_to_calculate_loss,
+                         )
++
++                    if self.repa is not None:
++                        # before preservation and the loss multiplier, so reg_weight and the
++                        # dataset's loss_multiplier weigh the whole batch loss
++                        with self.timer('repa'):
++                            repa_loss, repa_logs = self.repa.loss(batch, batch.latents)
++                            self.additional_logs['loss/denoise'] = loss.item()
++                            loss = loss + repa_loss
++                            self.additional_logs.update(repa_logs)
+                     
+                     if self.train_config.diff_output_preservation or self.train_config.blank_prompt_preservation:
+                         with torch.no_grad():
+@@ -2338,6 +2398,11 @@ class SDTrainer(BaseSDTrainProcess):
+         return loss.detach()
+         # flush()
+ 
++    def post_save_hook(self, save_path):
++        super().post_save_hook(save_path)
++        if self.repa is not None:
++            self.repa.save(self.save_root)
++
+     def hook_train_loop(self, batch: Union[DataLoaderBatchDTO, List[DataLoaderBatchDTO]]):
+         if isinstance(batch, list):
+             batch_list = batch
+diff --git a/toolkit/config_modules.py b/toolkit/config_modules.py
+index 4f05d74..77ffdbc 100644
+--- a/toolkit/config_modules.py
++++ b/toolkit/config_modules.py
+@@ -844,6 +844,38 @@ class EMAConfig:
+         self.param_multiplier: float = kwargs.get('param_multiplier', 1.0)
+ 
+ 
++# keys a process-level `repa:` block may hold, see toolkit/repa.py
++REPA_KEYS = ('enabled', 'weight', 'block_index', 'encoder', 'encoder_resolution', 'projector', 'projector_dim')
++
++
++class RepaConfig:
++    """The process-level `repa:` block (representation alignment, toolkit/repa.py).
++
++    A key that is not listed in REPA_KEYS is an error, so a misspelt key is not silently ignored.
++    """
++
++    def __init__(self, **kwargs):
++        unknown = [key for key in kwargs if key not in REPA_KEYS]
++        if unknown:
++            raise ValueError(f"unknown repa key: {', '.join(unknown)}. Valid keys: {', '.join(REPA_KEYS)}")
++        # on when the block is present; the UI writes false to switch it off without deleting it
++        self.enabled: bool = kwargs.get('enabled', True)
++        # lambda on the alignment term, the paper's default
++        self.weight: float = kwargs.get('weight', 0.5)
++        # 0-indexed: the OUTPUT of this block of the model's block list (SimpleTuner's convention).
++        # The paper's encoder_depth=8 is the output of the 8th block, i.e. index 7
++        self.block_index: int = kwargs.get('block_index', 8)
++        # any Hugging Face ViT whose last_hidden_state ends with the patch grid (DINOv2, DINOv2 with registers, ...)
++        self.encoder: str = kwargs.get('encoder', 'facebook/dinov2-giant')
++        # the pixel side REPA aims the encoder at; the grid is a whole multiple of the token grid
++        # and the encoder input never exceeds twice this
++        self.encoder_resolution: int = kwargs.get('encoder_resolution', 518)
++        # mlp: the reference projector (Linear-SiLU-Linear-SiLU-Linear); linear: LayerNorm + Linear
++        self.projector: str = kwargs.get('projector', 'mlp')
++        # hidden width of the mlp projector
++        self.projector_dim: int = kwargs.get('projector_dim', 2048)
++
++
+ class ReferenceDatasetConfig:
+     def __init__(self, **kwargs):
+         # can pass with a side by side pait or a folder with pos and neg folder
+diff --git a/toolkit/models/base_model.py b/toolkit/models/base_model.py
+index 29256fd..c76366f 100644
+--- a/toolkit/models/base_model.py
++++ b/toolkit/models/base_model.py
+@@ -5,7 +5,7 @@ import json
+ import random
+ import shutil
+ import typing
+-from typing import Optional, Union, List, Literal
++from typing import Optional, Union, List, Literal, Tuple
+ import os
+ from collections import OrderedDict
+ import copy
+@@ -1766,6 +1766,50 @@ class BaseModel:
+         # override in child classes to get transformer block names for lora targeting
+         return None
+ 
++    def get_repa_token_grid(self, latent_height: int, latent_width: int) -> Optional[Tuple[int, int]]:
++        """Token grid (h, w) of the target image for a latent of this size, or None when
++        the model does not support REPA (toolkit/repa.py). Override together with
++        get_repa_target_tokens."""
++        return None
++
++    def get_repa_target_tokens(self, block_output, latents: torch.Tensor) -> torch.Tensor:
++        """A REPA block's raw forward output (a tensor or a tuple, whatever the block
++        returns) -> the target image's tokens as (B, h, w, D), row-major, with
++        (h, w) = get_repa_token_grid(*latents.shape[-2:]). Reference or condition image
++        tokens and text tokens must not be included."""
++        raise NotImplementedError(f"REPA target tokens are not defined for arch {self.arch}")
++
++    def get_repa_hidden_size(self) -> int:
++        """Width D of the tokens get_repa_target_tokens returns. Read from the transformer
++        config (hidden_size, inner_dim, dim or num_attention_heads * attention_head_dim);
++        override when a model's config has none of them."""
++        config = getattr(unwrap_model(self.model), "config", None)
++        for key in ("hidden_size", "inner_dim", "dim"):
++            value = getattr(config, key, None)
++            if isinstance(value, int) and value > 0:
++                return value
++        heads = getattr(config, "num_attention_heads", None)
++        head_dim = getattr(config, "attention_head_dim", None)
++        if isinstance(heads, int) and isinstance(head_dim, int) and heads > 0 and head_dim > 0:
++            return heads * head_dim
++        raise ValueError(
++            f"Cannot read the transformer width for arch {self.arch}: its config has none of hidden_size, "
++            f"inner_dim, dim or num_attention_heads * attention_head_dim. Override get_repa_hidden_size."
++        )
++
++    def get_repa_blocks(self) -> torch.nn.ModuleList:
++        """The block list REPA indexes: the first name in get_transformer_block_names(),
++        resolved as a dotted path on the unwrapped transformer."""
++        names = self.get_transformer_block_names()
++        if not names:
++            raise ValueError(f"Arch {self.arch} names no transformer block list (get_transformer_block_names)")
++        blocks = unwrap_model(self.model)
++        for part in names[0].split("."):
++            blocks = getattr(blocks, part, None)
++            if blocks is None:
++                raise ValueError(f"Arch {self.arch} has no transformer block list at '{names[0]}'")
++        return blocks
++
+     def get_quantization_exclude_modules(self) -> Optional[List[str]]:
+         # override in child classes to keep sensitive modules in full precision when
+         # quantizing. Returns fnmatch patterns matched against the transformer's module
+diff --git a/toolkit/repa.py b/toolkit/repa.py
+new file mode 100644
+index 0000000..08b8c69
+--- /dev/null
++++ b/toolkit/repa.py
+@@ -0,0 +1,616 @@
++"""REPA: representation alignment for diffusion transformer training.
++
++Yu et al., "Representation Alignment for Generation: Training Diffusion Transformers Is
++Easier Than You Think" (ICLR 2025), reference code github.com/sihyun-yu/REPA.
++
++A small trainable projector maps the image tokens a DiT produces after one early block
++onto the patch features a frozen vision encoder (DINOv2) produces for the clean training
++image. The negative cosine similarity, averaged over tokens, is added to the denoising loss:
++
++    loss = denoise_loss + weight * mean_tokens(-cos(proj(h_block), enc(x)))
++
++The projector is training state only: it is saved beside the optimizer state
++(`repa_projector.pt`) so a resumed run continues with it, and it never enters the LoRA.
++
++Config, a top-level block of the process next to `train`, `model` and `datasets`
++(`RepaConfig` in toolkit/config_modules.py):
++
++    repa:
++      enabled: true                   # default true when the block is present
++      weight: 0.5                     # lambda on the alignment term
++      block_index: 8                  # 0-indexed: the OUTPUT of this block of the model's block list
++      encoder: facebook/dinov2-giant  # HF AutoModel id or local path
++      encoder_resolution: 518         # the pixel side the encoder is aimed at (input never exceeds 2x this)
++      projector: mlp                  # mlp (the reference) | linear (LayerNorm + Linear)
++      projector_dim: 2048             # hidden width of the mlp projector
++
++A model supports REPA by implementing two methods of toolkit.models.base_model.BaseModel,
++get_repa_token_grid and get_repa_target_tokens, and by naming its block list in
++get_transformer_block_names. `validate_repa_setup` fails before any weights are downloaded
++when the arch or the surrounding training setup cannot work.
++
++Image features are aligned token for token. The clean image goes to the encoder at the
++aspect ratio of the token grid, resized so the encoder's patch grid is a whole multiple k of
++it, and the encoder features are average-pooled by k, so every DiT token is compared with
++the encoder patches that cover the same pixels (`encoder_grid`). Grids too large for the
++encoder (above twice `encoder_resolution`) are encoded at the largest grid under that
++ceiling and the feature map is interpolated in 2D onto the token grid.
++
++The pixels are the exact tensors the latents were encoded from. REPA turns on the model's
++`require_pixel_tensor_cache` flag, so the trainer stores each image's pre-VAE tensor beside
++its cached latent. When latents are cached, the encoder runs once per image in a caching
++pass before training, its features are stored beside the latent cache (`_repa_cache`) and
++the encoder is freed; a later run on the same data never loads it. Without latent caching
++the encoder stays resident and runs on every step.
++"""
++
++import hashlib
++import math
++import os
++import random
++from contextlib import contextmanager
++from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Tuple
++
++import numpy as np
++import torch
++import torch.nn as nn
++import torch.nn.functional as F
++from safetensors import safe_open
++from safetensors.torch import load_file, save_file
++from tqdm import tqdm
++from transformers import AutoConfig, AutoModel
++
++from toolkit.accelerator import unwrap_model
++from toolkit.basic import flush
++from toolkit.print import print_acc
++
++if TYPE_CHECKING:
++    from toolkit.config_modules import DatasetConfig, RepaConfig, TrainConfig
++    from toolkit.data_loader import AiToolkitDataset
++    from toolkit.data_transfer_object.data_loader import DataLoaderBatchDTO, FileItemDTO
++
++IMAGENET_MEAN = (0.485, 0.456, 0.406)
++IMAGENET_STD = (0.229, 0.224, 0.225)
++
++# bump when what a cached feature map contains changes, so old files are never read
++REPA_CACHE_VERSION = 1
++
++# beside optimizer.pt in the save folder. `.pt` keeps it out of the Hub push (which ignores
++# *.pt) and the name does not start with the job name, so checkpoint cleanup leaves it alone
++PROJECTOR_FILE = "repa_projector.pt"
++# beside `_latent_cache`, one file per cached image
++FEATURE_CACHE_DIR = "_repa_cache"
++
++
++# ----------------------------------------------------------------------------
++# pure helpers
++# ----------------------------------------------------------------------------
++def encoder_grid(h: int, w: int, patch: int, encoder_resolution: int) -> Tuple[int, int, int, bool]:
++    """Encoder patch grid for an (h, w) token grid: (gh, gw, k, interpolate).
++
++    The encoder grid is k times the token grid, with k the whole number that puts the number
++    of patches closest to (encoder_resolution // patch) ** 2, so `to_token_grid` can average
++    the k x k patches under each token. At 768 px a Qwen-Image-2.1 latent is 48 x 48 tokens and
++    the encoder sees 672 px, one patch per token (k = 1); images under about 400 px get k = 2.
++
++    The encoder never sees more than twice `encoder_resolution` pixels on a side. Above that
++    the grid is the largest one at the token grid's aspect that fits (k = 1, interpolate
++    True) and the feature map has to be interpolated onto the token grid instead.
++    """
++    n_target = (encoder_resolution // patch) ** 2
++    k = max(1, round(math.sqrt(n_target / (h * w))))
++    gh, gw = k * h, k * w
++    if max(gh, gw) * patch > 2 * encoder_resolution:
++        longest = 2 * encoder_resolution // patch
++        return max(1, h * longest // max(h, w)), max(1, w * longest // max(h, w)), 1, True
++    return gh, gw, k, False
++
++
++def preprocess(pixels: torch.Tensor, gh: int, gw: int, patch: int) -> torch.Tensor:
++    """(B, C, H, W) images in [-1, 1] -> (B, 3, gh * patch, gw * patch), ImageNet-normalised.
++    Bicubic with antialiasing, like the reference's resize; extra channels (RGBA) are dropped."""
++    x = pixels[:, :3].float().clamp(-1, 1) * 0.5 + 0.5
++    x = F.interpolate(x, size=(gh * patch, gw * patch), mode="bicubic", align_corners=False, antialias=True)
++    x = x.clamp(0, 1)
++    mean = torch.tensor(IMAGENET_MEAN, device=x.device, dtype=x.dtype).view(1, 3, 1, 1)
++    std = torch.tensor(IMAGENET_STD, device=x.device, dtype=x.dtype).view(1, 3, 1, 1)
++    return (x - mean) / std
++
++
++def patch_tokens(last_hidden_state: torch.Tensor, gh: int, gw: int) -> torch.Tensor:
++    """The patch grid of a ViT's last_hidden_state as (B, gh, gw, D). The class token and any
++    register tokens come first, so the grid is the tail of the sequence."""
++    batch_size = last_hidden_state.shape[0]
++    return last_hidden_state[:, -gh * gw :].reshape(batch_size, gh, gw, -1)
++
++
++def to_token_grid(features: torch.Tensor, h: int, w: int, k: int, interpolate: bool) -> torch.Tensor:
++    """(B, gh, gw, D) encoder features -> (B, h * w, D) on the DiT token grid, row-major:
++    k x k average pooling when k > 1, 2D bilinear interpolation when `interpolate`."""
++    x = features.permute(0, 3, 1, 2)
++    if interpolate:
++        x = F.interpolate(x, size=(h, w), mode="bilinear", align_corners=False)
++    elif k > 1:
++        x = F.avg_pool2d(x, kernel_size=k, stride=k)
++    if tuple(x.shape[-2:]) != (h, w):
++        raise ValueError(f"encoder features of grid {tuple(features.shape[1:3])} do not map onto a {h}x{w} token grid")
++    return x.flatten(2).transpose(1, 2).contiguous()
++
++
++def alignment_loss(projected: torch.Tensor, target: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
++    """(B, N, D) projected DiT tokens against (B, N, D) encoder features -> (-cos.mean(), cos.mean()).
++    The sign of the first is the loss to minimise; the reference averages per sample then over
++    the batch, which is the same mean because every sample has the same N."""
++    cos = (F.normalize(projected.float(), dim=-1) * F.normalize(target.float(), dim=-1)).sum(dim=-1)
++    mean = cos.mean()
++    return -mean, mean
++
++
++def build_projector(
++    kind: str, hidden: int, projector_dim: int, encoder_dim: int, generator: torch.Generator
++) -> nn.Module:
++    """The projector from DiT width to encoder width. `mlp` is the reference's build_mlp,
++    Linear-SiLU-Linear-SiLU-Linear; `linear` is LayerNorm + Linear. Every Linear is
++    initialised as the reference does (xavier-uniform weights, zero bias), from `generator`."""
++    if kind == "mlp":
++        projector = nn.Sequential(
++            nn.Linear(hidden, projector_dim),
++            nn.SiLU(),
++            nn.Linear(projector_dim, projector_dim),
++            nn.SiLU(),
++            nn.Linear(projector_dim, encoder_dim),
++        )
++    elif kind == "linear":
++        projector = nn.Sequential(nn.LayerNorm(hidden), nn.Linear(hidden, encoder_dim))
++    else:
++        raise ValueError(f"unknown repa projector {kind!r}")
++    for module in projector.modules():
++        if isinstance(module, nn.Linear):
++            nn.init.xavier_uniform_(module.weight, generator=generator)
++            nn.init.zeros_(module.bias)
++    return projector
++
++
++def feature_cache_key(latent_cache_name: str, encoder: str, encoder_resolution: int, h: int, w: int) -> str:
++    """Names a cached feature map. The latent cache file name already changes with the image,
++    bucket, crop, flip, resolution and latent space, so a feature file can never outlive the
++    pixels it was computed from; the rest of the key is everything else the features depend on."""
++    key = f"{latent_cache_name}|{encoder}|{encoder_resolution}|{h}x{w}|v{REPA_CACHE_VERSION}"
++    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
++
++
++@contextmanager
++def _isolated_rng():
++    """Run a block without moving the global random streams. REPA builds its projector and
++    loads its encoder inside this, so a run with REPA and its control (same training_seed) draw
++    the same noise, timesteps and data order."""
++    python_state = random.getstate()
++    numpy_state = np.random.get_state()
++    try:
++        with torch.random.fork_rng(devices=[]):
++            yield
++    finally:
++        random.setstate(python_state)
++        np.random.set_state(numpy_state)
++
++
++# ----------------------------------------------------------------------------
++# setup validation
++# ----------------------------------------------------------------------------
++def validate_repa_setup(
++    sd,
++    train_config: "TrainConfig",
++    dataset_configs: List["DatasetConfig"],
++    do_guided_loss: bool = False,
++    job_name: Optional[str] = None,
++) -> None:
++    """Fail before anything is downloaded or trained when REPA cannot work: an arch without the
++    hooks, or a training setup that bypasses the prediction REPA reads. The values of the `repa`
++    block are not judged here. Every message names the key or feature at fault."""
++    arch = getattr(sd, "arch", None)
++    token_grid = getattr(sd, "get_repa_token_grid", None)
++    if token_grid is None or token_grid(16, 16) is None:
++        raise ValueError(
++            f"REPA is not implemented for arch '{arch}': it needs get_repa_token_grid and get_repa_target_tokens"
++        )
++    if not train_config.train_unet:
++        raise ValueError("REPA needs the transformer trained: set train.train_unet to true")
++
++    # the paths that bypass the single primary prediction REPA reads its block from
++    unsupported = []
++    if do_guided_loss:
++        unsupported.append("guided loss")
++    if train_config.loss_type == "mean_flow":
++        unsupported.append("train.loss_type mean_flow")
++    if train_config.short_and_long_captions:
++        unsupported.append("train.short_and_long_captions")
++    for dataset in dataset_configs:
++        if dataset.unconditional_path is not None:
++            unsupported.append("unconditional_path datasets")
++        if dataset.num_frames > 1 or dataset.auto_frame_count:
++            unsupported.append("video datasets")
++        if dataset.do_i2v:
++            unsupported.append("do_i2v datasets")
++        if dataset.do_audio:
++            unsupported.append("audio datasets")
++    if unsupported:
++        feature = ", ".join(dict.fromkeys(unsupported))
++        raise ValueError(f"REPA is not supported with {feature}: it needs the single primary prediction")
++
++    # checkpoint cleanup and "latest checkpoint" search match files by the job name as a prefix
++    if job_name and PROJECTOR_FILE.startswith(job_name):
++        raise ValueError(
++            f"A job named '{job_name}' would treat {PROJECTOR_FILE} as one of its checkpoints. Rename the job."
++        )
++
++
++# ----------------------------------------------------------------------------
++# the regularizer
++# ----------------------------------------------------------------------------
++class RepaRegularizer:
++    def __init__(
++        self,
++        config: "RepaConfig",
++        sd,
++        device: torch.device,
++        training_seed: Optional[int] = None,
++    ):
++        self.config = config
++        self.sd = sd
++        self.device = torch.device(device)
++
++        self.encoder: Optional[nn.Module] = None
++        # feature maps of datasets that cache latents in memory only; the disk cache is read per step
++        self._memory_cache: Dict[str, torch.Tensor] = {}
++        self._features_cached = False
++
++        # capture state, see capture()
++        self._active = False
++        self._captured = None
++        self._fired = 0
++        self._hook_handle = None
++        self._hooked_block: Optional[nn.Module] = None
++        self._grad_checked = False
++
++        # resume state, see load() and drop_stale_optimizer_state()
++        self.restored = False
++        self._stale_optimizer_state = False
++
++        with _isolated_rng():
++            # the width and patch size come from the config alone, the weights are loaded on demand
++            encoder_config = AutoConfig.from_pretrained(config.encoder)
++            patch_size = getattr(encoder_config, "patch_size", None)
++            encoder_dim = getattr(encoder_config, "hidden_size", None)
++            if not isinstance(patch_size, int) or not isinstance(encoder_dim, int):
++                raise ValueError(
++                    f"repa.encoder '{config.encoder}' has no integer patch_size and hidden_size in its config: "
++                    "it needs to be a ViT whose last_hidden_state ends with the patch grid"
++                )
++            self.patch_size = patch_size
++            self.encoder_dim = encoder_dim
++            self.hidden_size = sd.get_repa_hidden_size()
++
++            generator = torch.Generator().manual_seed(0 if training_seed is None else int(training_seed))
++            self.projector: nn.Module = build_projector(
++                config.projector, self.hidden_size, config.projector_dim, encoder_dim, generator
++            )
++            self.projector.to(self.device, dtype=torch.float32).train()
++
++    # -- projector -------------------------------------------------------------
++    def _unwrapped_projector(self) -> nn.Module:
++        return unwrap_model(self.projector)
++
++    def parameters(self) -> Iterator[nn.Parameter]:
++        return self._unwrapped_projector().parameters()
++
++    def prepare(self, accelerator) -> None:
++        """Let accelerate wrap the projector so its gradients are reduced across processes."""
++        self.projector = accelerator.prepare(self.projector)
++
++    def state_dict(self) -> dict:
++        return {key: value.detach().cpu().clone() for key, value in self._unwrapped_projector().state_dict().items()}
++
++    def load_state_dict(self, state: dict) -> None:
++        self._unwrapped_projector().load_state_dict(state)
++
++    def _state_config(self) -> dict:
++        # what a saved projector has to agree with to be of any use to this run
++        return {
++            "encoder": self.config.encoder,
++            "block_index": self.config.block_index,
++            "projector": self.config.projector,
++            "projector_dim": self.config.projector_dim,
++            "hidden": self.hidden_size,
++            "encoder_dim": self.encoder_dim,
++        }
++
++    def save(self, save_root: str) -> None:
++        """Write the projector beside optimizer.pt, replacing the previous file."""
++        os.makedirs(save_root, exist_ok=True)
++        path = os.path.join(save_root, PROJECTOR_FILE)
++        temporary = f"{path}.tmp"
++        torch.save({"projector": self.state_dict(), "config": self._state_config()}, temporary)
++        os.replace(temporary, path)
++
++    def load(self, save_root: str) -> bool:
++        """Restore the projector a previous run saved. Returns False, with a warning when there
++        was a file that does not fit, and the projector keeps its fresh initialisation."""
++        optimizer_file = os.path.join(save_root, "optimizer.pt")
++        path = os.path.join(save_root, PROJECTOR_FILE)
++        self.restored = False
++        if os.path.exists(path):
++            try:
++                saved = torch.load(path, map_location="cpu", weights_only=True)
++                self._check_saved(saved)
++                self.load_state_dict(saved["projector"])
++                self.restored = True
++                print_acc(f"REPA: restored the projector from {path}")
++            except Exception as e:
++                print_acc(f"REPA: not using {path} ({e}); the projector starts from scratch")
++        # optimizer.pt may carry moments for a projector that is now fresh
++        self._stale_optimizer_state = not self.restored and os.path.exists(optimizer_file)
++        return self.restored
++
++    def _check_saved(self, saved: dict) -> None:
++        """Raise ValueError, in words that finish "not using <file> (...)", unless a saved projector fits this run."""
++        if not isinstance(saved, dict) or "projector" not in saved or "config" not in saved:
++            raise ValueError("it is not a REPA projector file")
++        differs = [key for key, value in self._state_config().items() if saved["config"].get(key) != value]
++        if differs:
++            raise ValueError("it was saved with another " + ", ".join(differs))
++        current = self._unwrapped_projector().state_dict()
++        if set(saved["projector"]) != set(current) or any(
++            saved["projector"][key].shape != value.shape for key, value in current.items()
++        ):
++            raise ValueError("its weights do not fit the projector")
++
++    def drop_stale_optimizer_state(self, optimizer) -> None:
++        """Forget what the optimizer holds for the projector after a run that restored the
++        optimizer state but could not restore the projector, so fresh weights never meet the
++        moments of trained ones."""
++        if not self._stale_optimizer_state:
++            return
++        self._stale_optimizer_state = False
++        state = getattr(optimizer, "state", None)
++        if state is None:
++            return
++        dropped = sum(state.pop(parameter, None) is not None for parameter in self.parameters())
++        if dropped:
++            print_acc("REPA: the projector is new, so the optimizer state loaded for it was dropped")
++
++    @staticmethod
++    def warn_about_resume(save_root: str, enabled: bool) -> None:
++        """Say so when REPA was turned on or off since the last save. The optimizer then has a
++        different number of parameter groups and the existing loader falls back to a fresh
++        optimizer (it prints that it could not load optimizer.pt)."""
++        if not os.path.exists(os.path.join(save_root, "optimizer.pt")):
++            return
++        has_projector = os.path.exists(os.path.join(save_root, PROJECTOR_FILE))
++        if enabled and not has_projector:
++            print_acc(
++                f"REPA is on but {save_root} has an optimizer.pt and no {PROJECTOR_FILE}. If REPA was turned on "
++                "since the last save, the optimizer param groups changed, so optimizer.pt will not load and a "
++                "fresh optimizer is used."
++            )
++        elif not enabled and has_projector:
++            print_acc(
++                f"REPA is off but {save_root} holds a {PROJECTOR_FILE} from an earlier run. REPA was turned off "
++                "since the last save, so the optimizer param groups changed, optimizer.pt will not load and a "
++                "fresh optimizer is used."
++            )
++
++    # -- encoder ---------------------------------------------------------------
++    def load_encoder(self) -> None:
++        if self.encoder is not None:
++            return
++        print_acc(f"REPA: loading the encoder {self.config.encoder}")
++        with _isolated_rng():
++            encoder = AutoModel.from_pretrained(self.config.encoder, dtype=torch.float32)
++        self.encoder = encoder.eval().requires_grad_(False).to(self.device)
++
++    def _free_encoder(self) -> None:
++        if self.encoder is None:
++            return
++        self.encoder = None
++        flush()
++
++    @torch.no_grad()
++    def encode(self, pixels: torch.Tensor, h: int, w: int) -> torch.Tensor:
++        """Encoder features of a batch of images in [-1, 1] on an (h, w) token grid: (B, h * w, D_enc), fp32."""
++        gh, gw, k, interpolate = encoder_grid(h, w, self.patch_size, self.config.encoder_resolution)
++        x = preprocess(pixels.to(self.device), gh, gw, self.patch_size)
++        hidden = self.encoder(pixel_values=x).last_hidden_state
++        return to_token_grid(patch_tokens(hidden, gh, gw).float(), h, w, k, interpolate)
++
++    # -- feature cache ---------------------------------------------------------
++    def _feature_key(self, file_item: "FileItemDTO", h: int, w: int) -> str:
++        # names a file inside the item's own `_repa_cache` folder, so the latent's file name is enough
++        latent_name = os.path.basename(file_item.get_latent_path())
++        return feature_cache_key(latent_name, self.config.encoder, self.config.encoder_resolution, h, w)
++
++    def _memory_key(self, file_item: "FileItemDTO", h: int, w: int) -> str:
++        # the in-memory cache is shared by every dataset and a latent's file name does not include its
++        # folder (two folders can each hold a 001.png), so this key carries the whole latent path
++        return f"{file_item.get_latent_path()}|{self._feature_key(file_item, h, w)}"
++
++    @staticmethod
++    def _feature_path(file_item: "FileItemDTO", key: str) -> str:
++        # beside the `_latent_cache` folder the latent lives in
++        image_dir = os.path.dirname(os.path.dirname(file_item.get_latent_path()))
++        stem = os.path.splitext(os.path.basename(file_item.path))[0]
++        return os.path.join(image_dir, FEATURE_CACHE_DIR, f"{stem}_{key}.safetensors")
++
++    @staticmethod
++    def _latent_grid(file_item: "FileItemDTO") -> Tuple[int, int]:
++        """(h, w) of a cached latent without loading it from disk."""
++        latent = file_item._encoded_latent
++        if latent is not None:
++            return int(latent.shape[-2]), int(latent.shape[-1])
++        with safe_open(file_item.get_latent_path(), framework="pt") as f:
++            shape = f.get_slice("latent").get_shape()
++        return int(shape[-2]), int(shape[-1])
++
++    def _collect_items(self, datasets: List["AiToolkitDataset"]) -> list:
++        """One (file_item, memory_key, h, w, path) per distinct cached latent file. num_repeats
++        copies and any other items that share a latent file are one entry; the same file name in
++        two folders is two."""
++        entries, seen = [], set()
++        for dataset in datasets:
++            for file_item in getattr(dataset, "file_list", []):
++                if not file_item.is_latent_cached:
++                    continue
++                latent_path = file_item.get_latent_path()
++                if latent_path in seen:
++                    continue
++                seen.add(latent_path)
++                h, w = self.sd.get_repa_token_grid(*self._latent_grid(file_item))
++                path = None
++                if file_item.is_caching_to_disk:
++                    path = self._feature_path(file_item, self._feature_key(file_item, h, w))
++                entries.append((file_item, self._memory_key(file_item, h, w), h, w, path))
++        return entries
++
++    def cache_features(self, datasets: List["AiToolkitDataset"], accelerator) -> None:
++        """Compute the encoder features of every cached latent that does not have them yet, then
++        free the encoder. Features go beside the latent cache when latents are cached to disk and
++        stay in memory when they are cached only in memory. If nothing is missing the encoder is
++        not loaded, not even downloaded."""
++        with _isolated_rng():
++            entries = self._collect_items(datasets)
++            # a disk cache is shared, so one process fills it; memory caches are per process
++            missing = [
++                entry
++                for entry in entries
++                if (entry[4] is None) or (accelerator.is_main_process and not os.path.exists(entry[4]))
++            ]
++            if not missing:
++                print_acc(f"REPA: all {len(entries)} feature maps cached; encoder not loaded")
++            else:
++                print_acc(f"REPA: caching {len(missing)} of {len(entries)} feature maps with {self.config.encoder}")
++                self.load_encoder()
++                for file_item, memory_key, h, w, path in tqdm(missing, desc="Caching REPA features"):
++                    features = self._encode_cached_item(file_item, h, w)
++                    if path is None:
++                        self._memory_cache[memory_key] = features
++                    else:
++                        self._write_features(path, features, h, w)
++                self._free_encoder()
++        self._features_cached = True
++        accelerator.wait_for_everyone()
++
++    @torch.no_grad()
++    def _encode_cached_item(self, file_item: "FileItemDTO", h: int, w: int) -> torch.Tensor:
++        file_item.get_latent()  # rebuilds file_item.tensor from the pixel tensor cached beside the latent
++        if file_item.tensor is None:
++            raise RuntimeError(
++                f"REPA found no pixel tensor for {file_item.path}: its latent was cached without "
++                "cache_tensors_to_disk, delete the _latent_cache folder to cache it again"
++            )
++        features = self.encode(file_item.tensor.unsqueeze(0), h, w)[0]
++        file_item.tensor = None
++        file_item.cleanup_latent()
++        return features.to(torch.float16).cpu()
++
++    def _write_features(self, path: str, features: torch.Tensor, h: int, w: int) -> None:
++        os.makedirs(os.path.dirname(path), exist_ok=True)
++        temporary = f"{path}.tmp"
++        metadata = {
++            "encoder": self.config.encoder,
++            "encoder_resolution": str(self.config.encoder_resolution),
++            "grid": f"{h}x{w}",
++            "version": str(REPA_CACHE_VERSION),
++        }
++        save_file({"features": features.contiguous()}, temporary, metadata=metadata)
++        os.replace(temporary, path)
++
++    def _read_features(self, file_item: "FileItemDTO", h: int, w: int) -> torch.Tensor:
++        features = self._memory_cache.get(self._memory_key(file_item, h, w))
++        if features is None:
++            path = self._feature_path(file_item, self._feature_key(file_item, h, w))
++            if not os.path.exists(path):
++                raise RuntimeError(f"REPA has no cached features for {file_item.path} (expected {path})")
++            features = load_file(path)["features"]
++        if tuple(features.shape) != (h * w, self.encoder_dim):
++            raise RuntimeError(
++                f"REPA features of {file_item.path} have shape {tuple(features.shape)}, "
++                f"expected {(h * w, self.encoder_dim)}"
++            )
++        return features
++
++    def _target_features(self, batch: "DataLoaderBatchDTO", h: int, w: int) -> torch.Tensor:
++        """Encoder features of the batch's clean images on the (h, w) token grid: (B, h * w, D_enc) fp32."""
++        if self._features_cached:
++            features = [self._read_features(file_item, h, w) for file_item in batch.file_items]
++            return torch.stack(features).to(self.device, dtype=torch.float32)
++        if batch.tensor is None:
++            raise RuntimeError("REPA needs the batch's pixel tensor and found none")
++        self.load_encoder()
++        return self.encode(batch.tensor, h, w)
++
++    # -- capture ---------------------------------------------------------------
++    def _register_hook(self) -> None:
++        # resolved at the first capture, not at construction: block_compile swaps list entries
++        # for torch.compile wrappers after setup, and a hook on a wrapper runs outside the graph
++        block = self.sd.get_repa_blocks()[self.config.block_index]
++        if block is self._hooked_block:
++            return
++        if self._hook_handle is not None:
++            self._hook_handle.remove()
++        self._hook_handle = block.register_forward_hook(self._on_block_output)
++        self._hooked_block = block
++
++    def _on_block_output(self, module, args, output) -> None:
++        # inactive for the recomputation gradient checkpointing runs in backward
++        if self._active:
++            self._fired += 1
++            self._captured = output
++
++    @contextmanager
++    def capture(self, active: bool):
++        """Hold the raw output of the REPA block for the model call inside the context. Only the
++        primary prediction captures, so DOP/BPP passes, prior predictions, validation and
++        sampling pass through with active=False."""
++        if not active:
++            yield
++            return
++        self._register_hook()
++        self._captured, self._fired = None, 0
++        self._active = True
++        try:
++            yield
++        finally:
++            self._active = False
++
++    # -- loss ------------------------------------------------------------------
++    def loss(self, batch: "DataLoaderBatchDTO", latents: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, float]]:
++        """The weighted alignment loss for the prediction captured last, and values to log."""
++        captured, fired = self._captured, self._fired
++        self._captured, self._fired = None, 0
++        index = self.config.block_index
++        if captured is None:
++            raise RuntimeError(f"REPA captured nothing from block {index}: the primary prediction did not run it")
++        if fired != 1:
++            raise RuntimeError(f"REPA block {index} ran {fired} times in one prediction; expected exactly one")
++
++        h, w = self.sd.get_repa_token_grid(*latents.shape[-2:])
++        tokens = self.sd.get_repa_target_tokens(captured, latents)
++        if tuple(tokens.shape[:3]) != (latents.shape[0], h, w):
++            raise RuntimeError(
++                f"REPA expected tokens of shape {(latents.shape[0], h, w)} + (D,) from arch "
++                f"'{self.sd.arch}', got {tuple(tokens.shape)}"
++            )
++        if not self._grad_checked:
++            if not tokens.requires_grad:
++                raise RuntimeError(
++                    f"REPA has no effect: the output of block {index} carries no gradient, so nothing trainable is "
++                    "upstream of it (all trained weights sit after the block, or a reentrant gradient checkpoint "
++                    "hides its output from autograd)"
++                )
++            self._grad_checked = True
++
++        target = self._target_features(batch, h, w)
++        projected = self.projector(tokens.flatten(1, 2).float())
++        loss, cos = alignment_loss(projected, target)
++        loss = loss * self.config.weight
++        weighted, mean_cos = torch.stack([loss.detach(), cos.detach()]).tolist()
++        return loss, {"loss/repa": weighted, "repa/cos": mean_cos}
+-- 
+2.54.0
+

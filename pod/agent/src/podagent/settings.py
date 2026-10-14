@@ -35,6 +35,11 @@ class Paths:
         return self.workspace / "models"
 
     @property
+    def regsets(self) -> Path:
+        """The reuse cache of generated regularisation images (``scripts/regularization.py``)."""
+        return self.workspace / "regsets"
+
+    @property
     def hf_cache(self) -> Path:
         return self.models / "hf-cache"
 

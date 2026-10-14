@@ -1,17 +1,21 @@
 # images
 
-Current public release: `ghcr.io/rationallyprime/concept-captioner-pod-{base,aitoolkit,ltx}:v0.3.0-20261014`,
-a **clean build from commit `f784947`** (`model-table`, merged as PR #10: the model table and the Z-Image and
-Qwen-Image-2.1 rows): the three Dockerfiles as committed, built on cx53 with `docker buildx build` and no
-overlay. The previous release, `v0.2.3-clean-20261011` (from `b7908618`; base `d41b8287…`, aitoolkit `fe09109d…`,
-ltx `40a0361f…`), stays published. The images carry no OCI revision label; this table is the record of
+Current public release: `ghcr.io/rationallyprime/concept-captioner-pod-{base,aitoolkit,ltx}:v0.3.3-20261014`,
+a **clean build from commit `126eb67`** (regularisation sets and REPA on top of the model table, the Hub licence ids,
+Qwen-Image-2.1 checkpoints every 500 steps and REPA on by default; the aitoolkit
+build applied the three REPA patches with `git am`): the three Dockerfiles as committed, built on cx53 with
+`docker buildx build` and no overlay. The previous releases stay published: `v0.3.2-20261014` (from `374e695`; base `3a809cae…`, aitoolkit `73266718…`,
+ltx `5bf0ef9e…`), `v0.3.1-20261014` (from `0124582`; base `0483ff50…`, aitoolkit `3bc32673…`,
+ltx `e568b43b…`), `v0.3.0-20261014` (from `f784947`,
+PR #10; base `eab5ddb9…`, aitoolkit `afe466d1…`, ltx `41a74204…`) and `v0.2.3-clean-20261011` (from `b7908618`;
+base `d41b8287…`, aitoolkit `fe09109d…`, ltx `40a0361f…`). The images carry no OCI revision label; this table is the record of
 which commit they came from.
 
 | image suffix | public manifest digest |
 | --- | --- |
-| `base` | `sha256:eab5ddb98ad490a95fe8826a7d48e819cb3a57fdd50ff6c258eafcfec4b60302` |
-| `aitoolkit` | `sha256:afe466d1b75e8a4398eb8dc099fcb96d591729d757db4d436a2ab483aa272966` |
-| `ltx` | `sha256:41a7420463c8bfa7a97d199f3c91ee2d46895cb71a33bd7e57744f6067b2c7d5` |
+| `base` | `sha256:bfcb30c7f768a57fa9bfd1d36eab8742cecb1634d6b0352d9c9f5a3708fb402d` |
+| `aitoolkit` | `sha256:24793dec0c0b6aa11bd9f39c258d98c8aeb17fe25d0fdfd5c5e5757342ebc14c` |
+| `ltx` | `sha256:4aeb4e3b50af518f025b1df2a980136674a3de14db8d0a98168e14b282350789` |
 
 Checked after the push: each tag resolves anonymously on GHCR to the digest above. The CPU
 control smoke described next has not been rerun for this tag; it ran against the pushed `v0.2.3` base image and passed (receipt
@@ -37,7 +41,7 @@ are distinguished in [POD-STATUS](../docs/POD-STATUS.md).
 | file | purpose |
 | --- | --- |
 | `Dockerfile.base` | CUDA 12.8 runtime + CPython 3.12 + uv; `/opt/venvs/vllm` (vLLM and its torch), `/opt/venvs/agent` (podagent[pod], concept-captioner[hf], tensorboard, huggingface_hub, datasets, Pillow); `/opt/pod/scripts/*.py` plus `model-table.json` (the model table) and `ltx_rules.py`; entrypoint. The build fails if a flag in the agent's vLLM allowlist is absent from the installed vLLM (`check_vllm_flags.py`) |
-| `Dockerfile.aitoolkit` | base + `ostris/ai-toolkit` at a pinned commit in `/opt/ai-toolkit`, venv `/opt/venvs/aitoolkit` with upstream's own torch/flash-attn/NATTEN stack |
+| `Dockerfile.aitoolkit` | base + `ostris/ai-toolkit` at a pinned commit in `/opt/ai-toolkit` with the local patch series applied on top (`git am`; `patches/ai-toolkit/`), venv `/opt/venvs/aitoolkit` with upstream's own torch/flash-attn/NATTEN stack. The build fails if a patch does not apply |
 | `Dockerfile.ltx` | base + `Lightricks/LTX-2` at a pinned commit in `/opt/ltx-2` (uv workspace), venv `/opt/venvs/ltx` plus TensorBoard 2.21.0 (pinned, with an event write/read check) |
 | `Dockerfile.fake` | `python:3.12-slim` + podagent only, for `compose.fake.yaml` (no CUDA, no trainers) |
 | `entrypoint.sh` | creates `/workspace/{datasets,runs,models/hf-cache,logs}`, exports `HF_HOME`, execs `tini -s -- python -m podagent --host 0.0.0.0 --port 8800`; nothing else |
@@ -51,7 +55,8 @@ are distinguished in [POD-STATUS](../docs/POD-STATUS.md).
 /opt/venvs/vllm/                    vllm 0.31.0+cu129, torch 2.13.0+cu129       (freeze.txt)
 /opt/venvs/aitoolkit/               ai-toolkit stack, torch 2.13.0+cu130        (aitoolkit image; freeze.txt)
 /opt/venvs/ltx/                     LTX-2 workspace, torch 2.13.0+cu132         (ltx image; freeze.txt)
-/opt/ai-toolkit/  /opt/ltx-2/       the trainers' checkouts (ltx-2 also holds the uv.lock the build resolved)
+/opt/ai-toolkit/  /opt/ltx-2/       the trainers' checkouts (ltx-2 also holds the uv.lock the build resolved; ai-toolkit's git log lists the patch series on top of the pin)
+/opt/ai-toolkit-patches/            the patch series the aitoolkit image applied (record only)
 /opt/src/{concept-captioner,podagent}  the sources the agent venv was installed from (record only)
 /opt/pod/scripts/*.py               pull_dataset.py, push_lora.py, launch_aitoolkit.py, launch_ltx.py, generate_results.py, model_table.py
 /opt/pod/scripts/model-table.json    the model table (copied from app/Sources/ConceptStudio/Resources/Training/)
@@ -63,7 +68,7 @@ Separate venvs per workload so vLLM's and each trainer's torch never collide (PO
 agent runs services by absolute path (`/opt/venvs/<name>/bin/…`), so no venv is on `PATH`. The
 build context is the repository root (`-f pod/images/Dockerfile.base .`) because the base image
 installs `concept-captioner` from `src/` and `podagent` from `pod/agent/`; the trainer images copy
-nothing from the context.
+nothing from the context except the aitoolkit image's patch series (`pod/images/patches/ai-toolkit/*.patch`).
 
 ## Pins
 
@@ -78,6 +83,7 @@ Every pin was read from its source on 2026-10-10. `date` is when upstream publis
 | torch for vLLM | `torch==2.13.0+cu129`, `torchvision==0.28.0+cu129`, `torchaudio==2.11.0+cu129`, `torchcodec==0.15.0+cu129` | 2026-07-08 | exactly what the vllm wheel requires (`torch==2.13.0`, `torchvision==0.28.0`, `torchaudio==2.11.0`, `torchcodec>=0.14`), from the cu129 index |
 | FlashInfer kernel cache | `flashinfer-jit-cache==0.7.0.post1` from `https://flashinfer.ai/whl/cu129` | — | the FlashInfer version vllm 0.31.0 pins (`flashinfer-python==0.7.0.post1`, and `FLASHINFER_VERSION` in its `docker/Dockerfile`) and the install vLLM's own image performs so FlashInfer needs no `nvcc` for its shipped kernels; optional (`FLASHINFER_JIT_CACHE_VERSION=""` skips it) |
 | ai-toolkit | `ostris/ai-toolkit@f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47` ("Version bump") | 2026-10-10 | the release commit at the top of `main` at pin time |
+| ai-toolkit patches | the series in `pod/images/patches/ai-toolkit/` (REPA, three patches), applied with `git am --3way` | — | The pin above is the **base**: `AI_TOOLKIT_COMMIT` and `generate_results.AI_PIN` keep naming it. |
 | ai-toolkit torch | `torch==2.13.0+cu130`, `torchvision==0.28.0+cu130`, `torchaudio==2.11.0+cu130`, `torchcodec==0.15.0+cu130` | 2026-07-08 (torch) | copied from that commit's `docker/Dockerfile` and `manager/spec.py` (upstream's "linux cu130" spec). cu126 is upstream's only other prebuilt stack and has no Blackwell kernels |
 | ai-toolkit extras | `requirements.txt` at the commit (diffusers at `c9438378…`, transformers 5.5.3, peft 0.18.1, …), then `setuptools==69.5.1`, `natten==0.21.7+torch2130cu130` (whl.natten.org), `flash_attn 2.8.3+cu130torch2.13` cp312 (mjun0812/flash-attention-prebuild-wheels v0.9.47) | — | the same files and the same order as upstream's Dockerfile |
 | LTX-2 | `Lightricks/LTX-2@9ec55f9f22798a3198d9c923856824821bc3317e` ("Automated PR - 2026-10-02"; packages 1.4.2) | 2026-10-02 | the top of `main` at pin time; `packages/ltx-trainer/scripts/{process_dataset,train}.py` both exist there |
@@ -86,6 +92,10 @@ Every pin was read from its source on 2026-10-10. `date` is when upstream publis
 apt packages (`git curl ca-certificates build-essential ffmpeg libgl1 libglib2.0-0`) are not
 version-pinned on purpose: Ubuntu's archive keeps only the current security build, so an exact pin
 breaks at the next security update. The base digest pins the layer beneath them.
+
+The ai-toolkit patch series is part of that pin: after a bump to a commit that already contains
+REPA, delete the series (and the Dockerfile's `COPY` and `git am` steps); otherwise re-export it
+against the new base and let the build show whether it still applies.
 
 To bump a pin: `curl -s https://pypi.org/pypi/vllm/json | jq .info.version` and the release's
 asset list on GitHub for vLLM (look for the `+cu129` wheel), `git ls-remote <repo> HEAD` for the

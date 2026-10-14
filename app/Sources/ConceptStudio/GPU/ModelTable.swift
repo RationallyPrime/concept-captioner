@@ -129,6 +129,9 @@ struct ModelTable: Sendable {
                 throw ModelTableError("trainers.\(trainer.name).default_model must name a row on that trainer")
             }
         }
+        for (index, row) in models.enumerated() {
+            try row.validateTrainingAids(path: "models[\(index)]")
+        }
     }
 
     // MARK: Lookups

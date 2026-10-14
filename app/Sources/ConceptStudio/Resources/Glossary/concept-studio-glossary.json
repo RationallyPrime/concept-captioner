@@ -4,7 +4,7 @@
   "language": "en",
   "editorial_status": "Complete first draft",
   "created": "2026-10-11",
-  "entry_count": 177,
+  "entry_count": 178,
   "mode_labels": {
     "plain_language": "Plain language",
     "good_stuff": "Show me the good stuff"
@@ -65,7 +65,7 @@
       "id": "training-controls",
       "title": "Training progress and controls",
       "description": "The units, settings, and saved states used to run and compare training.",
-      "entry_count": 24
+      "entry_count": 25
     },
     {
       "id": "adaptation",
@@ -3659,6 +3659,25 @@
       ],
       "definition_scope": "standard",
       "display_order": 177
+    },
+    {
+      "id": "representation-alignment",
+      "term": "Representation alignment",
+      "section_id": "training-controls",
+      "aliases": [
+        "REPA"
+      ],
+      "plain_language": "An optional training aid that nudges the model's early layers to see your photos the way a strong image-recognition model does, which can make learning faster and more faithful.",
+      "good_stuff": "An auxiliary loss (Yu et al., ICLR 2025) that maximises the cosine similarity between a projection of a chosen transformer block's image tokens and the patch features of a frozen self-supervised encoder (DINOv2) for the clean image, added to the denoising loss with a fixed weight. The projector is trained alongside the adapter and discarded; it is not part of the trained LoRA.",
+      "related_terms": [
+        "lora",
+        "training"
+      ],
+      "source_ids": [
+        "repa-paper"
+      ],
+      "definition_scope": "standard",
+      "display_order": 178
     }
   ],
   "sources": [
@@ -4228,6 +4247,13 @@
       "url": "https://json-schema.org/understanding-json-schema/about",
       "accessed": "2026-10-11",
       "display_number": 81
+    },
+    {
+      "id": "repa-paper",
+      "title": "Representation Alignment for Generation: Training Diffusion Transformers Is Easier Than You Think (Yu et al., ICLR 2025)",
+      "url": "https://arxiv.org/abs/2410.06940",
+      "accessed": "2026-10-14",
+      "display_number": 82
     }
   ]
 }

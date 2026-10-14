@@ -6,7 +6,17 @@
 1. Validate run.json: an own copy of the RunConfig rules of POD-SPEC §4.1 (no podagent import).
    ``dataset.path`` must be an existing directory under ``<PODAGENT_WORKSPACE>/datasets``.
 2. Write ``<run>/config.yaml``: ai-toolkit ``job: extension`` with one ``sd_trainer`` process,
-   ``extra`` deep-merged last. ``--dry-run`` stops here with exit 0.
+   ``extra`` deep-merged last. ``--dry-run`` plans the regularisation set (below), prints its
+   counts and stops with exit 0.
+2b. Regularisation set, when run.json has ``regularization`` (regularization.py; POD-SPEC 4.3):
+   a generated set was already drawn by the ``draw-regularization`` service and captioned by the
+   app, so the launcher plans it again (same keys), checks the captions for triggers and copies
+   the captioned images from ``<workspace>/regsets`` into ``<run>/regularization/``. The config
+   then has a second ``is_reg`` dataset over that copy and ``train.reg_weight``. A provided folder
+   is checked for triggers in its captions and copied. Bad input exits 2, a failed copy exits 1,
+   both before the trainer starts.
+   ``repa`` becomes ``process.repa`` (ai-toolkit's representation alignment; the patched trainer
+   image reads it) and the log says where the encoder weights come from.
 3. Spawn ``python /opt/ai-toolkit/run.py <run>/config.yaml`` and tee its output to stdout, which
    the agent points at ``<run>/trainer.log``. ``\\r``-separated progress-bar redraws are written
    as separate lines so the agent's line-based ``logs`` endpoint stays usable. While tee'ing,
@@ -44,6 +54,7 @@ from __future__ import annotations
 import argparse
 import codecs
 import contextlib
+import copy
 import json
 import math
 import os
@@ -94,6 +105,8 @@ _TOP_KEYS = frozenset(
         "extra",
         "resume",
         "initialization",
+        "regularization",
+        "repa",
     }
 )
 _REQUIRED_KEYS = ("run_id", "dataset", "triggers", "base_model")
@@ -275,6 +288,12 @@ def validate_run_config(
     cfg["resume"] = raw.get("resume", False)
     if not isinstance(cfg["resume"], bool):
         errors.append("resume: must be true or false")
+    for key in ("regularization", "repa"):  # AI Toolkit only; its launcher checks the contents
+        value = raw.get(key)
+        if value is not None and not isinstance(value, dict):
+            errors.append(f"{key}: must be an object or null")
+            value = None
+        cfg[key] = value
     if errors:
         raise ConfigError("; ".join(errors))
     return cfg
@@ -691,6 +710,17 @@ AI_TOOLKIT_DIR_ENV = "AI_TOOLKIT_DIR"
 DEFAULT_AI_TOOLKIT_DIR = "/opt/ai-toolkit"
 ROOT_KEYS = frozenset({"job", "config", "meta"})
 
+# Regularisation sets and REPA (run.json top-level keys; docs/model-table.md; POD-SPEC 4.1, 4.3).
+REGULARIZATION_SCRIPT = "regularization.py"
+REGULARIZATION_DIR = "regularization"  # <run>/regularization/: the copy the trainer reads
+UNSUPPORTED_REGULARIZATION = (
+    "Generated regularisation images need a supported model. Provide your own images instead."
+)
+NO_REGULARIZATION_HERE = "Regularisation images are not available for this model."
+UNSUPPORTED_REPA = "Representation alignment is not available for this model."
+GENERATION_KEYS = frozenset({"steps", "guidance_scale", "seed"})
+REPA_DEFAULT_ENCODER = "facebook/dinov2-giant"  # ai-toolkit's own default
+
 YAML_HEADER = (
     "# ai-toolkit config written by launch_aitoolkit.py from run.json (POD-SPEC §4.3).\n"
     '# Regenerated at every start; put overrides in run.json "extra", not here.\n'
@@ -734,8 +764,86 @@ def apply_row_recipe(process: dict[str, Any], row: dict[str, Any]) -> None:
         process.update(deep_merge(process, options))
 
 
+def _regularization_errors(
+    block: dict[str, Any], cfg: dict[str, Any], row: dict[str, Any] | None, workspace: Path
+) -> list[str]:
+    """What this model and the launcher's own mapping need of ``regularization`` (POD-SPEC 4.1).
+
+    Values (counts, weights, generation settings) are the user's own and are not judged here.
+    """
+    source = block.get("source")
+    needed = {
+        "generate": ("images", "weight", "class_nouns", "generation", "captions"),
+        "folder": ("path", "weight"),
+    }
+    if source not in needed:
+        return ["regularization.source: must be 'generate' or 'folder'"]
+    errors = [f"regularization.{key}: required" for key in needed[source] if key not in block]
+    # A trainer_config hook builds datasets[] from its own groups: no kind of set fits (H3).
+    if row is not None and model_table()["hook"](row, "trainer_config") is not None:
+        errors.append(NO_REGULARIZATION_HERE)
+    elif source == "generate" and (row is None or not row.get("regularization")):
+        errors.append(UNSUPPORTED_REGULARIZATION)
+    if errors:
+        return errors
+    if source == "folder":
+        path, root = block["path"], workspace / "datasets"
+        if not is_under(path, (root,)) or Path(path).resolve() == root.resolve():
+            errors.append(f"regularization.path: must be an absolute path under {root}")
+        return errors
+    nouns = block["class_nouns"]
+    if not isinstance(nouns, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) and v.strip() for k, v in nouns.items()
+    ):
+        errors.append("regularization.class_nouns: must map each trigger to a non-blank noun")
+    elif set(nouns) != set(cfg["triggers"]):
+        problems = [f"missing {t}" for t in cfg["triggers"] if t not in nouns]
+        problems += [f"unknown {t}" for t in nouns if t not in cfg["triggers"]]
+        errors.append(
+            "regularization.class_nouns: must name every trigger and no other ("
+            + ", ".join(problems)
+            + ")"
+        )
+    generation = block["generation"]
+    if not isinstance(generation, dict) or GENERATION_KEYS - generation.keys():
+        errors.append(
+            "regularization.generation: must be an object with steps, guidance_scale and seed"
+        )
+    return errors
+
+
+def _repa_errors(block: dict[str, Any], row: dict[str, Any] | None, workspace: Path) -> list[str]:
+    """What this model needs of ``repa``: a row that offers it, and an encoder that can be loaded.
+
+    The block's values reach the trainer as they are.
+    """
+    if row is None or not row.get("repa"):
+        return [UNSUPPORTED_REPA]
+    encoder = block.get("encoder")
+    if encoder is not None and not is_model_ref(encoder, (workspace,)):
+        return ["repa.encoder: must be a Hub id ('owner/name') or a path under the workspace"]
+    return []
+
+
+def check_regularization_and_repa(cfg: dict[str, Any]) -> None:
+    """Refuse a ``regularization`` / ``repa`` block this model or these values cannot take."""
+    regularization, repa = cfg.get("regularization"), cfg.get("repa")
+    if regularization is None and repa is None:
+        return
+    workspace = workspace_root()
+    row = model_table()["exact_row"](cfg["base_model"], "aitoolkit")
+    errors: list[str] = []
+    if regularization is not None:
+        errors += _regularization_errors(regularization, cfg, row, workspace)
+    if repa is not None:
+        errors += _repa_errors(repa, row, workspace)
+    if errors:
+        raise ConfigError("; ".join(errors))
+
+
 def build_native_config(cfg: dict[str, Any], run_dir: Path) -> dict[str, Any]:
     """The ai-toolkit document for a validated run config: the mapping table of POD-SPEC §4.3."""
+    check_regularization_and_repa(cfg)
     size = max(cfg["resolution"])
     sampling = cfg["sample_every"] > 0 and bool(cfg["sample_prompts"])
     process: dict[str, Any] = {
@@ -793,10 +901,18 @@ def build_native_config(cfg: dict[str, Any], run_dir: Path) -> dict[str, Any]:
     hook = table["hook"](row, "trainer_config") if row is not None else None
     if row is not None and hook is None:
         apply_row_recipe(process, row)
+    # Regularisation weight and REPA are run.json's explicit values; `extra` still wins over both.
+    regularization = cfg.get("regularization")
+    if regularization is not None:
+        process["train"]["reg_weight"] = regularization["weight"]
+    if cfg.get("repa") is not None:
+        process["repa"] = dict(cfg["repa"])  # the keys are ai-toolkit's own, one to one
     # VERIFY: resume. ai-toolkit continues from the newest checkpoint in training_folder/<name>
     # by itself; nothing is deleted here, so a restart with an existing output/ resumes.
     extra = cfg["extra"]
     process = deep_merge(process, {k: v for k, v in extra.items() if k not in ROOT_KEYS})
+    if regularization is not None:
+        add_regularization_dataset(process, run_dir)
     document: dict[str, Any] = {
         "job": "extension",
         "config": {"name": cfg["run_id"], "process": [process]},
@@ -807,6 +923,29 @@ def build_native_config(cfg: dict[str, Any], run_dir: Path) -> dict[str, Any]:
         TRAINER_CONFIG_HOOKS[hook].build(cfg, run_dir, document, extra)
     check_native_paths(document, run_dir)
     return document
+
+
+def add_regularization_dataset(process: dict[str, Any], run_dir: Path) -> None:
+    """Append the regularisation set as a second dataset: a copy of the merged first one.
+
+    Copying keeps resolution, caption extension and dropout, and the caching settings (ai-toolkit
+    requires ``cache_text_embeddings`` equal on all datasets). Done after ``extra`` merged, so the
+    copy follows whatever the first dataset became; ``extra`` defining its own ``is_reg`` dataset
+    would leave two sources of truth, so that is refused.
+    """
+    datasets = process.get("datasets")
+    if not isinstance(datasets, list) or not datasets or not isinstance(datasets[0], dict):
+        raise ConfigError("regularization needs a first dataset to copy; extra emptied datasets")
+    if any(isinstance(d, dict) and d.get("is_reg") for d in datasets):
+        raise ConfigError("extra already defines a regularisation dataset")
+    process["datasets"] = [
+        *datasets,
+        {
+            **copy.deepcopy(datasets[0]),
+            "folder_path": str(run_dir / REGULARIZATION_DIR),
+            "is_reg": True,
+        },
+    ]
 
 
 def minimax_h3_trainer_config(
@@ -894,7 +1033,8 @@ def check_native_paths(document: dict[str, Any], run_dir: Path) -> None:
     ``extra`` merges last and may name anything, so the check runs on the final document
     rather than on ``extra``: ``training_folder`` and ``log_dir`` (written to), every
     ``datasets[*].folder_path`` (read), ``model.name_or_path`` (a Hub id or a local path) and
-    ``config.name`` (a folder created under ``training_folder``, so it must be a plain run id).
+    ``config.name`` (a folder created under ``training_folder``, so it must be a plain run id),
+    and ``repa.encoder`` (a Hub id or a local path, like the model).
     Allowed roots: ``PODAGENT_WORKSPACE`` and the run directory. Raises ConfigError listing
     every violation.
     """
@@ -927,6 +1067,9 @@ def check_native_paths(document: dict[str, Any], run_dir: Path) -> None:
             require_model_ref(
                 errors, f"{label}.model.name_or_path", model.get("name_or_path"), roots
             )
+        repa = process.get("repa")
+        if isinstance(repa, dict) and repa.get("encoder") is not None:
+            require_model_ref(errors, f"{label}.repa.encoder", repa["encoder"], roots)
         datasets = process.get("datasets")
         if not isinstance(datasets, list):
             errors.append(f"{label}.datasets: must be a list")
@@ -940,6 +1083,64 @@ def check_native_paths(document: dict[str, Any], run_dir: Path) -> None:
             )
     if errors:
         raise ConfigError("; ".join(errors))
+
+
+def regularization_namespace() -> dict[str, Any]:
+    """``regularization.py``'s functions, loaded the way the other scripts are (``python -I``)."""
+    return runpy.run_path(str(Path(__file__).with_name(REGULARIZATION_SCRIPT)))
+
+
+def prepare_regularization(cfg: dict[str, Any], run_dir: Path, *, dry_run: bool = False) -> int:
+    """Have the regularisation set ready in ``<run>/regularization/``; 0, 2 (bad input) or 1.
+
+    A copy this run already made for the same ``regularization`` block is used as it is (Resume).
+    Otherwise a generated set is planned again and its captioned images are copied from the shared
+    cache, and a provided folder is checked and copied. A dry run plans and checks but copies
+    nothing.
+    """
+    block = cfg.get("regularization")
+    if block is None:
+        return 0
+    reg = regularization_namespace()
+    try:
+        current = None if dry_run else reg["existing_copy"](run_dir, block)
+        if current is not None:
+            say(f"regularisation: using the {len(current['images'])} images this run copied")
+        elif block["source"] == "folder":
+            manifest = reg["check_folder"](cfg, run_dir, workspace_root(), copy=not dry_run)
+            say(f"regularisation: {len(manifest['images'])} images from {block['path']}")
+        else:
+            plan = reg["plan_generated"](cfg, run_dir, workspace_root())
+            say(reg["plan_summary"](plan))
+            if not dry_run:
+                count = len(reg["materialize"](cfg, run_dir, plan)["images"])
+                say(f"regularisation: {count} images ready in {run_dir / REGULARIZATION_DIR}")
+        return 0
+    except reg["InputError"] as error:
+        say(str(error))
+        return 2
+    except (reg["GenerationError"], OSError) as error:
+        say(f"regularisation failed: {error}")
+        return 1
+
+
+def repa_encoder_line(native: dict[str, Any]) -> str | None:
+    """Where REPA's encoder weights come from, for the log; None when REPA is off.
+
+    The patched trainer downloads them through ``from_pretrained`` into ``HF_HOME`` (the model
+    cache on the volume) on the first caching pass, which is a long pause that this line explains.
+    """
+    repa = native["config"]["process"][0].get("repa")
+    if not isinstance(repa, dict) or repa.get("enabled") is False:
+        return None
+    encoder = repa.get("encoder") or REPA_DEFAULT_ENCODER
+    if encoder.startswith("/"):
+        return f"REPA encoder {encoder}: read from this storage"
+    home = Path(os.environ.get("HF_HOME") or Path.home() / ".cache" / "huggingface")
+    snapshots = home / "hub" / ("models--" + encoder.replace("/", "--")) / "snapshots"
+    if snapshots.is_dir() and any(snapshots.iterdir()):
+        return f"REPA encoder {encoder}: already in the model cache"
+    return f"REPA encoder {encoder}: downloaded on first use into the model cache"
 
 
 def trainer_argv(run_dir: Path, cfg: dict[str, Any]) -> list[str]:
@@ -976,6 +1177,12 @@ def main(argv: list[str] | None = None) -> int:
     say(f"trainer command: {shlex.join(cmd)}")
     if cfg["hub"] is not None and cfg["hub"]["push_on_finish"]:
         say(f"push on finish: {shlex.join(push_lora_argv(run_dir, cfg))}")
+    announce = repa_encoder_line(native)
+    if announce is not None:
+        say(announce)
+    code = prepare_regularization(cfg, run_dir, dry_run=args.dry_run)
+    if code != 0:
+        return code
     if args.dry_run:
         say("dry run: trainer not started")
         return 0

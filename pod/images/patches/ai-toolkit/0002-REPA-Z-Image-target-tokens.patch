@@ -1,0 +1,73 @@
+From 81d1c684dc65f8260d0c2a906e82a7a79c121a91 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?H=C3=A1kon=20Freyr=20Gunnarsson?=
+ <rationallyprime@gmail.com>
+Date: Wed, 14 Oct 2026 00:10:10 +0000
+Subject: [PATCH] REPA: Z-Image target tokens
+
+Implements the two REPA hooks for Z-Image: latents are cut into 2x2 patches,
+one token each, and the main `layers` stack sees the image tokens first
+(padded to a multiple of 32), then the caption, so the target image is the
+first h * w tokens.
+
+The pixel-space ZImageL2PModel inherits from ZImageModel and uses 16 px
+patches, so it opts out explicitly instead of inheriting a wrong layout.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ README.md                                             |  2 +-
+ .../diffusion_models/z_image/z_image.py               | 11 +++++++++++
+ .../diffusion_models/z_image/z_image_l2p_model.py     |  4 ++++
+ 3 files changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/README.md b/README.md
+index c91db97..803dc04 100644
+--- a/README.md
++++ b/README.md
+@@ -387,7 +387,7 @@ It is off unless the process config has a `repa` block, next to `train`, `model`
+       projector_dim: 2048              # hidden width of the mlp projector
+ ```
+ 
+-Supported models: Qwen-Image-2.1. The values above are SimpleTuner's Qwen-Image-2.1 preset (DINOv2 ViT-g/14,
++Supported models: Qwen-Image-2.1 and Z-Image. The values above are SimpleTuner's Qwen-Image-2.1 preset (DINOv2 ViT-g/14,
+ block 8, lambda 0.5) with the paper's projector. Other models are added with two methods on their model class
+ (`get_repa_token_grid` and `get_repa_target_tokens` in `toolkit/models/base_model.py`) and a
+ `get_transformer_block_names` entry. A model without them fails at setup with a message saying so.
+diff --git a/extensions_built_in/diffusion_models/z_image/z_image.py b/extensions_built_in/diffusion_models/z_image/z_image.py
+index fed40e0..5cb1177 100644
+--- a/extensions_built_in/diffusion_models/z_image/z_image.py
++++ b/extensions_built_in/diffusion_models/z_image/z_image.py
+@@ -393,5 +393,16 @@ class ZImageModel(BaseModel):
+     def get_transformer_block_names(self) -> Optional[List[str]]:
+         return ["layers"]
+ 
++    def get_repa_token_grid(self, latent_height: int, latent_width: int):
++        # the latents are cut into 2x2 patches, one token each
++        return latent_height // 2, latent_width // 2
++
++    def get_repa_target_tokens(self, block_output, latents: torch.Tensor) -> torch.Tensor:
++        # the image tokens come first in the sequence (padded to a multiple of 32), then the
++        # caption, and the tokens are row-major, so the target image is the first h * w
++        height, width = self.get_repa_token_grid(*latents.shape[-2:])
++        hidden = block_output[0] if isinstance(block_output, (tuple, list)) else block_output
++        return hidden[:, : height * width].reshape(latents.shape[0], height, width, -1)
++
+     lora_keys_use_comfy_prefix = True
+ 
+diff --git a/extensions_built_in/diffusion_models/z_image/z_image_l2p_model.py b/extensions_built_in/diffusion_models/z_image/z_image_l2p_model.py
+index b642935..6271e1e 100644
+--- a/extensions_built_in/diffusion_models/z_image/z_image_l2p_model.py
++++ b/extensions_built_in/diffusion_models/z_image/z_image_l2p_model.py
+@@ -288,6 +288,10 @@ class ZImageTransformer2DModel(ZImageTransformer2DModelOriginal):
+ class ZImageL2PModel(ZImageModel):
+     arch = "zimage_l2p"
+ 
++    def get_repa_token_grid(self, latent_height: int, latent_width: int):
++        # a pixel-space variant with 16 px patches: ZImageModel's layout does not apply
++        return None
++
+     def load_model(self):
+         dtype = self.torch_dtype
+         self.print_and_status_update("Loading ZImage model")
+-- 
+2.54.0
+

@@ -50,10 +50,41 @@ outside a hook tests a model's name; the trainer (`aitoolkit`, `ltx`) is still b
 
 The table has five rows: FLUX.1-dev, LTX-2, MiniMax H3, Z-Image and Qwen-Image-2.1. Z-Image and
 Qwen-Image-2.1 count their training length in epochs (the app sends steps) and show their licence
-notice and first-download size under the picker. Z-Image compares through the
-`aitoolkit_arch_image` generator hook, and its picker note says a Z-Image LoRA works on Z-Image-Turbo
-at about twice the strength. Qwen-Image-2.1 is offered only on GPUs with at least 80 GB and has no
-comparison generator.
+notice and first-download size under the picker. Both compare through the `aitoolkit_arch_image`
+generator hook; Z-Image's picker note says a Z-Image LoRA works on Z-Image-Turbo at about twice the
+strength. Qwen-Image-2.1 is offered only on GPUs with at least 80 GB.
+
+## Regularisation images and REPA
+
+Two optional row fields, `regularization` and `repa`, are decoded by `ModelRow` and read by the Training
+screen. They apply to AI Toolkit rows only; `regularization` needs a generator hook and no
+`trainer_config` hook, and `repa` needs an architecture in `ModelRow.repaArchitectures`. The
+Qwen-Image-2.1 row carries both, so the app offers them for that model only.
+
+On the Training screen, between "What to train" and "Run settings" (`GPU/TrainingAidsView.swift`), a
+model with the fields shows two sections in plain language, each with its own Definitions:
+**Regularisation images** (a toggle, the class nouns taken from the project's concepts, the number of
+images, a minutes-and-money estimate from the row's seconds per image and the quoted hourly price, and
+the note that training takes about twice as long) and **Representation alignment (experimental)** (one
+toggle and the size of the helper-model download). Advanced training controls add "Regularisation
+strength" while the toggle is on. A trigger with no concept stops the run with "Define a class noun for
+<trigger> in Concepts before training with regularisation images."
+
+`trainingParams` writes `regularization` then `repa` before `extra`, as explicit values: the row's
+generation settings and the six AI Toolkit REPA keys, so a saved run repeats the same way after the table
+changes (Repeat passes on the saved blocks for the same model). With regularisation on, a length in epochs
+doubles into trainer steps, since every other step looks at a regularisation image; Repeat halves it again
+to show epochs. Choosing a model resets both toggles to the row's `default_on` and keeps an edited image
+count or strength. Starting a run with regularisation on first draws the images (the `draw-regularization`
+service, "Drawing regularisation images: 12 of 40"), downloads them, and has the project's own captioner
+describe each one with `RegularizationCaptioner` (ConceptCore): the project's endpoint, skill and profile plus
+the skill's `references/regularization.md` and the class nouns, never a trigger. On a one-GPU computer the
+caption server is stopped for the drawing and started again if the project captions with it. The captions go
+to the trainer in `regularization.captions`; Saved runs says what each run used.
+
+The glossary has an entry for `representation-alignment` (alias REPA, section Training progress and
+controls); the three terms the sections link to are `StudioTerm.regularizationImages`,
+`.priorPreservation` and `.representationAlignment`.
 
 ## Implemented
 
@@ -269,9 +300,12 @@ including rejected unauthenticated and out-of-scope requests. This proves backen
 not native WebKit rendering. Both new proof pods used one 32 GB GPU and 62 GB host RAM; these
 small recipes do not establish a memory guarantee for other datasets or settings.
 
-Current trainer images are published under `v0.3.0-20261014`, a clean build of PR #10 at `f784947`
-(the earlier `v0.2.3-clean-20261011` was built from `main` at `b7908618`) (digests in `pod/images/README.md`), and verified by anonymous tag-to-digest checks. The
-app default uses this tag. The owner/Claude H3 still-image training run used this clean tag;
+Current trainer images are published under `v0.3.3-20261014`, a clean build of `126eb67` (regularisation and REPA with the licence-id
+fix, Qwen-Image-2.1 checkpoints every 500 steps and REPA on by default; `v0.3.2-20261014` is the regularisation and
+REPA change at `374e695`, `v0.3.1-20261014` is the same change before its review fixes, at `0124582`; the earlier `v0.3.0-20261014` was built from PR #10 at `f784947`, and
+`v0.2.3-clean-20261011` from `main` at `b7908618`) (digests in `pod/images/README.md`), and verified by
+anonymous tag-to-digest checks. The app default uses this tag. The owner/Claude H3 still-image training
+run used `v0.2.3-clean-20261011`;
 the earlier bounded FLUX/LTX proofs used the r1/r2 tags, which stay published. Their
 separate scopes and limits are recorded in POD-STATUS.
 
