@@ -155,7 +155,6 @@ struct H3TrainingTests {
             budget: 10,
             trainer: "aitoolkit",
             runID: "",
-            outputRepo: "",
             volumeID: "storage"
         )
         workspace.agent = agent

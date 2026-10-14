@@ -259,7 +259,7 @@ struct ProjectContractTests {
         defer { preferences.remove() }
         let saved = SavedPod(
             pod: RentedPod(id: "injected-pod", status: "RUNNING", cost: 1, gpu: .init(count: 1)),
-            started: Date(), hourlyRate: 1, budget: 10, trainer: "aitoolkit", runID: "", outputRepo: ""
+            started: Date(), hourlyRate: 1, budget: 10, trainer: "aitoolkit", runID: ""
         )
         try preferences.defaults.set(JSONEncoder().encode(saved), forKey: "ConceptStudio.activePod")
         let secrets = MemorySecretStore(["pod.injected-pod": "agent-token"])

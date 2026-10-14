@@ -222,7 +222,7 @@ struct GPUWalkthroughTests {
         workspace.pod = .init(id: "fixture", status: "RUNNING", cost: 1, gpu: .init(count: 2))
         workspace.saved = try .init(
             pod: #require(workspace.pod), started: Date(), hourlyRate: 1, budget: 10, trainer: "aitoolkit",
-            runID: "", outputRepo: "", volumeID: "pod:fixture"
+            runID: "", volumeID: "pod:fixture"
         )
         workspace.agent = agent
         if generation {

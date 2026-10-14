@@ -16,13 +16,13 @@ struct GPUResultTests {
         let downloader = FakeDownloader([:])
         let workspace = makeWorkspace(transport, preferences, downloader: downloader)
         try workspace.configure(runpodKey: "provider-only", hubToken: "hub-write", imageName: "test")
-        workspace.outputRepo = "me/lora"
-        workspace.privateResult = privateResult
         workspace.resolution = 1024
         workspace.samplesEnabled = true
         await workspace.refreshOffers()
         await workspace.rent()
-        await workspace.train(datasetRepo: "test/images")
+        await workspace.train(
+            datasetRepo: "test/images", output: HubDestination(repo: "me/lora", isPrivate: privateResult)
+        )
         let params = try await trainerParams(transport, "aitoolkit")
         #expect(params["hub"] == .object([
             "repo_id": .string("me/lora"), "private": .bool(privateResult), "push_on_finish": .bool(true),
@@ -52,13 +52,12 @@ struct GPUResultTests {
         let workspace = makeWorkspace(transport, preferences, downloader: downloader)
         try workspace.configure(runpodKey: "provider-only", hubToken: "", imageName: "test")
         workspace.projectFolder = project
-        workspace.outputRepo = "me/lora"
         await workspace.refreshOffers()
         await workspace.rent()
         let inputProject = try await captionedUploadProject(at: workspace.projectFolder)
         workspace.projectFolder = inputProject.directory
         defer { try? FileManager.default.removeItem(at: inputProject.directory) }
-        await workspace.train(datasetRepo: "test/images")
+        await workspace.train(datasetRepo: "test/images", output: HubDestination(repo: "me/lora"))
         #expect(try await trainerParams(transport, "aitoolkit")["hub"] == nil)
         let runID = workspace.runID
         // What ai-toolkit leaves in output/<run-id>/ (config.name = run id), as the agent lists it.
@@ -105,8 +104,9 @@ struct GPUResultTests {
         workspace.projectFolder = FileManager.default.temporaryDirectory.appendingPathComponent("My Nora!")
         await workspace.refreshOffers()
         await workspace.rent()
-        await workspace.train(datasetRepo: "test/images")
-        #expect(workspace.outputRepo == "tester/my-nora-lora")
+        let suggested = await workspace.suggestedOutputRepo()
+        #expect(suggested == "tester/my-nora-lora")
+        await workspace.train(datasetRepo: "test/images", output: HubDestination(repo: suggested ?? ""))
         #expect(workspace.result?.destination == .hub)
         #expect(try await trainerParams(transport, "aitoolkit")["hub"] == .object([
             "repo_id": .string("tester/my-nora-lora"), "private": .bool(true), "push_on_finish": .bool(true),
@@ -295,7 +295,7 @@ struct GPUResultTests {
         defer { preferences.removePersistentDomain(forName: suite) }
         let saved = SavedPod(
             pod: RentedPod(id: "test", status: "RUNNING", cost: 1, gpu: .init(count: 1)),
-            started: Date(), hourlyRate: 1, budget: 100, trainer: "aitoolkit", runID: "previous-run", outputRepo: ""
+            started: Date(), hourlyRate: 1, budget: 100, trainer: "aitoolkit", runID: "previous-run"
         )
         try preferences.set(JSONEncoder().encode(saved), forKey: GPUWorkspace.activePodKey)
         let inner = UnreachableAgentTransport(agentAvailable: true)

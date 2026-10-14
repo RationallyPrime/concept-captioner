@@ -117,8 +117,7 @@ struct StudioSessionTests {
                 hourlyRate: 1,
                 budget: 10,
                 trainer: "aitoolkit",
-                runID: "",
-                outputRepo: ""
+                runID: ""
             )
             let data = try JSONEncoder().encode(saved)
             #expect(StudioSession.startupNeedsPodRecovery(data) == ["RUNNING", "STARTING"].contains(status))
@@ -174,9 +173,6 @@ struct StudioSessionTests {
         }
         #expect(!session.gpu.points.isEmpty)
         #expect(session.gpu.trainingState == "exited")
-        session.gpu.outputRepo = "demo/result"
-        await session.gpu.publishResult()
-        #expect(session.gpu.message.contains("uploaded"))
         for _ in 0 ..< 8 {
             session.next()
         }

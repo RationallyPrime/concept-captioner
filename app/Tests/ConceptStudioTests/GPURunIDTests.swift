@@ -81,7 +81,6 @@ struct GPURunIDTests {
             budget: 10,
             trainer: "aitoolkit",
             runID: "../escape",
-            outputRepo: "",
             volumeID: "storage"
         )
         pod.result = result

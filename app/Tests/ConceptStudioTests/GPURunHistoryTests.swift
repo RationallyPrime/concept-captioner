@@ -17,7 +17,6 @@ struct GPURunHistoryTests {
             budget: 10,
             trainer: "aitoolkit",
             runID: "",
-            outputRepo: "",
             volumeID: "storage"
         )
         workspace.agent = agent
@@ -201,7 +200,7 @@ struct GPURunHistoryTests {
         let saved = SavedPod(
             pod: RentedPod(id: "old-pod", status: "EXITED", cost: 1, gpu: .init(count: 1)),
             started: Date(), hourlyRate: 1, budget: 10, trainer: run.trainer,
-            runID: run.runID, outputRepo: "", volumeID: run.volumeID,
+            runID: run.runID, volumeID: run.volumeID,
             result: run.result, run: run, generation: comparison
         )
         try preferences.set(JSONEncoder().encode(saved), forKey: GPUWorkspace.activePodKey)

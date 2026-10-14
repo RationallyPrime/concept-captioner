@@ -38,6 +38,16 @@ extension StudioSession {
         set { updateProjectState { $0.trainingOutput.isPrivate = newValue } }
     }
 
+    /// Gives a project with no training destination its own default, `<account>/<project>-lora`, when
+    /// signed in to Hugging Face. Without an account it stays empty and the result is saved to the project.
+    func fillDefaultTrainingOutput() async {
+        guard trainingOutputRepo.isEmpty, let directory = project?.directory,
+              let suggested = await gpu.suggestedOutputRepo() else { return }
+        // The open project, or its destination, may have changed while the account was read.
+        guard project?.directory == directory, trainingOutputRepo.isEmpty else { return }
+        trainingOutputRepo = suggested
+    }
+
     /// Change the project's app-only settings and save them with the project (not in demo mode).
     func updateProjectState(_ change: (inout ProjectAppState) -> Void) {
         var state = projectState

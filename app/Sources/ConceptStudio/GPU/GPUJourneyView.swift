@@ -306,18 +306,15 @@ struct GPUJourneyView: View {
                     TextField("Starting model", text: $workspace.baseModel)
                         .help("Base diffusion model to train. Choose a compatible model for these images or clips.")
                         .disabled(workspace.isBusy || workspace.isTraining)
-                    TextField(
-                        "Save trained model to",
-                        text: $workspace.outputRepo,
-                        prompt: Text("your-name/model-name")
-                    )
-                    Toggle("Keep the trained model private", isOn: $workspace.privateResult)
+                    trainingDestinationFields
                 }.formStyle(.columns)
-                Text("With a Hugging Face token in Settings, the trained model is uploaded to this repository when "
-                    + "training finishes. Without one, it is saved in this project's results folder on your Mac.")
+                Text("This project's own destination. With a Hugging Face token in Settings, the trained model is "
+                    + "uploaded to this repository when training finishes. Without one, it is saved in this "
+                    + "project's results folder on your Mac.")
                     .font(.callout).foregroundStyle(StudioStyle.supportingText)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .task(id: session.project?.directory) { await session.fillDefaultTrainingOutput() }
             Divider()
             TrainingInitializationView(workspace: workspace)
             Divider()
@@ -335,8 +332,10 @@ struct GPUJourneyView: View {
                 }
                 Button("Start training", systemImage: "play.fill") {
                     Task {
+                        await session.fillDefaultTrainingOutput()
                         await workspace.train(
-                            datasetRepo: datasetRepo, captureLocal: session.captureTrainingInputs,
+                            datasetRepo: datasetRepo, output: session.projectState.trainingOutput,
+                            captureLocal: session.captureTrainingInputs,
                             regularizationCaptioning: session.regularizationCaptioning
                         )
                     }
@@ -580,5 +579,19 @@ extension GPUJourneyView {
                 }
             }
         }
+    }
+}
+
+extension GPUJourneyView {
+    /// The open project's own training destination; another project's repository never shows here.
+    @ViewBuilder var trainingDestinationFields: some View {
+        TextField(
+            "Save trained model to",
+            text: Binding(get: { session.trainingOutputRepo }, set: { session.trainingOutputRepo = $0 }),
+            prompt: Text("your-name/model-name")
+        )
+        Toggle("Keep the trained model private", isOn: Binding(
+            get: { session.trainingOutputPrivate }, set: { session.trainingOutputPrivate = $0 }
+        ))
     }
 }

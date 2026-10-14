@@ -89,8 +89,6 @@ final class GPUWorkspace {
 
     /// Sample images during training. Off by default: sample generation is unverified (POD-SPEC 4.2).
     var samplesEnabled = false
-    /// Model repos created for results are private unless the user turns this off.
-    var privateResult = true
     var runID = ""
     var seed = 42
     var datasetRevision = ""
@@ -102,7 +100,6 @@ final class GPUWorkspace {
     var repeatSourceRunID = ""
     var generations: [GeneratedComparison] = []
     var generation: GeneratedComparison?
-    var outputRepo = ""
     var triggerWords = "NORA7"
     var profile: String
     var keepCaptionServer = false
@@ -220,7 +217,6 @@ final class GPUWorkspace {
             budget = previous.budget
             if repeatSourceRunID.isEmpty, previous.pod.isRunning { trainer = previous.trainer }
             runID = previous.runID
-            outputRepo = previous.outputRepo
             points = previous.points
             result = previous.result ?? result
             // The loaded project record owns history. The global pod record owns billing
@@ -303,7 +299,7 @@ final class GPUWorkspace {
             self.elapsedCost = 0
             self.saved = SavedPod(
                 pod: created, started: started, hourlyRate: max(created.cost, self.quotedHourlyRate),
-                budget: self.budget, trainer: self.trainer, runID: "", outputRepo: self.outputRepo,
+                budget: self.budget, trainer: self.trainer, runID: "",
                 idleMinutes: self.idleMinutes, volumeID: volume?.id ?? "pod:" + created.id,
                 agentSecret: credentials.agentSecret
             )
@@ -404,7 +400,6 @@ final class GPUWorkspace {
             saved.pod = pod
             saved.trainer = trainer
             saved.runID = runID
-            saved.outputRepo = outputRepo
             saved.idleMinutes = idleMinutes
             saved.points = points
             saved.result = result
