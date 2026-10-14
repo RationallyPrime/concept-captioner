@@ -169,6 +169,7 @@ extension GPUWorkspace {
             throw StudioError.message("Training length in epochs needs the number of included images and clips. "
                 + "Open the project that holds them.")
         }
+        try validateTrainingAids()
         guard !resultNeedsSaving else {
             throw StudioError.message("Retrieve pending trained models or generated outputs before starting a run.")
         }
@@ -188,6 +189,7 @@ extension GPUWorkspace {
             ])
         }
         points = []
+        regularizationProgress = nil
         datasetContainsVideo = inputs.containsVideo
         datasetRevision = local == nil ? (revision ?? "") : ""
         result = TrainingResult(
@@ -262,7 +264,7 @@ extension GPUWorkspace {
     ) -> JSONObject {
         let words = inputFacts.triggers.split(whereSeparator: { $0 == "," || $0.isWhitespace }).map(String.init)
         let row = effectiveModelRow
-        let totalSteps = optimizerSteps(items: items ?? datasetItemCount)
+        let totalSteps = trainerSteps(items: items ?? datasetItemCount)
         let saveInterval = row.recipe.checkpoints.editable
             ? checkpointEvery : min(row.recipe.checkpoints.every, totalSteps)
         var params: JSONObject = [
@@ -280,6 +282,8 @@ extension GPUWorkspace {
         if samplesEnabled {
             params["sample_prompts"] = .array([.string(words.joined(separator: " "))])
         }
+        if let block = regularizationBlock(triggers: words) { params["regularization"] = .object(block) }
+        if let block = repaBlock() { params["repa"] = .object(block) }
         if trainer == "ltx" {
             let extra = row.runExtra ?? [:]
             params["extra"] = .object(row.hooks.runExtra?.apply(to: extra, containsVideo: inputFacts.video) ?? extra)

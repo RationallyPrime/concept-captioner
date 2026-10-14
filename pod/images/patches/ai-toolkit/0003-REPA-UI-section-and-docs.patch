@@ -1,0 +1,245 @@
+From 0504950a7898e330ef9095e307c5bdc063324a69 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?H=C3=A1kon=20Freyr=20Gunnarsson?=
+ <rationallyprime@gmail.com>
+Date: Wed, 14 Oct 2026 00:10:10 +0000
+Subject: [PATCH] REPA: UI section and docs
+
+Adds an opt-in "REPA" group to the Training card for the models that
+support it (the additionalSections convention of train.audio_loss_multiplier):
+a checkbox, the weight and the block index. Turning it on writes the whole
+`repa` block so the advanced YAML shows every key; turning it off writes
+`enabled: false`. Encoder, projector and encoder resolution stay in the
+YAML. Switching to a model without REPA drops the block, since the trainer
+refuses it there. A docs entry explains what it does and costs.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ README.md                                   |  3 ++
+ extensions_built_in/diffusion_models/ui.tsx |  3 +-
+ ui/src/app/jobs/new/SimpleJob.tsx           | 38 ++++++++++++++++++++-
+ ui/src/app/jobs/new/jobConfig.ts            | 13 ++++++-
+ ui/src/app/jobs/new/options.tsx             |  1 +
+ ui/src/app/jobs/new/utils.ts                |  5 +++
+ ui/src/docs.tsx                             | 25 ++++++++++++++
+ ui/src/types.ts                             | 12 +++++++
+ 8 files changed, 97 insertions(+), 3 deletions(-)
+
+diff --git a/README.md b/README.md
+index 803dc04..9b7267c 100644
+--- a/README.md
++++ b/README.md
+@@ -395,6 +395,9 @@ block 8, lambda 0.5) with the paper's projector. Other models are added with two
+ `block_index` counts from 0 and aligns the output of that block, as SimpleTuner does. The paper's `encoder_depth=8`
+ is the output of the 8th block, which is `block_index: 7`.
+ 
++In the UI, the Training card of these models has a REPA group with a checkbox, the weight and the block. The encoder,
++the projector and the encoder resolution are in the advanced YAML.
++
+ ### What it does when you train
+ 
+ - **Pixels.** REPA turns on the same switch MiniMax H3 uses (`cache_tensors_to_disk`, forced on for the datasets that
+diff --git a/extensions_built_in/diffusion_models/ui.tsx b/extensions_built_in/diffusion_models/ui.tsx
+index f270a5d..4df2b34 100644
+--- a/extensions_built_in/diffusion_models/ui.tsx
++++ b/extensions_built_in/diffusion_models/ui.tsx
+@@ -621,6 +621,7 @@ export const AI_TOOLKIT_UI_MODELS: ModelArch[] = [
+       "sample.multi_ctrl_imgs",
+       "model.low_vram",
+       "model.layer_offloading",
++      "repa",
+     ],
+     customModelSelectOptions: qwenImage21TransparencyOption,
+   },
+@@ -974,7 +975,7 @@ export const AI_TOOLKIT_UI_MODELS: ModelArch[] = [
+       "config.process[0].sample.sample_steps": [30, 25],
+     },
+     disableSections: ["network.conv"],
+-    additionalSections: ["model.low_vram", "model.layer_offloading"],
++    additionalSections: ["model.low_vram", "model.layer_offloading", "repa"],
+   },
+   {
+     name: "zimage:deturbo",
+diff --git a/ui/src/app/jobs/new/SimpleJob.tsx b/ui/src/app/jobs/new/SimpleJob.tsx
+index 3fd9f9e..6a56979 100644
+--- a/ui/src/app/jobs/new/SimpleJob.tsx
++++ b/ui/src/app/jobs/new/SimpleJob.tsx
+@@ -8,7 +8,7 @@ import {
+   SampleTags,
+ } from './options';
+ import { useModelArchs } from '@/extensions/modelArchs';
+-import { defaultCompileOptions, defaultDatasetConfig } from './jobConfig';
++import { defaultCompileOptions, defaultDatasetConfig, defaultRepaConfig } from './jobConfig';
+ import { GroupedSelectOption, JobConfig, SelectOption } from '@/types';
+ import { objectCopy, tagsToObj, objToTags } from '@/utils/basic';
+ import {
+@@ -984,6 +984,42 @@ export default function SimpleJob({
+                     </>
+                   </FormGroup>
+                 )}
++                {modelArch?.additionalSections?.includes('repa') && (
++                  <FormGroup label="REPA" docKey={'repa'} className="pt-2">
++                    <Checkbox
++                      label="Use REPA"
++                      className="pt-1"
++                      checked={jobConfig.config.process[0].repa?.enabled || false}
++                      onChange={value => {
++                        if (value) {
++                          // write every key so the advanced YAML shows what the trainer will use
++                          setJobConfig(
++                            { ...defaultRepaConfig, ...jobConfig.config.process[0].repa, enabled: true },
++                            'config.process[0].repa',
++                          );
++                        } else {
++                          setJobConfig(false, 'config.process[0].repa.enabled');
++                        }
++                      }}
++                    />
++                    {jobConfig.config.process[0].repa?.enabled && (
++                      <>
++                        <NumberInput
++                          label="Weight"
++                          value={jobConfig.config.process[0].repa?.weight ?? defaultRepaConfig.weight}
++                          onChange={value => setJobConfig(value, 'config.process[0].repa.weight')}
++                          placeholder="eg. 0.5"
++                        />
++                        <NumberInput
++                          label="Block"
++                          value={jobConfig.config.process[0].repa?.block_index ?? defaultRepaConfig.block_index}
++                          onChange={value => setJobConfig(value, 'config.process[0].repa.block_index')}
++                          placeholder="eg. 8"
++                        />
++                      </>
++                    )}
++                  </FormGroup>
++                )}
+               </div>
+             </div>
+           </Card>
+diff --git a/ui/src/app/jobs/new/jobConfig.ts b/ui/src/app/jobs/new/jobConfig.ts
+index ec01502..27ba18f 100644
+--- a/ui/src/app/jobs/new/jobConfig.ts
++++ b/ui/src/app/jobs/new/jobConfig.ts
+@@ -1,7 +1,7 @@
+ 'use client';
+ import { isMac } from '@/helpers/basic';
+ import { defaultSampleConfig } from '@/helpers/defaultSamples';
+-import { JobConfig, SampleConfig, DatasetConfig, SliderConfig } from '@/types';
++import { JobConfig, SampleConfig, DatasetConfig, SliderConfig, RepaConfig } from '@/types';
+ 
+ export const defaultDatasetConfig: DatasetConfig = {
+   folder_path: '/path/to/images/folder',
+@@ -31,6 +31,17 @@ export const defaultSliderConfig: SliderConfig = {
+   anchor_class: '',
+ };
+ 
++// what the trainer assumes for a `repa` block; written out so the advanced YAML shows every key
++export const defaultRepaConfig: Required<RepaConfig> = {
++  enabled: true,
++  weight: 0.5,
++  block_index: 8,
++  encoder: 'facebook/dinov2-giant',
++  encoder_resolution: 518,
++  projector: 'mlp',
++  projector_dim: 2048,
++};
++
+ export const defaultCompileOptions = {
+   block_compile: true,
+ };
+diff --git a/ui/src/app/jobs/new/options.tsx b/ui/src/app/jobs/new/options.tsx
+index 29fcbf7..b8e507b 100644
+--- a/ui/src/app/jobs/new/options.tsx
++++ b/ui/src/app/jobs/new/options.tsx
+@@ -27,6 +27,7 @@ type AdditionalSections =
+   | 'sample.multi_ctrl_imgs'
+   | 'sample.duration'
+   | 'train.audio_loss_multiplier'
++  | 'repa'
+   | 'datasets.num_frames'
+   | 'model.multistage'
+   | 'model.layer_offloading'
+diff --git a/ui/src/app/jobs/new/utils.ts b/ui/src/app/jobs/new/utils.ts
+index 6832c3c..62e4b8f 100644
+--- a/ui/src/app/jobs/new/utils.ts
++++ b/ui/src/app/jobs/new/utils.ts
+@@ -59,6 +59,11 @@ export const handleModelArchChange = (
+     }
+   }
+ 
++  // REPA is only wired up for some models; the trainer refuses a block on the others
++  if (!newArch?.additionalSections?.includes('repa') && jobConfig.config.process[0].repa) {
++    setJobConfig(undefined, 'config.process[0].repa');
++  }
++
+   const numDatasets = jobConfig.config.process[0].datasets.length;
+ 
+   let currentDefaults = expandDatasetDefaults(currentArch.defaults || {}, numDatasets);
+diff --git a/ui/src/docs.tsx b/ui/src/docs.tsx
+index 7533d5d..b8a56ea 100644
+--- a/ui/src/docs.tsx
++++ b/ui/src/docs.tsx
+@@ -275,6 +275,31 @@ const docs: { [key: string]: ConfigDoc } = {
+       </>
+     ),
+   },
++  repa: {
++    title: 'REPA (Representation Alignment)',
++    description: (
++      <>
++        Experimental. REPA adds a second loss to training. A small helper network (the projector) is trained to turn the
++        model's early image features into the features a frozen vision model (DINOv2) sees in the same, clean training
++        image, and the model is pushed to make that easy. The projector is only used while training and is not part of
++        the saved LoRA. Based on "Representation Alignment for Generation: Training Diffusion Transformers Is Easier
++        Than You Think" (Yu et al., ICLR 2025).
++        <br />
++        <br />
++        What it costs: the first run downloads the vision model (about 4.4 GB for the default{' '}
++        <code>facebook/dinov2-giant</code>). If your latents were cached without REPA, they are cached again once,
++        because REPA also needs the exact images the latents were made from. With <b>Cache Latents</b> on in your dataset, the
++        vision model runs once over your images before training, stores its features next to the latents (about 7 MB per
++        768px image) and is then unloaded, so it adds little to training time or VRAM. Without it, the vision model
++        stays on the GPU and runs every step.
++        <br />
++        <br />
++        <b>Weight</b> is how strongly the alignment counts against the normal loss (0.5 by default). <b>Block</b> is
++        which transformer block's output is aligned, counting from 0 (8 by default). The encoder, the projector and
++        the resolution it sees can be changed in the advanced YAML.
++      </>
++    ),
++  },
+   'train.blank_prompt_preservation': {
+     title: 'Blank Prompt Preservation',
+     description: (
+diff --git a/ui/src/types.ts b/ui/src/types.ts
+index 7faa5f5..9e9a52e 100644
+--- a/ui/src/types.ts
++++ b/ui/src/types.ts
+@@ -143,6 +143,17 @@ export interface EMAConfig {
+   ema_decay: number;
+ }
+ 
++// representation alignment, see toolkit/repa.py. Any key left out takes the trainer's default
++export interface RepaConfig {
++  enabled?: boolean;
++  weight?: number;
++  block_index?: number;
++  encoder?: string;
++  encoder_resolution?: number;
++  projector?: string; // mlp or linear
++  projector_dim?: number;
++}
++
+ export interface ValidationItem {
+   image_path: string;
+   prompt: string;
+@@ -285,6 +296,7 @@ export interface ProcessConfig {
+   save: SaveConfig;
+   datasets: DatasetConfig[];
+   train: TrainConfig;
++  repa?: RepaConfig;
+   logging: LoggingConfig;
+   model: ModelConfig;
+   sample: SampleConfig;
+-- 
+2.54.0
+

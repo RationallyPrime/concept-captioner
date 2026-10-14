@@ -54,11 +54,31 @@ def tree_bytes(root: Path) -> int:
     return total
 
 
+def regularization_folder(paths: Paths, config: dict[str, Any]) -> Path | None:
+    """The ``datasets/`` folder a run's provided regularisation set was read from, if any.
+
+    A run copies the set into its own directory, so the folder matters only to a Repeat or a
+    restart, but it is protected exactly like ``dataset.path``: while its run is active or
+    resumable it stays, afterwards it is as removable as any other run input.
+    """
+    block = config.get("regularization")
+    if not isinstance(block, dict) or block.get("source") != "folder":
+        return None
+    return dataset_folder(paths, block.get("path"))
+
+
 @dataclass(frozen=True)
 class _CompletedRun:
     run_id: str
     dataset: Path
     resumable_at: int | None
+    regularization: Path | None = None
+
+    @property
+    def folders(self) -> tuple[Path, ...]:
+        return (
+            (self.dataset,) if self.regularization is None else (self.dataset, self.regularization)
+        )
 
 
 def cleanup_candidates(
@@ -103,8 +123,11 @@ def cleanup_candidates(
                 except ValueError:
                     pass
             continue
+        reg_folder = regularization_folder(paths, cfg)
         if run.name in keep:
             protected.add(folder)
+            if reg_folder is not None:
+                protected.add(reg_folder)
         try:
             state = _json(run / RUN_STATE_FILE)
             trainer = str(state.get("name", "")).removeprefix("trainer-")
@@ -115,10 +138,10 @@ def cleanup_candidates(
                 and state.get("group_alive") is False
                 and trainer in {"aitoolkit", "ltx"}
             ):
-                protected.add(folder)
+                protected.update(filter(None, (folder, reg_folder)))
                 continue
         except (OSError, ValueError):
-            protected.add(folder)
+            protected.update(filter(None, (folder, reg_folder)))
             continue
         stamp = None
         try:
@@ -128,16 +151,21 @@ def cleanup_candidates(
                 stamp = checkpoint.stat().st_mtime_ns
         except (OSError, ValueError, AgentError):
             pass
-        completed.append(_CompletedRun(run.name, folder, stamp))
+        completed.append(_CompletedRun(run.name, folder, stamp, reg_folder))
     resumable = sorted(
         (run for run in completed if run.resumable_at is not None),
         key=lambda run: (run.resumable_at, run.run_id),
         reverse=True,
     )
-    protected.update(run.dataset for run in resumable[:KEEP_RESUMABLE])
-    protected.update(run.dataset for run in completed if run.run_id in keep)
+    protected.update(folder for run in resumable[:KEEP_RESUMABLE] for folder in run.folders)
+    protected.update(folder for run in completed if run.run_id in keep for folder in run.folders)
     return sorted(
-        {run.dataset for run in completed if run.dataset not in protected and run.dataset.is_dir()}
+        {
+            folder
+            for run in completed
+            for folder in run.folders
+            if folder not in protected and folder.is_dir()
+        }
     )
 
 
@@ -162,6 +190,8 @@ def storage_usage(paths: Paths) -> dict[str, int]:
         "free_bytes": disk.free,
         "datasets_bytes": tree_bytes(paths.datasets),
         "reclaimable_dataset_bytes": sum(tree_bytes(p) for p in cleanup_candidates(paths)),
+        # The reuse cache of generated regularisation images; cleanup never removes it.
+        "regularization_cache_bytes": tree_bytes(paths.regsets),
     }
 
 

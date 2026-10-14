@@ -50,10 +50,38 @@ outside a hook tests a model's name; the trainer (`aitoolkit`, `ltx`) is still b
 
 The table has five rows: FLUX.1-dev, LTX-2, MiniMax H3, Z-Image and Qwen-Image-2.1. Z-Image and
 Qwen-Image-2.1 count their training length in epochs (the app sends steps) and show their licence
-notice and first-download size under the picker. Z-Image compares through the
-`aitoolkit_arch_image` generator hook, and its picker note says a Z-Image LoRA works on Z-Image-Turbo
-at about twice the strength. Qwen-Image-2.1 is offered only on GPUs with at least 80 GB and has no
-comparison generator.
+notice and first-download size under the picker. Both compare through the `aitoolkit_arch_image`
+generator hook; Z-Image's picker note says a Z-Image LoRA works on Z-Image-Turbo at about twice the
+strength. Qwen-Image-2.1 is offered only on GPUs with at least 80 GB.
+
+## Regularisation images and REPA
+
+Two optional row fields, `regularization` and `repa`, are decoded by `ModelRow` and read by the Training
+screen. They apply to AI Toolkit rows only; `regularization` needs a generator hook and no
+`trainer_config` hook, and `repa` needs an architecture in `ModelRow.repaArchitectures`. The
+Qwen-Image-2.1 row carries both, so the app offers them for that model only.
+
+On the Training screen, between "What to train" and "Run settings" (`GPU/TrainingAidsView.swift`), a
+model with the fields shows two sections in plain language, each with its own Definitions:
+**Regularisation images** (a toggle, the class nouns taken from the project's concepts, the number of
+images, a minutes-and-money estimate from the row's seconds per image and the quoted hourly price, and
+the note that training takes about twice as long) and **Representation alignment (experimental)** (one
+toggle and the size of the helper-model download). Advanced training controls add "Regularisation
+strength" while the toggle is on. A trigger with no concept stops the run with "Define a class noun for
+<trigger> in Concepts before training with regularisation images."
+
+`trainingParams` writes `regularization` then `repa` before `extra`, as explicit values: the row's
+generation settings and the six AI Toolkit REPA keys, so a saved run repeats the same way after the table
+changes (Repeat passes on the saved blocks for the same model). With regularisation on, a length in epochs
+doubles into trainer steps, since every other step looks at a regularisation image; Repeat halves it again
+to show epochs. Choosing a model resets both toggles to the row's `default_on` and keeps an edited image
+count or strength. While the pod draws the images, Progress reads the launcher's
+`regularization/planned` and `regularization/ready` scalars and says "Drawing regularisation images: 12 of
+40" until the trainer reports its first measurement; Saved runs says what each run used.
+
+The glossary has an entry for `representation-alignment` (alias REPA, section Training progress and
+controls); the three terms the sections link to are `StudioTerm.regularizationImages`,
+`.priorPreservation` and `.representationAlignment`.
 
 ## Implemented
 

@@ -96,6 +96,7 @@ def test_usage_and_explicit_cpu_cleanup_have_same_policy(client, anon_client, se
         "free_bytes",
         "datasets_bytes",
         "reclaimable_dataset_bytes",
+        "regularization_cache_bytes",
     }
     assert all(type(value) is int for value in usage.values())
     assert usage["datasets_bytes"] == 56 and usage["reclaimable_dataset_bytes"] == 14

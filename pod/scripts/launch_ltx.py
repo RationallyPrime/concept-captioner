@@ -5,6 +5,7 @@
 
 1. Validate run.json: an own copy of the RunConfig rules of POD-SPEC §4.1 (no podagent import).
    ``dataset.path`` must be an existing directory under ``<PODAGENT_WORKSPACE>/datasets``.
+   ``regularization`` and ``repa`` belong to the AI Toolkit trainer; this wrapper refuses them.
 2. Prepare the Hub model when ``base_model`` is ``Lightricks/LTX-2`` (see "Model files"); a
    failure exits ``EXIT_MODEL_PREPARATION`` (69) before any run file is written. Skipped by
    ``--dry-run``.
@@ -133,6 +134,8 @@ _TOP_KEYS = frozenset(
         "extra",
         "resume",
         "initialization",
+        "regularization",
+        "repa",
     }
 )
 _REQUIRED_KEYS = ("run_id", "dataset", "triggers", "base_model")
@@ -314,6 +317,12 @@ def validate_run_config(
     cfg["resume"] = raw.get("resume", False)
     if not isinstance(cfg["resume"], bool):
         errors.append("resume: must be true or false")
+    for key in ("regularization", "repa"):  # AI Toolkit only; its launcher checks the contents
+        value = raw.get(key)
+        if value is not None and not isinstance(value, dict):
+            errors.append(f"{key}: must be an object or null")
+            value = None
+        cfg[key] = value
     if errors:
         raise ConfigError("; ".join(errors))
     return cfg
@@ -522,6 +531,9 @@ _LOSS_RE = re.compile(r"(?<!\w)loss" + _SEP + "(" + _NUM + ")", re.IGNORECASE)
 _LR_RE = re.compile(r"(?<!\w)(?:lr|learning[_ ]rate)" + _SEP + "(" + _NUM + ")", re.IGNORECASE)
 _SCRAPED_TAGS = (("scraped/loss", _LOSS_RE), ("scraped/lr", _LR_RE))
 _LINE_SPLIT_RE = re.compile(r"\r\n|\r|\n")
+# Regularisation images drawn so far, printed by regularization.py as it works. Written at step 0:
+# the trainer has not taken a step yet, and the tag is the app's progress for that phase.
+_REGULARIZATION_READY_RE = re.compile(r"^\[regularization\] ready (\d+)/\d+\s*$")
 
 
 def find_step(line: str) -> int | None:
@@ -539,6 +551,10 @@ class LogScraper:
         self._last_written: dict[str, int] = {}
 
     def feed(self, line: str) -> list[tuple[str, int, float]]:
+        ready = _REGULARIZATION_READY_RE.match(line)
+        if ready is not None:
+            self.written += 1
+            return [("regularization/ready", 0, float(ready.group(1)))]
         step = find_step(line)
         if step is not None:
             self.last_step = step
@@ -1188,6 +1204,8 @@ def main(argv: list[str] | None = None) -> int:
         run_dir, cfg = load_run(Path(args.config), restore_missing_dataset=not args.dry_run)
         if cfg.get("initialization") is not None:
             raise ConfigError("External initial LoRA weights currently support AI Toolkit H3 only")
+        if cfg.get("regularization") is not None or cfg.get("repa") is not None:
+            raise ConfigError("regularization/repa are not available on the LTX trainer")
         source_cfg = cfg
         cfg = resolve_hub_model(cfg)
         entries, skipped = build_dataset_entries(

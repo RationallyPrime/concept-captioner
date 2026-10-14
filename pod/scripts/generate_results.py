@@ -10,6 +10,8 @@ with the row's model settings (FLUX is one such row); ``aitoolkit_arch_image`` u
 ai-toolkit registers for the row's ``arch`` with the trained LoRA bound as a network (Z-Image is one
 such row); ``minimax_h3`` uses H3's registered model and the trained LoRASpecialNetwork recipe;
 ``ltx_one_stage`` uses LTX's official one-stage CLI.
+``render_base`` is the base-model-only entry point (no LoRA, no source run): regularization.py
+calls it to draw a row's regularisation images with the same model class.
 Heavy imports happen only at execution.
 """
 
@@ -25,11 +27,13 @@ import runpy
 import signal
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 AI_PIN = "f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47"
 LTX_PIN = "9ec55f9f22798a3198d9c923856824821bc3317e"
+RENDER_CHUNK = 8  # images per ``generate_images`` call in ``render_base``
 
 # Generator hook name -> (function that renders the pairs, function that adds the hook's fields to
 # the manifest or None). Names, not functions: they are looked up in this module's globals when
@@ -142,6 +146,82 @@ def flux_generate(
             # GenerateImageConfig parses '--' as prompt overrides. The API rejects those,
             # preserving the exact same prompt, seed and settings on both sides.
             sd.generate_images(configs, sampler="flowmatch")
+        del sd
+        gc.collect()
+        torch.cuda.empty_cache()
+
+
+def render_base(
+    base_model: str,
+    jobs: list[dict[str, Any]],
+    out_dir: Path,
+    *,
+    on_ready: Callable[[list[dict[str, Any]]], None] | None = None,
+) -> None:
+    """The base model alone: still images for ``jobs``, one model load, no LoRA.
+
+    ``jobs[i]`` is ``{"prompt", "seed", "width", "height", "steps", "guidance_scale", "path"}``;
+    the PNG is written at ``path`` (relative paths are under ``out_dir``). The model is the exact
+    row's, built the way the trainer builds it: ``get_model_class(ModelConfig(...))`` returns
+    ``StableDiffusion`` for the legacy archs (FLUX) and the architecture's own ``BaseModel``
+    subclass for the newer ones (Qwen-Image-2.1, Z-Image). Jobs render in chunks of
+    ``RENDER_CHUNK``; ``on_ready(chunk)`` runs after each, so a caller can keep finished images
+    when the process is stopped later. Used by regularization.py for the regularisation sets.
+    """
+    import torch
+
+    sys.path.insert(0, os.environ.get("AI_TOOLKIT_DIR", "/opt/ai-toolkit"))
+    from toolkit.config_modules import GenerateImageConfig, ModelConfig
+    from toolkit.sampler import get_sampler
+    from toolkit.util.get_model import get_model_class
+
+    table = model_table()
+    spec = table["exact_row"](base_model, "aitoolkit")
+    if spec is None:
+        raise ValueError(f"{base_model} is not in the model table; it cannot be rendered here")
+    architecture = spec["architecture"]
+    out_dir.mkdir(parents=True, exist_ok=True)
+    model = ModelConfig(
+        **table["aitoolkit_model_values"](spec, base_model), dtype=architecture["dtype"]
+    )
+    cls = get_model_class(model)
+    # A BaseModel subclass names its own scheduler (the trainer's previews use it); the legacy
+    # class takes the flow-match sampler, as flux_generate does.
+    scheduler = (
+        cls.get_train_scheduler()
+        if hasattr(cls, "get_train_scheduler")
+        else get_sampler("flowmatch", arch=architecture["arch"])
+    )
+    sd = cls(
+        device="cuda:0",
+        model_config=model,
+        dtype=architecture["dtype"],
+        noise_scheduler=scheduler,
+    )
+    try:
+        with torch.no_grad():
+            sd.load_model()
+            for start in range(0, len(jobs), RENDER_CHUNK):
+                chunk = jobs[start : start + RENDER_CHUNK]
+                configs = [
+                    GenerateImageConfig(
+                        prompt=job["prompt"],
+                        seed=job["seed"],
+                        width=job["width"],
+                        height=job["height"],
+                        num_inference_steps=job["steps"],
+                        guidance_scale=job["guidance_scale"],
+                        output_path=str(out_dir / job["path"]),
+                        output_ext="png",
+                    )
+                    for job in chunk
+                ]
+                # GenerateImageConfig parses '--' as prompt overrides; regularization.py never
+                # plans a prompt that contains one, so the prompt is rendered exactly as written.
+                sd.generate_images(configs, sampler="flowmatch")
+                if on_ready is not None:
+                    on_ready(chunk)
+    finally:
         del sd
         gc.collect()
         torch.cuda.empty_cache()

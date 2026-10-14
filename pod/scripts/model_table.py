@@ -22,6 +22,11 @@ Three lookups, used consistently (docs/model-table.md, "Lookup rules"):
   else from a family match (custom paths such as ``/workspace/models/MiniMax-H3``), else the
   name only. A family match supplies the block and nothing else.
 
+A row may also carry two optional AI Toolkit fields, ``regularization`` (a generated
+prior-preservation set; ``regularization.py`` and ``generate_results.render_base`` act on it) and
+``repa`` (representation alignment; the launcher writes it to ``process.repa``). The pod reads them
+only to admit a run and never for a run's settings, which arrive as explicit values in run.json.
+
 No code outside a hook tests a model's name. A hook is a named strategy for one concern; the
 row names it and ``HOOKS`` below registers every name this side knows. A row that names an
 unregistered hook fails loudly in ``hook()``.

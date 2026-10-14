@@ -321,6 +321,7 @@ struct GPUJourneyView: View {
             Divider()
             TrainingInitializationView(workspace: workspace)
             Divider()
+            TrainingAidsView(session: session, workspace: workspace)
             StudioSection(title: "Run settings", subtitle: workspace.trainingLengthSubtitle) {
                 Form {
                     TextField(workspace.trainingLengthLabel, value: $workspace.steps, format: .number.grouping(.never))
@@ -454,7 +455,13 @@ extension GPUJourneyView {
                     if workspace.curveDisplay == .noRun {
                         Button("Go to Training") { session.step = .training }
                     } else if workspace.curveDisplay == .waiting {
-                        ProgressView("Waiting for a training measurement").controlSize(.small)
+                        if let drawing = workspace.regularizationProgress {
+                            ProgressView(value: Double(drawing.ready), total: Double(drawing.planned)) {
+                                Text(drawing.text)
+                            }.controlSize(.small)
+                        } else {
+                            ProgressView("Waiting for a training measurement").controlSize(.small)
+                        }
                     }
                 } else {
                     Chart(workspace.monitoredPoints) { point in

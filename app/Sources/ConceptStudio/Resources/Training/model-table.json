@@ -455,7 +455,7 @@
       "video": null,
       "preview": {
         "training_samples": false,
-        "still": false,
+        "still": true,
         "video": null
       },
       "captions": {
@@ -476,8 +476,32 @@
         "notice": "Qwen-Image-2.1 is released under the Qwen Research License Agreement, which allows non-commercial research or evaluation use only; commercial use needs a separate licence from its authors. If you share a LoRA made with it, the licence requires \"Built with Qwen\" or \"Improved using Qwen\" in the LoRA's documentation.",
         "show_notice": true
       },
-      "hooks": {},
-      "notes": "AI Toolkit qwen_image_2 (one architecture for text-to-image and editing; this row trains plain text-to-image LoRAs). bf16, no quantisation, no gradient checkpointing, 768 px, AdamW at 1e-4 with a 50-step constant warmup, rank and alpha 32, timestep_type shift (AI Toolkit's own default for this architecture), cached text embeddings (the trainer then unloads the 17.5 GB text encoder from the GPU after caching), batch 1, 400 epochs. Checkpoint cadence is in steps: every 250 steps, newest 8 kept. 1024 px is not offered. Preview is off: aitoolkit_image builds the legacy StableDiffusion class, which does not serve qwen_image_2. Weights come from the Comfy-Org repack through AI Toolkit's own resolver, which picks the bf16 files when quantisation is off."
+      "hooks": {
+        "generator": "aitoolkit_arch_image"
+      },
+      "notes": "AI Toolkit qwen_image_2 (one architecture for text-to-image and editing; this row trains plain text-to-image LoRAs). bf16, no quantisation, no gradient checkpointing, 768 px, AdamW at 1e-4 with a 50-step constant warmup, rank and alpha 32, timestep_type shift (AI Toolkit's own default for this architecture), cached text embeddings (the trainer then unloads the 17.5 GB text encoder from the GPU after caching), batch 1, 400 epochs. Checkpoint cadence is in steps: every 250 steps, newest 8 kept. 1024 px is not offered. Training samples are off. Comparison generation names aitoolkit_arch_image, which builds the model class AI Toolkit registers for qwen_image_2 and binds the trained LoRA as a network; the same model class draws the regularisation images (generate_results.render_base). Weights come from the Comfy-Org repack through AI Toolkit's own resolver, which picks the bf16 files when quantisation is off.",
+      "regularization": {
+        "default_on": true,
+        "images": 40,
+        "weight": 1.0,
+        "generation": {
+          "steps": 40,
+          "guidance_scale": 3.0,
+          "seconds_per_image": 33
+        },
+        "note": "40 class-only images at reg_weight 1.0. seconds_per_image is an estimate for the time shown before generation."
+      },
+      "repa": {
+        "default_on": false,
+        "encoder": "facebook/dinov2-giant",
+        "encoder_download_gb": 4.4,
+        "block_index": 8,
+        "weight": 0.5,
+        "projector": "mlp",
+        "projector_dim": 2048,
+        "encoder_resolution": 518,
+        "note": "SimpleTuner's Qwen-Image-2.1 preset (ViT-g/14, block 8, lambda 0.5) with the paper's MLP projector."
+      }
     }
   ]
 }

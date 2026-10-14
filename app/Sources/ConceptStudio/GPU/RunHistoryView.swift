@@ -42,6 +42,9 @@ struct RunHistoryView: View {
             LabeledContent("Starting model", value: run.baseModel).textSelection(.enabled)
             LabeledContent("Dataset", value: run.datasetDescription).textSelection(.enabled)
             LabeledContent("Training length", value: "\(run.targetSteps) steps")
+            ForEach(run.trainingAidSummary, id: \.self) { line in
+                Text(line).textSelection(.enabled)
+            }
             LabeledContent("Result", value: run.resultExplanation)
             if let cost = run.estimatedGPUCostUSD {
                 LabeledContent("Run GPU cost including continuations", value: StudioMoney.format(cost))
