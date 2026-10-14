@@ -180,37 +180,6 @@ struct PreviewRenderTests {
         }
     }
 
-    private func captureAdvancedModes(
-        session: StudioSession, output: URL, filter: Set<String>, captures: inout [[String: String]]
-    ) async throws {
-        let originalMode = session.advancedUser
-        let originalStep = session.step
-        defer {
-            session.advancedUser = originalMode
-            session.step = originalStep
-        }
-        for enabled in [false, true] {
-            session.advancedUser = enabled
-            let mode = enabled ? "on" : "off"
-            try await capture(
-                "advanced-\(mode)-settings", view: StudioSettingsView(session: session),
-                output: output, filter: filter, captures: &captures,
-                renderSizes: [("window", CGSize(width: 700, height: 680))]
-            )
-            session.step = .concepts
-            try await capture(
-                "advanced-\(mode)-concepts", view: StudioRootView(session: session),
-                output: output, filter: filter, captures: &captures,
-                renderSizes: [("window", CGSize(width: 1240, height: 1100))]
-            )
-            session.step = .training
-            try await capture(
-                "advanced-\(mode)-training", view: StudioRootView(session: session),
-                output: output, filter: filter, captures: &captures
-            )
-        }
-    }
-
     private func captureAuxiliaryScreens(
         session: StudioSession, output: URL, filter: Set<String>, captures: inout [[String: String]]
     ) async throws {
@@ -439,4 +408,36 @@ struct PreviewRenderTests {
     }
 }
 
-// View-layer logic behind the screens; runs in every test pass, no network.
+// Advanced-mode captures use the same native rendering path.
+extension PreviewRenderTests {
+    private func captureAdvancedModes(
+        session: StudioSession, output: URL, filter: Set<String>, captures: inout [[String: String]]
+    ) async throws {
+        let originalMode = session.advancedUser
+        let originalStep = session.step
+        defer {
+            session.advancedUser = originalMode
+            session.step = originalStep
+        }
+        for enabled in [false, true] {
+            session.advancedUser = enabled
+            let mode = enabled ? "on" : "off"
+            try await capture(
+                "advanced-\(mode)-settings", view: StudioSettingsView(session: session),
+                output: output, filter: filter, captures: &captures,
+                renderSizes: [("window", CGSize(width: 700, height: 680))]
+            )
+            session.step = .concepts
+            try await capture(
+                "advanced-\(mode)-concepts", view: StudioRootView(session: session),
+                output: output, filter: filter, captures: &captures,
+                renderSizes: [("window", CGSize(width: 1240, height: 1100))]
+            )
+            session.step = .training
+            try await capture(
+                "advanced-\(mode)-training", view: StudioRootView(session: session),
+                output: output, filter: filter, captures: &captures
+            )
+        }
+    }
+}
