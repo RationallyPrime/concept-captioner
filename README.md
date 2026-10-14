@@ -1,25 +1,121 @@
 # ConceptStudio
 
-A native Mac application for turning your photos or video clips into a diffusion LoRA:
-prepare the training data, write and review captions, rent a GPU, train, and collect the model.
-The Mac manages the project; training and result generation run on RunPod.
+**Teach an image or video model something new from your own photos or clips: a person, a pet,
+an object, a style or a movement. Everything runs from a Mac, with no graphics card and no
+machine-learning background needed.**
 
-ConceptStudio is for people who have no programming or machine-learning experience, with
-direct controls for people who already know their tools. A LoRA is an adapter that teaches a
-compatible image or video model a concept, such as a person, object, visual style or movement.
-The default workflow teaches one concept. Multiple concepts and detailed settings are available
-under Advanced.
+ConceptStudio is a native macOS app that turns a folder of examples into a trained
+[LoRA](https://huggingface.co/docs/diffusers/training/lora), a small adapter that teaches a
+diffusion model one new concept. It walks you through choosing examples, writing and reviewing
+training captions, renting a GPU computer, training, and collecting the result. The Mac runs
+the project; training runs on a GPU computer the app rents from [RunPod](https://www.runpod.io)
+and controls for you, within the spending limits you set.
 
-**Development preview.** The app and offline demo work, and the repository records successful
-live captioning and training runs. A signed, notarized app download is not yet available.
-The current preview is built from source; release permission checks and several advanced
-training paths still need live verification. See [current status](app/docs/APP-STATUS.md).
+| Review captions beside the training images | Follow training as it runs |
+| --- | --- |
+| ![Review screen with an image and its caption](docs/images/readme-review.png) | ![Monitor screen with a learning curve](docs/images/readme-monitor.png) |
+
+<sub>Screens from the built-in offline demo, which uses synthetic photos and rents nothing.</sub>
+
+> **Status: development preview.** The full workflow has run end to end in a signed, notarised
+> build, from renting the computer to the trained adapter arriving on Hugging Face. There is no
+> public download yet: build from source as shown below. [Current status](app/docs/APP-STATUS.md)
+> lists what has been verified and what has not.
+
+## How it works
+
+Nine steps, each one a screen in the app's sidebar:
+
+| Step | What happens |
+| --- | --- |
+| **Images** | Import photos or clips. Spot duplicates, include or exclude examples, and approve crops or exact video segments. |
+| **Concepts** | Say what the adapter should learn, and choose the *trigger*: the word that names it in captions. |
+| **Mapping** | Confirm which subject in each image the concept belongs to. Style and motion concepts apply to the whole image and skip this. |
+| **Captioning** | A language model of your choice describes each example. A second model can review the captions. |
+| **Review** | Edit captions beside the actual training media, and mark finished ones so later model runs leave them alone. |
+| **Publish** | Package the approved media and captions as a Hugging Face dataset, or prepare them for direct upload. |
+| **GPU pods** | Pick hardware and storage, see the hourly price, and set a budget and an idle limit before renting. |
+| **Training** | Start a run from the model's tested recipe, adjust it, or repeat a saved run's settings. |
+| **Monitor** | Watch the learning curve and training log, retrieve the adapter, and compare the base and trained models on the same prompts and seeds. |
+
+Captions name the concept with its trigger and describe everything visible *outside* it:
+clothing, setting, light, pose. That boundary tells training what belongs to the concept and
+what doesn't. It guides learning but can't force it, so the choice of examples still matters.
+
+## Supported models
+
+Each model has a tested recipe, with its training length, learning rate, adapter size, image
+sizes and checkpoint schedule chosen for that model:
+
+| Model | Trains on | Notes |
+| --- | --- | --- |
+| [FLUX.1-dev](https://huggingface.co/black-forest-labs/FLUX.1-dev) | images | Non-commercial licence |
+| [Z-Image](https://huggingface.co/Tongyi-MAI/Z-Image) | images | Apache 2.0; adapters also work on Z-Image-Turbo |
+| [Qwen-Image-2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) | images | Regularisation and REPA on by default; 80 GB GPUs |
+| [LTX-2](https://huggingface.co/Lightricks/LTX-2) | images and video | Lightricks' own trainer; moving to LTX 2.3+ |
+| [MiniMax H3](https://huggingface.co/Comfy-Org/MiniMax-H3) | images and video | Native recipe with guidance controls |
+
+Turn on **Advanced user** in Settings to reveal every detailed control, plus 20 more
+architectures that [AI Toolkit](https://github.com/ostris/ai-toolkit) can train, among them
+FLUX.2, Chroma, SDXL, Lumina 2 and HiDream-O1. They use AI Toolkit's own defaults and are labelled
+*Unverified recipe* until one has been tested. Each shows its licence and any known upstream
+issues.
+
+## What's inside
+
+- **One model table, read by both sides.** Every supported model is one row of
+  [`model-table.json`](app/Sources/ConceptStudio/Resources/Training/model-table.json). The app
+  builds its pickers, defaults and limits from it, and the GPU images carry the same file to
+  build the trainer's configuration. Adding a model is a reviewed row plus an image rebuild, not
+  new code paths. See [the model table](docs/model-table.md).
+- **Captions shaped for the model being trained.** Caption instructions are an
+  [Agent Skills](https://agentskills.io) directory with one *profile* per caption style. Modern
+  image models get dense prose, SDXL gets short lines that fit CLIP's limit, and MiniMax H3 gets
+  its structured shot fields. Users can supply their own skill. The one hard check is that every
+  trigger appears exactly; beyond that, a rerun is the fix.
+- **Any captioning model, chosen at run time.** Sign in with a ChatGPT plan, connect
+  OpenRouter, use a provider or gateway key, or point at a [vLLM](https://docs.vllm.ai) server
+  you run yourself. Nothing is tied to one vendor.
+- **Rented GPUs, handled carefully.** Each rented computer runs our own container image with a
+  small control agent. The app talks to it over a single authenticated HTTP API, and services
+  start from a fixed catalogue, never from shell strings. Spending is capped per run and per
+  computer. An idle computer is stopped, though not while the app is still uploading to it. A
+  computer holding a result that hasn't been saved can't be removed.
+- **Stronger defaults where they're measured.** Optional *regularisation* draws reference
+  images from the base model itself, captions them with your own captioning model, and mixes
+  them in so the base model's sense of the class is preserved.
+  [REPA](https://arxiv.org/abs/2410.06940) aligns the model's internal features with a frozen
+  DINOv2 encoder for steadier training. Both are on by default for Qwen-Image-2.1.
+- **A private, native Mac app.** SwiftUI, sandboxed, with credentials in Keychain and projects
+  in ordinary folders you choose. The app starts no subprocesses. Built-in Help explains every
+  term in a 177-entry glossary, each in two readings: *Plain language* and *Show me the good
+  stuff*.
+
+```mermaid
+flowchart LR
+    subgraph Mac["Your Mac"]
+        App["ConceptStudio<br/>SwiftUI app"]
+        Folder[("Project folder<br/>media, captions, job file")]
+    end
+    LLM["Captioning model<br/>ChatGPT · OpenRouter · API key · vLLM"]
+    HF[("Hugging Face<br/>datasets and adapters")]
+    subgraph Pod["Rented GPU computer"]
+        Agent["Control agent<br/>authenticated HTTP"]
+        Trainer["Trainer<br/>AI Toolkit · LTX"]
+        Agent --> Trainer
+    end
+    App --- Folder
+    App -->|images in, captions out| LLM
+    App -->|publish dataset| HF
+    App -->|rent, stop, budget| RunPod["RunPod API"]
+    App -->|start, monitor, collect| Agent
+    Trainer -->|adapter| HF
+```
 
 ## Try the offline demo
 
-You need **macOS 15 or later** and a current Xcode installation with its Swift toolchain.
-Development and native verification have used Apple Silicon Macs; Intel distribution has not
-been verified. Open Xcode once to finish its setup before building.
+You need **macOS 15 or later** and a current Xcode with its Swift toolchain. Development has
+used Apple Silicon Macs. Open Xcode once to finish its setup, then:
 
 ```sh
 git clone https://github.com/RationallyPrime/concept-captioner.git
@@ -29,74 +125,59 @@ open app/dist/ConceptStudio.app
 ```
 
 Choose **Try the demo** in the Welcome window. It uses bundled synthetic photos, prepared
-captions and simulated computers. It needs no accounts, rents nothing and spends no money.
-Definitions are available throughout the app and in searchable Help, with **Plain language**
-and **Show me the good stuff** explanations.
+captions and simulated computers. It needs no accounts, rents nothing and spends nothing.
 
-The source build is an unsigned development preview. Build instructions, account setup and the
-signing/notarization procedure are in [Running ConceptStudio](app/docs/RUNNING.md).
-
-## From examples to a trained model
-
-| Step | What you do |
-| --- | --- |
-| **Images** | Import photos or clips, inspect duplicates, include or exclude examples, and approve crops or exact video segments. |
-| **Concepts** | Choose what the LoRA should learn and the trigger that names it in captions. |
-| **Mapping** | Confirm which subject the concept belongs to. Whole-target style and motion concepts skip this step. |
-| **Captioning** | Choose a provider and model, generate descriptions, and optionally have a second model review them. |
-| **Review** | Edit captions beside the actual training media and protect finished captions from model runs. |
-| **Publish** | Prepare the included media and saved captions; publish a Hub dataset or prepare a direct upload to the training computer. |
-| **GPU pods** | Choose hardware and storage, review the price, and set spending and idle limits before renting. |
-| **Training** | Set the training recipe, start a run, or reuse settings from a saved run. |
-| **Monitor** | Follow progress, retrieve the LoRA, and try supported base-versus-trained comparisons with matched prompts and seeds. |
-
-Captions name the concept with its trigger and describe the visible details outside that
-concept. This is the *concept boundary*: it guides what training should associate with the
-trigger. It does not guarantee that the model separates every correlated detail in the data;
-dataset choice and evaluation still matter.
+`scripts/build-app.sh release` produces a Developer ID-signed build, and notarises it when a
+notary profile is configured. [Running ConceptStudio](app/docs/RUNNING.md) covers accounts,
+signing and notarisation.
 
 ## Accounts, data and costs
 
-- **Captioning:** use an eligible ChatGPT account, connect OpenRouter, supply a provider or
-  gateway key, or use a compatible vLLM server. The app keeps the selected account and billing
-  route explicit. Image and video support depend on both the provider route and chosen model.
-- **Training:** use your RunPod account. Hugging Face is optional for publishing datasets and
-  trained models; direct dataset upload and saving results to the Mac are supported. Gated
-  base models may still require a Hugging Face token and acceptance of their license.
-- **Storage:** choose a reusable network volume or a persistent disk attached to the rented
-  computer. Stopping a computer ends GPU billing but retains saved storage and its charges.
-  Removing a computer deletes its attached disk; separate network storage remains.
-- **Credentials and project files:** credentials stay in Keychain. The project is an ordinary
-  folder containing a job file, media, caption sidecars and saved run information. A custom
-  captioning skill is copied into that folder. The selected captioning service receives the
-  media it needs, and the training computer receives the approved training set.
+- **Captioning:** one of the routes above. Image and video support depend on the model you pick.
+- **Training:** your RunPod account. Hugging Face is optional. Without it, datasets upload
+  directly to the training computer and the adapter is saved to your project folder. Some base
+  models are gated and need a Hugging Face token and an accepted licence.
+- **Storage:** a reusable network volume, or a disk attached to the rented computer. Stopping a
+  computer ends GPU billing but keeps its storage, and the storage charges. Removing a computer
+  deletes its attached disk.
+- **Your data:** credentials stay in Keychain. The captioning service sees the media it
+  captions, the training computer receives the approved training set, and a dataset goes to
+  Hugging Face only when you publish it there, privately unless you choose otherwise.
 
-**Budget and idle shutdown depend on this Mac.** Keep ConceptStudio running and the Mac awake
-while a computer is rented. Those controls cannot stop a rental while the app is closed or
-the Mac is asleep. GPU estimates exclude separately billed storage. These are current runtime
-limits, not a guarantee of a server-enforced spending cap.
+**Keep the app open and the Mac awake while a computer is rented.** Budgets and the idle stop
+are enforced by the app, not by RunPod, so they can't act while the app is closed or the Mac is
+asleep.
 
-## What has been verified
+## Engineering practice
 
-The [app status](app/docs/APP-STATUS.md) and [pod status](pod/docs/POD-STATUS.md) separate source
-tests, native interaction checks and actual service runs. Recorded live evidence includes
-ChatGPT and OpenRouter captioning, bounded FLUX/LTX training and result checks, and a completed
-H3 identity run using 69 still images and 3,000 training steps. Those checks used the specific
-images and settings recorded there; they do not establish every combination or model quality.
+- **Every change goes through CI:** the Swift build and tests with strict SwiftLint and
+  SwiftFormat; the Python reference package on Python 3.11 to 3.13, with Ruff and `ty` type
+  checks; and separate suites for the agent, its command-line client and the trainer
+  launchers. Together that is more than 550 Swift tests, about 120 reference tests and close to
+  1,000 GPU-side tests. Tool versions are pinned with [mise](https://mise.jdx.dev), and Python
+  dependencies are locked with [uv](https://docs.astral.sh/uv/).
+- **The GPU side has a fake mode.** The agent runs locally with simulated GPUs, so the whole
+  control flow can be tested with no rental and no Docker.
+- **Screens are rendered in tests.** An offscreen pass draws every screen in light and dark
+  mode at its minimum and default window sizes.
+  [`scripts/render-app-preview.sh`](scripts/render-app-preview.sh) produced the screenshots
+  above.
+- **Decisions and evidence are written down.** The [decision log](docs/ADR-LOG.md) keeps each
+  product decision verbatim, and the status documents keep source tests, local checks and real
+  GPU runs apart. A claim of "works" names the run that showed it.
+- **Built with AI coding agents.** Claude Code and Codex built ConceptStudio, working in
+  parallel from written briefs. Each change went through independent review and the CI gates
+  before merging, and product decisions stayed with the owner. The briefs, reviews and
+  walkthroughs are in [`docs/process`](docs/process/).
 
-H3 clip training, external warm-start, same-run Resume and matched H3 generation still need
-live acceptance. Signed sandbox behavior, Photos and folder-permission persistence across
-builds, VoiceOver acceptance and notarization remain release checks. ChatGPT plan access is
-shown, but the in-app remaining-allowance display is still unfinished.
+## The command-line captioner
 
-## CLI and project interoperability
-
-The repository also contains **`concept-captioner`**, the Python reference implementation and
-CLI. It shares the app's job, skill, profile and caption-record formats. The native app calls
-its providers and pod services directly; using it does not require installing Python.
-
-For command-line use, install from this checkout with Python 3.11 or later and
-[uv](https://docs.astral.sh/uv/):
+The repository also contains **`concept-captioner`**, the Python reference implementation of
+the captioning pipeline. It shares the app's job file, skill, caption profiles and per-image
+caption records, so a project can move between the two. It uses
+[pydantic-ai](https://ai.pydantic.dev) for model calls and reads from a local folder or a
+Hugging Face dataset. Captions go to sidecar files or back into the same dataset. The app
+doesn't need Python.
 
 ```sh
 uv venv
@@ -104,25 +185,23 @@ uv pip install -e ".[hf]"
 .venv/bin/concept-captioner --help
 ```
 
-There is currently no published `concept-captioner` package on PyPI. The
-[CLI guide](docs/CLI.md) covers a complete job example, providers, custom skills, all caption
-profiles, Hugging Face sources/sinks, reruns and library use. Existing `.txt`/`.json` caption
-companions can be imported into the app; captions marked `source: human` remain protected.
+The [CLI guide](docs/CLI.md) covers a complete job, providers, custom skills, caption profiles,
+Hugging Face sources and destinations, and reruns. It isn't published on PyPI yet.
 
-## Repository and documentation
+## Repository
 
-| Component | Role |
+| Path | What it is |
 | --- | --- |
-| [`app/`](app/) | SwiftUI application and the native ConceptCore captioning library. |
-| [`src/concept_captioner/`](src/concept_captioner/) | Python reference implementation and CLI, using pydantic-ai for model calls. |
-| [`pod/`](pod/) | Authenticated control agent, trainer/generation wrappers, container images and podctl. |
+| [`app/`](app/) | The SwiftUI app and ConceptCore, its native captioning library. |
+| [`pod/`](pod/) | Everything on the rented computer: the control agent, container images, trainer launchers and `podctl`. |
+| [`src/concept_captioner/`](src/concept_captioner/) | The Python reference implementation and CLI. |
 
-- [Run the app](app/docs/RUNNING.md) · [Use the CLI](docs/CLI.md) · [Operate the pod services](pod/README.md)
-- [Product brief](app/docs/APP-BRIEF.md) · [Architecture decisions](docs/ADR-LOG.md)
-- [Shared captioning contract](app/docs/CORE-SPEC.md) · [Pod contract](pod/docs/POD-SPEC.md)
-- [App status](app/docs/APP-STATUS.md) · [Core status](app/docs/CORE-STATUS.md) · [Pod status](pod/docs/POD-STATUS.md)
+- [Run the app](app/docs/RUNNING.md) · [Use the CLI](docs/CLI.md) · [Operate the GPU side](pod/README.md)
+- [Product brief](app/docs/APP-BRIEF.md) · [Decision log](docs/ADR-LOG.md) · [Model table](docs/model-table.md)
+- [Captioning contract](app/docs/CORE-SPEC.md) · [Pod contract](pod/docs/POD-SPEC.md)
+- [App status](app/docs/APP-STATUS.md) · [Captioning status](app/docs/CORE-STATUS.md) · [Pod status](pod/docs/POD-STATUS.md)
 
-Accepted decisions remain in the brief and decision log after their implementation. Dated
-verification records retain the scope of what was actually tested.
+## Licence
 
-MIT licensed. Model licenses and service access requirements are separate from the code license.
+The code is MIT licensed. Each base model has its own licence, which the app shows before you
+train. Several are non-commercial or research-only.
