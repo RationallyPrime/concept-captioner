@@ -79,17 +79,20 @@ struct TrainingBudgetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let cap = workspace.activeRunBudget {
-                LabeledContent("Current training run budget", value: StudioMoney.format(cap))
-                LabeledContent("Current run GPU cost", value: StudioMoney.format(workspace.activeRunCost ?? 0))
-                HStack {
+            // In a column form, like every other field on these screens, so each field shows its label.
+            Form {
+                if let cap = workspace.activeRunBudget {
+                    LabeledContent("Current training run budget", value: StudioMoney.format(cap))
+                    LabeledContent("Current run GPU cost", value: StudioMoney.format(workspace.activeRunCost ?? 0))
                     TextField("Raise this run's budget to (USD)", value: $higherCap, format: .number)
-                    Button("Raise run budget…") { raiseBudget(from: cap) }
-                        .disabled((higherCap ?? 0) <= cap)
+                } else {
+                    TextField("Budget for the next training run (USD)", value: $workspace.runBudget, format: .number)
+                        .disabled(workspace.isBusy)
                 }
-            } else {
-                TextField("Budget for the next training run (USD)", value: $workspace.runBudget, format: .number)
-                    .disabled(workspace.isBusy)
+            }.formStyle(.columns)
+            if let cap = workspace.activeRunBudget {
+                Button("Raise run budget…") { raiseBudget(from: cap) }
+                    .disabled((higherCap ?? 0) <= cap)
             }
             Text("The run budget includes input transfer, preparation, regularisation images and continued training. "
                 + "Reaching either this cap or the whole-computer cap stops the computer. Estimates exclude "
