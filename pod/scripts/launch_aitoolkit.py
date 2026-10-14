@@ -9,11 +9,12 @@
    ``extra`` deep-merged last. ``--dry-run`` plans the regularisation set (below), prints its
    counts and stops with exit 0.
 2b. Regularisation set, when run.json has ``regularization`` (regularization.py; POD-SPEC 4.3):
-   plan the prompts, draw the images that are not in ``<workspace>/regsets`` with the base model
-   in a child process (so the GPU is free again before the trainer loads), copy the set into
-   ``<run>/regularization/``. The config then has a second ``is_reg`` dataset over that copy and
-   ``train.reg_weight``. A provided folder is checked for triggers in its captions and copied.
-   Bad input exits 2, a failed drawing exits 1, both before the trainer starts.
+   a generated set was already drawn by the ``draw-regularization`` service and captioned by the
+   app, so the launcher plans it again (same keys), checks the captions for triggers and copies
+   the captioned images from ``<workspace>/regsets`` into ``<run>/regularization/``. The config
+   then has a second ``is_reg`` dataset over that copy and ``train.reg_weight``. A provided folder
+   is checked for triggers in its captions and copied. Bad input exits 2, a failed copy exits 1,
+   both before the trainer starts.
    ``repa`` becomes ``process.repa`` (ai-toolkit's representation alignment; the patched trainer
    image reads it) and the log says where the encoder weights come from.
 3. Spawn ``python /opt/ai-toolkit/run.py <run>/config.yaml`` and tee its output to stdout, which
@@ -501,9 +502,6 @@ _LOSS_RE = re.compile(r"(?<!\w)loss" + _SEP + "(" + _NUM + ")", re.IGNORECASE)
 _LR_RE = re.compile(r"(?<!\w)(?:lr|learning[_ ]rate)" + _SEP + "(" + _NUM + ")", re.IGNORECASE)
 _SCRAPED_TAGS = (("scraped/loss", _LOSS_RE), ("scraped/lr", _LR_RE))
 _LINE_SPLIT_RE = re.compile(r"\r\n|\r|\n")
-# Regularisation images drawn so far, printed by regularization.py as it works. Written at step 0:
-# the trainer has not taken a step yet, and the tag is the app's progress for that phase.
-_REGULARIZATION_READY_RE = re.compile(r"^\[regularization\] ready (\d+)/\d+\s*$")
 
 
 def find_step(line: str) -> int | None:
@@ -521,10 +519,6 @@ class LogScraper:
         self._last_written: dict[str, int] = {}
 
     def feed(self, line: str) -> list[tuple[str, int, float]]:
-        ready = _REGULARIZATION_READY_RE.match(line)
-        if ready is not None:
-            self.written += 1
-            return [("regularization/ready", 0, float(ready.group(1)))]
         step = find_step(line)
         if step is not None:
             self.last_step = step
@@ -779,7 +773,7 @@ def _regularization_errors(
     """
     source = block.get("source")
     needed = {
-        "generate": ("images", "weight", "class_nouns", "generation"),
+        "generate": ("images", "weight", "class_nouns", "generation", "captions"),
         "folder": ("path", "weight"),
     }
     if source not in needed:
@@ -1092,62 +1086,13 @@ def regularization_namespace() -> dict[str, Any]:
     return runpy.run_path(str(Path(__file__).with_name(REGULARIZATION_SCRIPT)))
 
 
-def regularization_argv(plan_path: Path) -> list[str]:
-    """The drawing child: same interpreter and venv, so it sees ai-toolkit's torch; unbuffered
-    because its ``ready k/N`` lines are the progress the app shows."""
-    script = Path(__file__).with_name(REGULARIZATION_SCRIPT)
-    return [sys.executable, "-I", "-u", str(script), "generate", "--plan", str(plan_path)]
-
-
-@contextlib.contextmanager
-def progress_writer(run_dir: Path) -> Any:
-    """A TensorBoard writer on ``<run>/tensorboard`` (None when torch has none), closed on exit."""
-    logdir = run_dir / "tensorboard"
-    logdir.mkdir(parents=True, exist_ok=True)
-    writer = open_writer(logdir)
-    try:
-        yield writer
-    finally:
-        if writer is not None:
-            writer.close()
-
-
-def write_regularization_progress(writer: Any | None, planned: int, ready: int) -> None:
-    """``regularization/planned`` and ``regularization/ready`` at step 0, which the app reads."""
-    if writer is None:
-        return
-    writer.add_scalar("regularization/planned", planned, 0)
-    writer.add_scalar("regularization/ready", ready, 0)
-    writer.flush()
-
-
-def draw_regularization_images(
-    plan: dict[str, Any], run_dir: Path, cfg: dict[str, Any], out: TextIO
-) -> int:
-    """Run the drawing child under the tee, so its output reaches trainer.log and its ``ready``
-    lines reach the progress scalar; returns its exit code."""
-    plan_path = run_dir / "regularization-plan.json"
-    with progress_writer(run_dir) as writer:
-        write_regularization_progress(writer, plan["planned"], plan["cached"])
-        return tee(
-            regularization_argv(plan_path),
-            cwd=run_dir,
-            env=child_env(cfg),
-            out=out,
-            scraper=LogScraper(),
-            writer=writer,
-        )
-
-
-def prepare_regularization(
-    cfg: dict[str, Any], run_dir: Path, out: TextIO, *, dry_run: bool = False
-) -> int:
+def prepare_regularization(cfg: dict[str, Any], run_dir: Path, *, dry_run: bool = False) -> int:
     """Have the regularisation set ready in ``<run>/regularization/``; 0, 2 (bad input) or 1.
 
     A copy this run already made for the same ``regularization`` block is used as it is (Resume).
-    Otherwise a generated set is planned, the images missing from the shared cache are drawn by
-    the child, and the planned ones are copied; a provided folder is checked and copied. A dry run
-    plans and checks but draws and copies nothing.
+    Otherwise a generated set is planned again and its captioned images are copied from the shared
+    cache, and a provided folder is checked and copied. A dry run plans and checks but copies
+    nothing.
     """
     block = cfg.get("regularization")
     if block is None:
@@ -1155,33 +1100,17 @@ def prepare_regularization(
     reg = regularization_namespace()
     try:
         current = None if dry_run else reg["existing_copy"](run_dir, block)
-        if block["source"] == "folder":
-            if current is None:
-                manifest = reg["check_folder"](cfg, run_dir, workspace_root(), copy=not dry_run)
-                say(f"regularisation: {len(manifest['images'])} images from {block['path']}")
-            else:
-                say(f"regularisation: using the {len(current['images'])} images this run copied")
-            return 0
         if current is not None:
-            count = len(current["images"])
-            say(f"regularisation: using the {count} images this run copied")
-            with progress_writer(run_dir) as writer:
-                write_regularization_progress(writer, count, count)
-            return 0
-        plan = reg["plan_generated"](cfg, run_dir, workspace_root())
-        say(reg["plan_summary"](plan))
-        if dry_run:
-            return 0
-        if plan["cached"] < plan["planned"]:
-            code = draw_regularization_images(plan, run_dir, cfg, out)
-            if code != 0:
-                say(f"drawing the regularisation images ended with code {code}")
-                return code if code >= 128 else 1
+            say(f"regularisation: using the {len(current['images'])} images this run copied")
+        elif block["source"] == "folder":
+            manifest = reg["check_folder"](cfg, run_dir, workspace_root(), copy=not dry_run)
+            say(f"regularisation: {len(manifest['images'])} images from {block['path']}")
         else:
-            with progress_writer(run_dir) as writer:
-                write_regularization_progress(writer, plan["planned"], plan["planned"])
-        reg["materialize"](cfg, run_dir, plan)
-        say(f"regularisation: {plan['planned']} images ready in {run_dir / REGULARIZATION_DIR}")
+            plan = reg["plan_generated"](cfg, run_dir, workspace_root())
+            say(reg["plan_summary"](plan))
+            if not dry_run:
+                count = len(reg["materialize"](cfg, run_dir, plan)["images"])
+                say(f"regularisation: {count} images ready in {run_dir / REGULARIZATION_DIR}")
         return 0
     except reg["InputError"] as error:
         say(str(error))
@@ -1247,7 +1176,7 @@ def main(argv: list[str] | None = None) -> int:
     announce = repa_encoder_line(native)
     if announce is not None:
         say(announce)
-    code = prepare_regularization(cfg, run_dir, sys.stdout, dry_run=args.dry_run)
+    code = prepare_regularization(cfg, run_dir, dry_run=args.dry_run)
     if code != 0:
         return code
     if args.dry_run:

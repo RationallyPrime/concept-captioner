@@ -531,9 +531,6 @@ _LOSS_RE = re.compile(r"(?<!\w)loss" + _SEP + "(" + _NUM + ")", re.IGNORECASE)
 _LR_RE = re.compile(r"(?<!\w)(?:lr|learning[_ ]rate)" + _SEP + "(" + _NUM + ")", re.IGNORECASE)
 _SCRAPED_TAGS = (("scraped/loss", _LOSS_RE), ("scraped/lr", _LR_RE))
 _LINE_SPLIT_RE = re.compile(r"\r\n|\r|\n")
-# Regularisation images drawn so far, printed by regularization.py as it works. Written at step 0:
-# the trainer has not taken a step yet, and the tag is the app's progress for that phase.
-_REGULARIZATION_READY_RE = re.compile(r"^\[regularization\] ready (\d+)/\d+\s*$")
 
 
 def find_step(line: str) -> int | None:
@@ -551,10 +548,6 @@ class LogScraper:
         self._last_written: dict[str, int] = {}
 
     def feed(self, line: str) -> list[tuple[str, int, float]]:
-        ready = _REGULARIZATION_READY_RE.match(line)
-        if ready is not None:
-            self.written += 1
-            return [("regularization/ready", 0, float(ready.group(1)))]
         step = find_step(line)
         if step is not None:
             self.last_step = step

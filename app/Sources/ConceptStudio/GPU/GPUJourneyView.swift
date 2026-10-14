@@ -334,7 +334,11 @@ struct GPUJourneyView: View {
                         .disabled(workspace.isBusy || workspace.isTraining)
                 }
                 Button("Start training", systemImage: "play.fill") {
-                    Task { await workspace.train(datasetRepo: datasetRepo, captureLocal: session.captureTrainingInputs)
+                    Task {
+                        await workspace.train(
+                            datasetRepo: datasetRepo, captureLocal: session.captureTrainingInputs,
+                            regularizationCaptioning: session.regularizationCaptioning
+                        )
                     }
                 }
                 .buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)

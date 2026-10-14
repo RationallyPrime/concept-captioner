@@ -75,9 +75,12 @@ generation settings and the six AI Toolkit REPA keys, so a saved run repeats the
 changes (Repeat passes on the saved blocks for the same model). With regularisation on, a length in epochs
 doubles into trainer steps, since every other step looks at a regularisation image; Repeat halves it again
 to show epochs. Choosing a model resets both toggles to the row's `default_on` and keeps an edited image
-count or strength. While the pod draws the images, Progress reads the launcher's
-`regularization/planned` and `regularization/ready` scalars and says "Drawing regularisation images: 12 of
-40" until the trainer reports its first measurement; Saved runs says what each run used.
+count or strength. Starting a run with regularisation on first draws the images (the `draw-regularization`
+service, "Drawing regularisation images: 12 of 40"), downloads them, and has the project's own captioner
+describe each one with `RegularizationCaptioner` (ConceptCore): the project's endpoint, skill and profile plus
+the skill's `references/regularization.md` and the class nouns, never a trigger. On a one-GPU computer the
+caption server is stopped for the drawing and started again if the project captions with it. The captions go
+to the trainer in `regularization.captions`; Saved runs says what each run used.
 
 The glossary has an entry for `representation-alignment` (alias REPA, section Training progress and
 controls); the three terms the sections link to are `StudioTerm.regularizationImages`,

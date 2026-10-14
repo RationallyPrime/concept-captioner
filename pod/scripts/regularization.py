@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 """Regularisation sets for AI Toolkit runs: plan the prompts, draw the images, copy the set.
 
-    regularization.py plan         --run RUN_DIR   # prompts, sizes and keys -> regularization-plan.json
-    regularization.py generate     --plan FILE     # draw the missing images with the base model (GPU)
-    regularization.py materialize  --run RUN_DIR   # copy the planned images into RUN_DIR/regularization/
-    regularization.py check-folder --run RUN_DIR   # a provided folder: trigger check, then copy
+    regularization.py draw --run RUN_DIR   # the draw-regularization service (GPU)
 
 A regularisation (prior-preservation) set is ordinary pictures of the subject's class ("a person")
 trained beside the subject, so the trigger keeps meaning one person while "a person" keeps meaning
@@ -12,10 +9,20 @@ any person. ``run.json`` carries a top-level ``regularization`` object (docs/mod
 launcher's mapping is in POD-SPEC 4.3):
 
     {"source": "generate", "images": 40, "weight": 1.0, "class_nouns": {"ohwx": "person"},
-     "generation": {"steps": 40, "guidance_scale": 3.0, "seed": 0}}
+     "generation": {"steps": 40, "guidance_scale": 3.0, "seed": 0},
+     "captions": {"<image key>": "a person stands in a kitchen."}}
     {"source": "folder", "path": "/workspace/datasets/reg-3f2a9c1e7b40", "weight": 1.0}
 
 Generated sets
+    The set is made in two steps with the app in between. ``draw`` runs as its own service before
+    the run: it plans the prompts, draws the missing images with the base model and copies the
+    planned pictures to ``<draw run>/output/<image key>.png``, where the agent's file routes serve
+    them. The app captions each picture with the project's captioner (which is never given a
+    trigger) and starts the run with the captions in ``regularization.captions``, image key to
+    text. The launcher then plans again (same keys) and ``materialize`` copies each captioned
+    picture into the run with its caption. A picture the captioner found unusable has no caption
+    and is left out.
+
     The prompts come from the subject captions on this pod (``<dataset>/<stem>.<caption_ext>``,
     image files only, sorted by file name). For each caption, in order:
 
@@ -44,7 +51,7 @@ Generated sets
 
 Exit codes of the command line: 0 done, 2 bad input (nothing was drawn), 1 drawing failed.
 
-Standard library only at import time (Pillow is read for image sizes when importable); ``generate``
+Standard library only at import time (Pillow is read for image sizes when importable); ``draw``
 loads ``generate_results.py`` and, through it, ai-toolkit.
 """
 
@@ -69,6 +76,8 @@ PLAN_VERSION = 1
 PLAN_FILE = "regularization-plan.json"
 MANIFEST_FILE = "regularization.json"
 COPY_DIR = "regularization"
+OUTPUT_DIR = "output"  # what the agent serves from a run directory
+DRAW_FILE = "regularization-draw.json"  # the draw service's params, written by the agent
 SAMPLER = "flowmatch"
 SIZE_MULTIPLE = 64
 ARTICLES = ("an", "the", "a")  # longest first
@@ -163,7 +172,7 @@ def derive_prompt(caption: str, class_nouns: dict[str, str]) -> str | None:
                 edits.append((start, end, f"the {nouns[trigger]}"))
     edits.sort()
     kept: list[tuple[int, int, str]] = []
-    for edit in edits:  # overlapping triggers: the earlier span wins
+    for edit in edits:  # triggers that run into each other: the earlier span wins
         if not kept or edit[0] >= kept[-1][1]:
             kept.append(edit)
     if not kept:
@@ -459,9 +468,8 @@ def generate(
 ) -> int:
     """Draw the images of ``plan_path`` that are not in the cache; returns 0.
 
-    Prints ``[regularization] ready k/N`` per image (k counts the cached ones too), which the
-    launcher turns into the ``regularization/ready`` progress scalar. ``render`` defaults to
-    ``generate_results.render_base``.
+    Prints ``[regularization] ready k/N`` per image (k counts the cached ones too), which the app
+    shows as progress. ``render`` defaults to ``generate_results.render_base``.
     """
     plan = load_plan(plan_path)
     cache = Path(plan["cache_dir"])
@@ -508,6 +516,24 @@ def generate(
     if absent:
         raise GenerationError(f"{len(absent)} regularisation images were not drawn")
     return 0
+
+
+def export_images(plan: dict[str, Any], run_dir: Path) -> None:
+    """Copy the planned pictures to ``<run>/output/<image key>.png``, which the agent serves."""
+    output = run_dir / OUTPUT_DIR
+    output.mkdir(parents=True, exist_ok=True)
+    cache = Path(plan["cache_dir"])
+    for image in plan["images"]:
+        shutil.copyfile(cache / f"{image['key']}.png", output / f"{image['key']}.png")
+
+
+def draw(cfg: dict[str, Any], run_dir: Path, workspace: Path) -> None:
+    """The draw-regularization service: plan, draw what the cache lacks, export the pictures."""
+    plan = plan_generated(cfg, run_dir, workspace)
+    say(plan_summary(plan))
+    generate(run_dir / PLAN_FILE)
+    export_images(plan, run_dir)
+    say(f"{plan['planned']} images ready in {run_dir / OUTPUT_DIR}")
 
 
 # --- the per-run copy -------------------------------------------------------------------------
@@ -558,26 +584,43 @@ def _write_copy(
 
 
 def materialize(cfg: dict[str, Any], run_dir: Path, plan: dict[str, Any]) -> dict[str, Any]:
-    """Copy the planned images into ``<run>/regularization/`` and describe them.
+    """Copy the captioned planned images into ``<run>/regularization/`` and describe them.
 
-    Raises GenerationError when the cache lacks any of them. The copy carries the captions with
-    the dataset's caption extension, because the trainer reads the second dataset the same way.
+    The captions are ``regularization.captions`` (image key to text, written by the app's
+    captioner); a planned image without one is left out. Raises InputError when no image has a
+    caption or a caption holds a trigger, GenerationError when the cache lacks a captioned image.
+    The copy carries the captions with the dataset's caption extension, because the trainer reads
+    the second dataset the same way.
     """
+    captions = {
+        key: text.strip()
+        for key, text in cfg["regularization"].get("captions", {}).items()
+        if text.strip()
+    }
+    kept = [image for image in plan["images"] if image["key"] in captions]
+    if not kept:
+        raise InputError("No regularisation image has a caption")
+    for image in kept:
+        trigger = first_trigger_in(captions[image["key"]], cfg["triggers"])
+        if trigger is not None:
+            raise InputError(
+                f"Regularisation caption of image {image['key']} contains the trigger {trigger}"
+            )
     cache = Path(plan["cache_dir"])
-    absent = [image["key"] for image in plan["images"] if not is_cached(cache, image["key"])]
+    absent = [image["key"] for image in kept if not is_cached(cache, image["key"])]
     if absent:
-        raise GenerationError(f"{len(absent)} planned regularisation images are not in the cache")
+        raise GenerationError(f"{len(absent)} captioned regularisation images are not in the cache")
     entries = [
         (
             cache / f"{image['key']}.png",
             f"{image['key']}.png",
-            (cache / f"{image['key']}.txt").read_text(encoding="utf-8"),
+            captions[image["key"]],
             {
                 key: image[key]
                 for key in ("key", "prompt", "seed", "width", "height", "steps", "guidance_scale")
             },
         )
-        for image in plan["images"]
+        for image in kept
     ]
     manifest = {
         "source": "generate",
@@ -643,16 +686,13 @@ def check_folder(
 # --- command line -----------------------------------------------------------------------------
 
 
-def _load_run(run_dir: Path) -> dict[str, Any]:
-    cfg = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
-    block = cfg.get("regularization")
-    if not isinstance(block, dict):
-        raise InputError(f"{run_dir / 'run.json'} has no regularization block")
-    cfg.setdefault("resolution", [768])
+def _load_draw(run_dir: Path) -> dict[str, Any]:
+    """The draw service's params as the agent wrote them, with the plan's defaults filled in."""
+    cfg = json.loads((run_dir / DRAW_FILE).read_text(encoding="utf-8"))
     cfg["resolution"] = (
         [cfg["resolution"]] if isinstance(cfg["resolution"], int) else cfg["resolution"]
     )
-    cfg.setdefault("dataset", {}).setdefault("caption_ext", "txt")
+    cfg["dataset"].setdefault("caption_ext", "txt")
     return cfg
 
 
@@ -663,33 +703,16 @@ def _workspace() -> Path:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
-    for name, text in (
-        ("plan", "plan the prompts and images of a generated set"),
-        ("materialize", "copy the planned images into <run>/regularization/"),
-        ("check-folder", "check a provided folder and copy it into <run>/regularization/"),
-    ):
-        command = commands.add_parser(name, help=text)
-        command.add_argument("--run", required=True, type=Path, help="the run directory")
-    command = commands.add_parser("generate", help="draw the missing images (needs the GPU)")
-    command.add_argument("--plan", required=True, type=Path, help="regularization-plan.json")
+    command = commands.add_parser("draw", help="draw the images of a generated set (needs the GPU)")
+    command.add_argument("--run", required=True, type=Path, help="the draw run directory")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    run_dir = args.run.expanduser().resolve()
     try:
-        if args.command == "generate":
-            return generate(args.plan)
-        run_dir = args.run.expanduser().resolve()
-        cfg = _load_run(run_dir)
-        if args.command == "check-folder":
-            manifest = check_folder(cfg, run_dir, _workspace())
-            say(f"{len(manifest['images'])} images copied from {manifest['path']}")
-        elif args.command == "plan":
-            say(plan_summary(plan_generated(cfg, run_dir, _workspace())))
-        else:
-            materialize(cfg, run_dir, load_plan(run_dir / PLAN_FILE))
-            say(f"copied the set into {run_dir / COPY_DIR}")
+        draw(_load_draw(run_dir), run_dir, _workspace())
         return 0
     except InputError as error:
         say(str(error))

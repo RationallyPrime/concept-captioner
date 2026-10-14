@@ -21,7 +21,7 @@ checkout); see "The model table" below.
 | `launch_aitoolkit.py` | `/opt/venvs/aitoolkit` | `run.json` → ai-toolkit YAML → `run.py` for the AI Toolkit models in the table; effective native snapshot, log tee and loss scraper |
 | `h3_recipe.py`, `h3_dataset.py` | stdlib admission, then AI Toolkit | canonical H3 quality/initializer contracts, fixed pinned BF16 asset download, exact approved clip grouping |
 | `generate_results.py` | selected trainer venv | actual matched base/LoRA inference for each model whose table row names a generator; incremental manifest and private checkpoint cleanup |
-| `regularization.py` | `/opt/venvs/aitoolkit` (the launcher loads it; `generate` runs as its child) | the regularisation set of an AI Toolkit run: class-only prompts from the subject captions, the shared image cache in `/workspace/regsets`, the run's copy, or a provided folder checked for triggers |
+| `regularization.py` | `/opt/venvs/aitoolkit` (the `draw-regularization` service runs `draw`; the launcher loads the module) | the regularisation set of an AI Toolkit run: class-only prompts from the subject captions, the drawn pictures in the shared cache `/workspace/regsets`, the run's copy with the app's captions, or a provided folder checked for triggers |
 | `launch_ltx.py` | `/opt/venvs/ltx` | `run.json` → preprocess + LTX-2 trainer config → train; same tee and scraper (POD-SPEC §4.3) |
 
 `docs/POD-STATUS.md` says which of these are implemented. The agent builds each argv from the
@@ -110,17 +110,18 @@ lists them. On success the repo URL is printed last and `<run>/push.json` record
 ## `regularization.py` and REPA (POD-SPEC §4.3, §7.5)
 
 ```
-regularization.py plan --run DIR | generate --plan FILE | materialize --run DIR | check-folder --run DIR
+regularization.py draw --run DIR
 ```
 
-`launch_aitoolkit.py` does this itself when run.json has a `regularization` block, in this order:
-`plan` (prompts, sizes, keys; the log says `regularisation: N planned, C cached, G to generate`),
-`generate` as a child process (the base model draws what `/workspace/regsets/<model-key>/` lacks,
-through `generate_results.render_base`), `materialize` (the run's copy in `<run>/regularization/`
-and `<run>/regularization.json`), then the trainer. A `folder` set is `check-folder` instead.
-`--dry-run` plans and checks only. The commands exist so the same steps can be run by hand on a pod.
-Exit codes: 0 done, 2 bad input (a trigger in a caption, no prompt derivable, an unsupported
-model), 1 drawing failed.
+A generated set is made in two steps. `draw` is the `draw-regularization` service: it plans the
+prompts, sizes and keys (the log says `regularisation: N planned, C cached, G to generate`), draws
+what `/workspace/regsets/<model-key>/` lacks through `generate_results.render_base`, and copies the
+pictures to `<run>/output/<key>.png` for the app, which captions them and starts the run with
+`regularization.captions`. When run.json has a `regularization` block, `launch_aitoolkit.py` plans
+again and `materialize`s each captioned picture into `<run>/regularization/` (+
+`<run>/regularization.json`) before the trainer starts; a `folder` set is `check_folder` instead.
+`--dry-run` plans and checks only. Exit codes: 0 done, 2 bad input (a trigger in a caption, no
+caption, no prompt derivable, an unsupported model), 1 drawing or copying failed.
 
 The launcher maps run.json's `regularization.weight` to `train.reg_weight`, appends the second
 dataset (`is_reg: true`, a copy of the first) and writes run.json's `repa` object as ai-toolkit's

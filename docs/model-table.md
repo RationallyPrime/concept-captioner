@@ -123,6 +123,11 @@ subject's class ("a person"), drawn by the base model before training from the s
 captions with the trigger taken out. The LoRA then learns that the trigger means one subject while
 the class noun keeps meaning any member of the class.
 
+The pod draws the set (`draw-regularization`), the app fetches the pictures and has the project's
+own captioner (the same provider, model and endpoint) describe each one, and the run starts with
+those captions. The captioner is told only the class nouns, with the skill's
+`references/regularization.md`; it never sees a trigger.
+
 ```json
 "regularization": {
   "default_on": true,
@@ -146,13 +151,14 @@ The row needs a `generator` hook, because the images are drawn through the same 
 comparison generation (`generate_results.render_base`), and no `trainer_config` hook, because such
 a hook builds `datasets[]` from its own groups.
 
-run.json carries a top-level `regularization` object: `source: "generate"` with `images`,
-`weight`, `class_nouns` (trigger to class noun) and `generation` (`steps`, `guidance_scale`,
-`seed`), or `source: "folder"` with `path` (a folder under `datasets/`) and `weight`. The launcher
-turns it into `train.reg_weight` and a second `datasets[]` entry, a copy of the first with
-`is_reg: true` over the run's copy of the images. Half of the trainer's steps then look at a
-regularisation image, so the app sends twice the steps an `epochs` row computes for the subject.
-Generated images are cached under `<workspace>/regsets` and reused.
+run.json carries a top-level `regularization` object: `source: "generate"` with `images`, `weight`,
+`class_nouns` (trigger to class noun), `generation` (`steps`, `guidance_scale`, `seed`) and
+`captions` (picture key to caption, written by the app), or `source: "folder"` with `path` (a
+folder under `datasets/`) and `weight`. The launcher turns it into `train.reg_weight` and a second
+`datasets[]` entry, a copy of the first with `is_reg: true` over the run's copy of the images. Half
+of the trainer's steps then look at a regularisation image, so the app sends twice the steps an
+`epochs` row computes for the subject. Generated images are cached under `<workspace>/regsets` and
+reused.
 
 ### `repa`
 

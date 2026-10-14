@@ -37,6 +37,23 @@ extension StudioSession {
         return captured
     }
 
+    /// The project's own captioner, for the regularisation images a run draws: its endpoint, skill and profile, and
+    /// the class nouns of the subjects. The captioner is never given a trigger.
+    func regularizationCaptioning(classNouns: [String]) throws -> RegularizationCaptioning {
+        guard let project else {
+            throw StudioError.message("Open the project whose captioner should describe the regularisation images.")
+        }
+        let skill = try selectedSkill()
+        let captioner = try RegularizationCaptioner(
+            captioner: endpoint(), skill: skill, profile: project.job.profile,
+            profileText: skill.profile(project.job.profile, relativeTo: project.job.directory),
+            classNouns: classNouns
+        )
+        return RegularizationCaptioning(
+            captioner: captioner, usesPodCaptionServer: usingPodCaptioner && endpointKind == "vllm"
+        )
+    }
+
     func preparePublishing() {
         guard !demoMode else { return }
         do { gpu.hubToken = try keyStore.read("huggingface") ?? "" } catch { errorMessage = Self.describe(error) }

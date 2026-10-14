@@ -4,7 +4,8 @@ import Foundation
 // The two optional training aids a model row can offer: regularisation images and representation alignment
 // (docs/model-table.md, `regularization` and `repa`). The row says what a model supports and its default values;
 // the person chooses whether to use them and how many images. Everything the pod needs travels in run.json
-// as explicit values, so a saved run repeats the same way after the table changes.
+// as explicit values, so a saved run repeats the same way after the table changes. The regularisation images are
+// drawn by the pod, then captioned here by the project's own captioner, and run.json carries the captions.
 
 /// A class noun as it reads in a sentence: "a woman", "an object".
 enum ClassNounPhrase {
@@ -45,9 +46,6 @@ struct RegularizationEstimate: Equatable {
 
 /// How far the pod has got drawing regularisation images before the trainer starts.
 struct RegularizationProgress: Equatable {
-    static let plannedTag = "regularization/planned"
-    static let readyTag = "regularization/ready"
-
     let planned: Int
     let ready: Int
 
@@ -55,21 +53,23 @@ struct RegularizationProgress: Equatable {
         "Drawing regularisation images: \(ready) of \(planned)"
     }
 
-    /// Reads a run's events (the agent's `GET /runs/{id}/events`). The launcher writes the two scalars at step 0, so
-    /// their step says nothing about training; the answer is nil once every image is ready or the trainer has written
-    /// any scalar of its own.
-    init?(events: JSONValue) {
-        guard let scalars = events.objectValue?["scalars"]?.objectValue,
-              let planned = Self.count(scalars[Self.plannedTag]), planned > 0,
-              let ready = Self.count(scalars[Self.readyTag]), ready < planned,
-              scalars.keys.allSatisfy({ $0.hasPrefix("regularization/") }) else { return nil }
-        self.planned = planned
-        self.ready = max(0, ready)
+    /// Reads the drawing's log, where `[regularization] ready 12/40` follows each finished image; nil before the first.
+    static func parse(log: String) -> RegularizationProgress? {
+        let prefix = "[regularization] ready "
+        for line in log.split(separator: "\n").reversed() where line.hasPrefix(prefix) {
+            let counts = line.dropFirst(prefix.count).split(separator: "/").compactMap { Int($0) }
+            if counts.count == 2, counts[1] > 0 { return RegularizationProgress(planned: counts[1], ready: counts[0]) }
+        }
+        return nil
     }
+}
 
-    private static func count(_ point: JSONValue?) -> Int? {
-        point?.objectValue?["value"]?.doubleValue.map { Int($0.rounded()) }
-    }
+/// The project's captioner, ready to describe regularisation images. It holds the endpoint, skill and profile the
+/// project captions with and the class nouns of the subjects, never a trigger. `usesPodCaptionServer` says the
+/// endpoint is the rented computer's caption server, which has to be running while it works.
+struct RegularizationCaptioning {
+    let captioner: RegularizationCaptioner
+    let usesPodCaptionServer: Bool
 }
 
 extension GPUWorkspace {
@@ -102,6 +102,12 @@ extension GPUWorkspace {
             let noun = conceptClassNouns[trigger]?.trimmingCharacters(in: .whitespacesAndNewlines)
             return (trigger, noun?.isEmpty == false ? noun : nil)
         }
+    }
+
+    /// The distinct class nouns of the next run's triggers, as the person typed them.
+    var regularizationClassNouns: [String] {
+        var seen = Set<String>()
+        return triggerClassNouns.compactMap(\.noun).filter { seen.insert($0.lowercased()).inserted }
     }
 
     /// "a woman and a man": what the regularisation images show.
@@ -213,21 +219,75 @@ extension GPUWorkspace {
         }
     }
 
-    // MARK: Progress
+    // MARK: Drawing and captioning
 
-    /// Whether the current run draws regularisation images before it trains.
-    var runDrawsRegularization: Bool {
-        let run = runHistory.first { $0.runID == runID } ?? saved?.run.flatMap { $0.runID == runID ? $0 : nil }
-        return run?.params["regularization"]?.objectValue != nil
+    /// The captioner for the next run's regularisation images, or nil when it uses none. Built before anything is
+    /// uploaded or drawn, so a missing key or skill is reported first.
+    func captioningForRegularization(
+        _ make: (@MainActor ([String]) throws -> RegularizationCaptioning)?
+    ) throws -> RegularizationCaptioning? {
+        guard usesRegularization else { return nil }
+        guard let make else {
+            throw StudioError.message("Regularisation images are described by the captioner of the open project. "
+                + "Open the project and start training from the Training screen.")
+        }
+        return try make(regularizationClassNouns)
     }
 
-    /// Asks the pod how many regularisation images are ready, until the trainer reports its first measurement.
-    func refreshRegularizationProgress(_ agent: any PodAgent) async {
-        guard points.isEmpty, runDrawsRegularization else {
-            regularizationProgress = nil
-            return
+    /// The run's params with captions in their `regularization` block. The computer draws the pictures
+    /// (`draw-regularization`), the project's captioner describes each one without being told a trigger, and the
+    /// block carries the captions to the trainer, which refuses any that holds a trigger. A picture the captioner
+    /// finds unusable is left out.
+    func captionedRegularization(
+        _ params: JSONObject, plan: TrainingPlan, captioning: RegularizationCaptioning?, agent: any PodAgent
+    ) async throws -> JSONObject {
+        guard !demoMode, let captioning, let block = params["regularization"]?.objectValue else { return params }
+        try await prepareCaptionServerForTraining(agent, plan: plan) // a one-GPU computer frees its GPU to draw
+        let drawID = "regularization-" + UUID().uuidString.prefix(12).lowercased()
+        message = "Drawing regularisation images."
+        try await agent.start("draw-regularization", gpus: [plan.train?.gpus.first ?? 0], params: [
+            "run_id": .string(drawID), "dataset": params["dataset"] ?? .null,
+            "base_model": params["base_model"] ?? .null, "resolution": params["resolution"] ?? .null,
+            "regularization": .object(block),
+        ])
+        try await waitForService("draw-regularization") {
+            guard let log = try? await agent.runLog(runID: drawID),
+                  let drawing = RegularizationProgress.parse(log: log) else { return }
+            self.regularizationProgress = drawing
+            self.message = drawing.text
         }
-        regularizationProgress = try? await agent.regularizationProgress(runID: runID)
+        regularizationProgress = nil
+        let files = try await agent.runFiles(runID: drawID).filter { $0.path.hasSuffix(".png") }
+        guard !files.isEmpty else {
+            throw StudioError.message("The computer drew no regularisation images. Read the log of run \(drawID).")
+        }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("studio-" + drawID)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        var samples: [Sample] = []
+        for (index, file) in files.enumerated() {
+            try Task.checkCancellation()
+            message = "Downloading regularisation image \(index + 1) of \(files.count)."
+            try await download(file, runID: drawID, into: folder, agent: agent)
+            let data = try Data(contentsOf: folder.appendingPathComponent(file.path))
+            samples.append(Sample(sampleID: Sources.stem(of: file.path), data: data, suffix: ".png"))
+        }
+        if captioning.usesPodCaptionServer {
+            try await ensureCaptionServer(agent, plan: plan, services: agent.services())
+        }
+        let captions = try await captioning.captioner.captions(of: samples) { done in
+            await MainActor.run { self.message = "Describing regularisation images: \(done) of \(samples.count)" }
+        }
+        guard !captions.isEmpty else {
+            throw StudioError.message("The captioner found none of the regularisation images usable.")
+        }
+        var captioned = params
+        var withCaptions = block
+        withCaptions["captions"] = .object(JSONObject(
+            captions.sorted { $0.key < $1.key }.map { ($0.key, JSONValue.string($0.value)) }
+        ))
+        captioned["regularization"] = .object(withCaptions)
+        return captioned
     }
 }
 

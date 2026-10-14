@@ -457,7 +457,10 @@ extension GPUWorkspace {
         }
     }
 
-    func waitForService(_ name: String, allowStopped: Bool = false) async throws {
+    /// Waits until the service has exited. `whileWaiting` runs after each check that finds it still running.
+    func waitForService(
+        _ name: String, allowStopped: Bool = false, whileWaiting: (() async -> Void)? = nil
+    ) async throws {
         guard let agent else { return }
         while true {
             try Task.checkCancellation()
@@ -471,6 +474,7 @@ extension GPUWorkspace {
                 }
                 return
             }
+            await whileWaiting?()
             try await Task.sleep(for: .seconds(demoMode ? 0.1 : 2))
         }
     }
@@ -565,7 +569,6 @@ extension GPUWorkspace {
             }
         }
         if let point = try await agent.latest(runID: runID) { merge([point]) }
-        await refreshRegularizationProgress(agent)
         if let log = try? await agent.runLog(runID: runID) { logs = log }
         persist()
         saveProjectRecord()

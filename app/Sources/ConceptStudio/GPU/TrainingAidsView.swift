@@ -34,8 +34,9 @@ struct RegularizationSection: View {
     /// What the section says before the person turns anything on.
     var explanation: String {
         "Before training, the computer draws ordinary pictures of \(subjects) with the original model, from your "
-            + "captions with the names taken out. Training looks at them alongside your photos so the model does "
-            + "not start drawing your subject whenever you ask for \(subjects)."
+            + "captions with the names taken out, and your captioning model describes each one without being told "
+            + "the names. Training looks at them alongside your photos so the model does not start drawing your "
+            + "subject whenever you ask for \(subjects)."
     }
 
     var body: some View {
@@ -50,9 +51,9 @@ struct RegularizationSection: View {
                 }
             }.formStyle(.columns)
             if workspace.regularizationOn, let estimate = workspace.regularizationEstimate {
-                Text(estimate.sentence + " Reused on this storage when your captions have not changed. "
-                    + "Training takes about twice as long: every other step looks at one of these images "
-                    + "instead of yours.")
+                Text(estimate.sentence + " The pictures are reused on this storage when your captions have not "
+                    + "changed; your captioning model describes them again for each run. Training takes about "
+                    + "twice as long: every other step looks at one of these images instead of yours.")
                     .font(.callout).foregroundStyle(StudioStyle.supportingText)
                     .fixedSize(horizontal: false, vertical: true)
             }

@@ -1,6 +1,6 @@
 """The service catalog: fixed argv builders over validated params (POD-SPEC §3, §4.1).
 
-Nine services, one ``ServiceSpec`` each. Everything a client sends arrives as ``params`` and
+Ten services, one ``ServiceSpec`` each. Everything a client sends arrives as ``params`` and
 passes two checks before anything is built:
 
 1. ``spec.params_model.model_validate(raw)``: shape, patterns and ranges, including the rules
@@ -330,7 +330,11 @@ class RegularizationGeneration(BaseModel):
 
 
 class GeneratedRegularization(BaseModel):
-    """A set drawn on the pod by the base model from the subject captions (regularization.py)."""
+    """A set drawn on the pod by the base model from the subject captions (regularization.py).
+
+    ``captions`` (image key to text) is what the app's captioner wrote for the drawn pictures; the
+    app sends the block without it to ``draw-regularization`` and with it to the trainer.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -339,6 +343,7 @@ class GeneratedRegularization(BaseModel):
     weight: float
     class_nouns: dict[str, str]
     generation: RegularizationGeneration
+    captions: dict[str, str] = {}
 
     @field_validator("class_nouns")
     @classmethod
@@ -384,6 +389,24 @@ class Repa(BaseModel):
     @classmethod
     def _encoder(cls, value: str) -> str:
         return _model_ref(value, "repa.encoder")
+
+
+class DrawRegularizationParams(ServiceParams):
+    """Draw the pictures of a generated regularisation set before the run (regularization.py).
+
+    ``run_id`` names the drawing's own run directory, never the training run's.
+    """
+
+    run_id: str = Field(pattern=RUN_ID_PATTERN)
+    dataset: DatasetRef
+    base_model: str
+    resolution: int | list[int] = [512, 768, 1024]
+    regularization: GeneratedRegularization
+
+    @field_validator("base_model")
+    @classmethod
+    def _base_model(cls, value: str) -> str:
+        return _model_ref(value, "base_model")
 
 
 class RunConfig(ServiceParams):
@@ -696,7 +719,7 @@ def _check_regularization_folder(
     errors: list[InitErrorDetails], params: RunConfig, folder: FolderRegularization, paths: Paths
 ) -> None:
     """A provided set: a directory under datasets/ that is not the subject dataset, nor holds it
-    or sits in it (the trainer scans folders recursively, so either overlap mixes the two sets)."""
+    or sits in it (the trainer scans folders recursively, so either would mix the two sets)."""
     loc = ("regularization", "path")
     before = len(errors)
     _check_under(errors, loc, folder.path, paths.datasets, strict=True)
@@ -735,6 +758,10 @@ def validate(params: ServiceParams, paths: Paths) -> None:
             _check_under(
                 errors, ("repa", "encoder"), params.repa.encoder, paths.workspace, strict=True
             )
+    elif isinstance(params, DrawRegularizationParams):
+        _check_under(errors, ("dataset", "path"), params.dataset.path, paths.datasets, strict=True)
+        if params.base_model.startswith("/"):
+            _check_under(errors, ("base_model",), params.base_model, paths.models, strict=True)
     elif isinstance(params, TensorboardParams):
         if params.logdir is not None:
             _check_under(errors, ("logdir",), params.logdir, paths.workspace, strict=False)
@@ -758,6 +785,8 @@ def parse_params(
         _validate_training_start(name, params, paths)
     elif isinstance(params, GenerationParams):
         _validate_generation(name, params, paths)
+    elif isinstance(params, DrawRegularizationParams):
+        _validate_draw(params, paths)
     return params
 
 
@@ -820,6 +849,18 @@ def _validate_regularization_and_repa(name: str, params: RunConfig, paths: Paths
             _invalid(params, UNSUPPORTED_REGULARIZATION, ("regularization",))
     if params.repa is not None and (row is None or not row.get("repa")):
         _invalid(params, UNSUPPORTED_REPA, ("repa",))
+
+
+def _validate_draw(params: DrawRegularizationParams, paths: Paths) -> None:
+    """A new run directory, and a model whose row offers generated regularisation images."""
+    if paths.run_dir(params.run_id).exists():
+        _invalid(params, "Choose a new run_id; existing outputs are kept")
+    table = _model_table(paths)
+    row = table["exact_row"](params.base_model, "aitoolkit")
+    if _row_hook(table, row, "trainer_config") is not None:
+        _invalid(params, NO_REGULARIZATION_HERE, ("regularization",))
+    if row is None or not row.get("regularization"):
+        _invalid(params, UNSUPPORTED_REGULARIZATION, ("regularization",))
 
 
 def _validate_training_start(name: str, params: RunConfig, paths: Paths) -> None:
@@ -1282,6 +1323,28 @@ def _generation_prepare(params: ServiceParams, paths: Paths) -> None:
     )
 
 
+def _draw_prepare(params: ServiceParams, paths: Paths) -> None:
+    """Create the drawing's run directory and save its params for ``regularization.py``."""
+    cfg = _as(params, DrawRegularizationParams)
+    run_dir = paths.run_dir(cfg.run_id)
+    run_dir.mkdir(parents=True, exist_ok=False)
+    (run_dir / "regularization-draw.json").write_text(
+        json.dumps(cfg.model_dump(mode="json"), indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _draw_argv(params: ServiceParams, _gpus: list[int], paths: Paths) -> list[str]:
+    p = _as(params, DrawRegularizationParams)
+    return [
+        paths.venv_bin("aitoolkit", "python"),
+        str(paths.scripts / "regularization.py"),
+        "draw",
+        "--run",
+        str(paths.run_dir(p.run_id)),
+    ]
+
+
 def _generation_argv(trainer: str) -> Callable[[ServiceParams, list[int], Paths], list[str]]:
     def build(params: ServiceParams, _gpus: list[int], paths: Paths) -> list[str]:
         p = _as(params, GenerationParams)
@@ -1423,6 +1486,18 @@ CATALOG: dict[str, ServiceSpec] = {
         env=_hf_env,
         prepare=_pull_dataset_prepare,
         run_id=_no_run_id,
+    ),
+    "draw-regularization": ServiceSpec(
+        name="draw-regularization",
+        params_model=DrawRegularizationParams,
+        gpus=(1, 1),
+        port=None,
+        argv=_draw_argv,
+        cwd=_run_dir,
+        log_path=_trainer_log,
+        env=_trainer_env,
+        prepare=_draw_prepare,
+        run_id=_params_run_id,
     ),
     "push-lora": ServiceSpec(
         name="push-lora",

@@ -50,7 +50,9 @@ extension GPUWorkspace {
     }
 
     func train(
-        datasetRepo: String, captureLocal: (@MainActor () async throws -> LocalTrainingDataset)? = nil
+        datasetRepo: String,
+        captureLocal: (@MainActor () async throws -> LocalTrainingDataset)? = nil,
+        regularizationCaptioning: (@MainActor ([String]) throws -> RegularizationCaptioning)? = nil
     ) async {
         await perform {
             guard let agent = self.agent, self.hasRunningPod else {
@@ -86,6 +88,7 @@ extension GPUWorkspace {
             try self.validateTrainingSettings(
                 local: local != nil, repo: repo, containsVideo: containsVideo, items: items
             )
+            let captioning = try self.captioningForRegularization(regularizationCaptioning)
             let initialization = try self.trainingInitialization()
             let dataset = "concept-" + UUID().uuidString.prefix(12).lowercased()
             var params = self.trainingParams(dataset: dataset, inputFacts: inputFacts, items: items)
@@ -108,6 +111,7 @@ extension GPUWorkspace {
             if let initialization {
                 params["initialization"] = try await .object(initialization.upload(to: agent))
             }
+            params = try await self.captionedRegularization(params, plan: plan, captioning: captioning, agent: agent)
             try await self.prepareCaptionServerForTraining(agent, plan: plan)
             self.historyRunID = self.runID
             try Task.checkCancellation()
@@ -340,19 +344,24 @@ extension GPUWorkspace {
                services.contains(where: { $0.name.hasPrefix("trainer-") && $0.active }) {
                 throw StudioError.message("Finish training before captioning on this single-GPU computer.")
             }
-            if !services.contains(where: { $0.name == "vllm" && $0.active }) {
-                try await agent.start("vllm", gpus: plan.caption?.gpus ?? [], params: self.captionStartParams)
-                self.captionServerActive = nil
-            }
-            self.lastActivity = Date()
-            self.message = "The caption model is starting. Large models can take several minutes to download."
-            if !self.demoMode {
-                try await self.waitForCaptionModel()
-            }
+            try await self.ensureCaptionServer(agent, plan: plan, services: services)
             ready = true
             self.message = "The caption model is ready. You can now caption with this computer."
         }
         return ready
+    }
+
+    /// Starts the caption server on the rented computer unless it runs, and waits until it serves the model.
+    func ensureCaptionServer(_ agent: any PodAgent, plan: TrainingPlan, services: [AgentService]) async throws {
+        if !services.contains(where: { $0.name == "vllm" && $0.active }) {
+            try await agent.start("vllm", gpus: plan.caption?.gpus ?? [], params: captionStartParams)
+            captionServerActive = nil
+        }
+        lastActivity = Date()
+        message = "The caption model is starting. Large models can take several minutes to download."
+        if !demoMode {
+            try await waitForCaptionModel()
+        }
     }
 
     private func waitForCaptionModel() async throws {

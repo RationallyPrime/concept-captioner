@@ -111,8 +111,6 @@ protocol PodAgent: Sendable {
     /// The trainer log of a run, read from the volume (POD-SPEC 2.8), so it survives an agent restart.
     func runLog(runID: String) async throws -> String
     func latest(runID: String) async throws -> TrainingPoint?
-    /// How many regularisation images are ready while the pod draws them before training; nil otherwise.
-    func regularizationProgress(runID: String) async throws -> RegularizationProgress?
     /// Every loss point TensorBoard holds for the run (through the agent's authenticated proxy).
     func history(runID: String) async throws -> [TrainingPoint]
     func runFiles(runID: String) async throws -> [RunFile]
@@ -141,10 +139,6 @@ extension PodAgent {
 
     func storageUsage() async throws -> AgentStorageUsage {
         throw StudioError.message("This agent does not expose workspace storage usage.")
-    }
-
-    func regularizationProgress(runID: String) async throws -> RegularizationProgress? {
-        nil
     }
 
     func runConfiguration(runID: String) async throws -> AgentRunConfiguration {
@@ -234,10 +228,6 @@ struct PodAgentClient: PodAgent {
         let loss = scalars?["loss"]?.objectValue ?? scalars?["scraped/loss"]?.objectValue
         guard let step = loss?["step"]?.intValue, let value = loss?["value"]?.doubleValue else { return nil }
         return TrainingPoint(step: step, loss: value)
-    }
-
-    func regularizationProgress(runID: String) async throws -> RegularizationProgress? {
-        try await RegularizationProgress(events: JSONValue(parsing: call("runs/\(runID)/events")))
     }
 
     func history(runID: String) async throws -> [TrainingPoint] {
