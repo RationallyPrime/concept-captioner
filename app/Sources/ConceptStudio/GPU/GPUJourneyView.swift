@@ -329,9 +329,11 @@ struct GPUJourneyView: View {
                         .disabled(workspace.isBusy || workspace.isTraining)
                 }.formStyle(.columns)
                 TrainingBudgetView(session: session, workspace: workspace)
-                DisclosureGroup("Advanced training controls") {
-                    AdvancedTrainingControls(workspace: workspace).padding(.top, 12)
-                        .disabled(workspace.isBusy || workspace.isTraining)
+                if session.advancedUser {
+                    DisclosureGroup("Advanced training controls") {
+                        AdvancedTrainingControls(workspace: workspace).padding(.top, 12)
+                            .disabled(workspace.isBusy || workspace.isTraining)
+                    }
                 }
                 Button("Start training", systemImage: "play.fill") {
                     Task {

@@ -82,6 +82,10 @@ final class StudioSession {
         }
     }
 
+    var advancedUser = false {
+        didSet { preferences.set(advancedUser, forKey: "ConceptStudio.advancedUser") }
+    }
+
     var demoMode = false
     var step: StudioStep? = .images {
         didSet {
@@ -157,6 +161,7 @@ final class StudioSession {
         demoDirectory: URL = DemoProject.defaultDirectory
     ) {
         self.preferences = preferences
+        advancedUser = preferences.bool(forKey: "ConceptStudio.advancedUser")
         self.secrets = secrets
         self.demoDirectory = demoDirectory
         self.chatGPT = chatGPT ?? ChatGPTAccounts(preferences: preferences)

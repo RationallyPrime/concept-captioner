@@ -40,21 +40,23 @@ struct ConceptsView: View {
                     conceptSummary(concept)
                     Divider()
                 }
-                DisclosureGroup("Advanced settings") {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Toggle("Configure multiple concepts in one LoRA", isOn: $multipleConcepts)
-                            .disabled(concepts.count > 1)
-                        Text(
-                            "Each concept needs its own trigger. Confirm locations for people, objects and characters; "
-                                + "style and motion apply to the whole target automatically. "
-                                + "Use this only when you intend to train the concepts together."
-                        )
-                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
-                        if multipleConcepts || concepts.count > 1 {
-                            Button("Add concept…", systemImage: "plus") { editor = EditorSelection(existing: nil) }
-                                .disabled(session.busy || session.editing)
-                        }
-                    }.padding(.top, 10)
+                if session.advancedUser {
+                    DisclosureGroup("Advanced settings") {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Toggle("Configure multiple concepts in one LoRA", isOn: $multipleConcepts)
+                                .disabled(concepts.count > 1)
+                            Text(
+                                "Each concept needs its own trigger. Confirm locations for people, objects and characters; "
+                                    + "style and motion apply to the whole target automatically. "
+                                    + "Use this only when you intend to train the concepts together."
+                            )
+                            .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                            if multipleConcepts || concepts.count > 1 {
+                                Button("Add concept…", systemImage: "plus") { editor = EditorSelection(existing: nil) }
+                                    .disabled(session.busy || session.editing)
+                            }
+                        }.padding(.top, 10)
+                    }
                 }
             }.frame(maxWidth: 820, alignment: .leading)
         }
@@ -167,25 +169,27 @@ struct ConceptEditor: View {
                         )
                         .font(.callout).foregroundStyle(StudioStyle.supportingText)
                     }
-                    DisclosureGroup("Advanced settings") {
-                        VStack(alignment: .leading, spacing: 14) {
-                            TextField("Class noun", text: $classNoun)
-                            Text("The ordinary noun used beside the trigger: person, dog, mug, style or motion.")
-                                .font(.callout).foregroundStyle(StudioStyle.supportingText)
-                            Text("Caption detail overrides").font(.headline)
-                            Text("The category supplies these defaults. Change them only to refine which details "
-                                + "the captions should describe; use one per line.").font(.callout)
-                            TextEditor(text: $describe).frame(height: 100).border(.quaternary)
-                                .accessibilityLabel("Caption detail overrides")
-                            Text("Boundary exceptions").font(.headline)
-                            Text("Optional: detail: decision, one per line. For example, explain whether a "
-                                + "character's permanent costume belongs to the concept.").font(.callout)
-                            TextEditor(text: $decisions).frame(height: 75).border(.quaternary)
-                                .accessibilityLabel("Boundary exceptions")
-                            Picker("Detailed category", selection: $target) {
-                                ForEach(TargetConcept.allCases, id: \.self) { Text($0.title).tag($0) }
-                            }
-                        }.padding(.top, 10)
+                    if session.advancedUser {
+                        DisclosureGroup("Advanced settings") {
+                            VStack(alignment: .leading, spacing: 14) {
+                                TextField("Class noun", text: $classNoun)
+                                Text("The ordinary noun used beside the trigger: person, dog, mug, style or motion.")
+                                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                                Text("Caption detail overrides").font(.headline)
+                                Text("The category supplies these defaults. Change them only to refine which details "
+                                    + "the captions should describe; use one per line.").font(.callout)
+                                TextEditor(text: $describe).frame(height: 100).border(.quaternary)
+                                    .accessibilityLabel("Caption detail overrides")
+                                Text("Boundary exceptions").font(.headline)
+                                Text("Optional: detail: decision, one per line. For example, explain whether a "
+                                    + "character's permanent costume belongs to the concept.").font(.callout)
+                                TextEditor(text: $decisions).frame(height: 75).border(.quaternary)
+                                    .accessibilityLabel("Boundary exceptions")
+                                Picker("Detailed category", selection: $target) {
+                                    ForEach(TargetConcept.allCases, id: \.self) { Text($0.title).tag($0) }
+                                }
+                            }.padding(.top, 10)
+                        }
                     }
                 }.padding(.trailing, 8)
             }

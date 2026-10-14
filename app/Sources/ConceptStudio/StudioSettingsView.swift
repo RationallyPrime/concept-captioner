@@ -54,12 +54,20 @@ struct StudioSettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: StudioStyle.contentSpacing) {
                     StudioTermsHelp(terms: [.provider, .apiKey, .keychain, .gateway, .tokens])
+                    Toggle("Advanced user", isOn: $session.advancedUser)
+                    Text(
+                        "Reveals custom servers, detailed concept, captioning and training controls, and unverified recipes."
+                    )
+                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                    Divider()
                     captioningAccounts
                     Divider()
                     publishingAndTrainingAccounts
                     Divider()
-                    DisclosureGroup("Advanced: custom servers and training images") {
-                        advancedPreferences.padding(.top, 12)
+                    if session.advancedUser {
+                        DisclosureGroup("Advanced: custom servers and training images") {
+                            advancedPreferences.padding(.top, 12)
+                        }
                     }
                     Divider()
                     StudioSection(
