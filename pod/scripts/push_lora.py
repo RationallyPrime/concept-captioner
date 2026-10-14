@@ -215,7 +215,9 @@ def load_run(run_dir: Path) -> dict[str, Any]:
 
 def dataset_info(run: dict[str, Any]) -> dict[str, Any]:
     """Name, manifest and job.yaml profile of the dataset the run trained on, when readable."""
-    dataset = run.get("dataset") if isinstance(run.get("dataset"), dict) else {}
+    dataset = run.get("dataset")
+    if not isinstance(dataset, dict):
+        dataset = {}
     info: dict[str, Any] = {"name": None, "manifest": None, "profile": None}
     raw = dataset.get("path")
     if not isinstance(raw, str) or not raw:
