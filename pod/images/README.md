@@ -1,9 +1,11 @@
 # images
 
-Current public release: `ghcr.io/rationallyprime/concept-captioner-pod-{base,aitoolkit,ltx}:v0.3.2-20261014`,
-a **clean build from commit `374e695`** (regularisation sets and REPA on top of the model table, with the review fixes; the aitoolkit
+Current public release: `ghcr.io/rationallyprime/concept-captioner-pod-{base,aitoolkit,ltx}:v0.3.3-20261014`,
+a **clean build from commit `126eb67`** (regularisation sets and REPA on top of the model table, the Hub licence ids,
+Qwen-Image-2.1 checkpoints every 500 steps and REPA on by default; the aitoolkit
 build applied the three REPA patches with `git am`): the three Dockerfiles as committed, built on cx53 with
-`docker buildx build` and no overlay. The previous releases stay published: `v0.3.1-20261014` (from `0124582`; base `0483ff50…`, aitoolkit `3bc32673…`,
+`docker buildx build` and no overlay. The previous releases stay published: `v0.3.2-20261014` (from `374e695`; base `3a809cae…`, aitoolkit `73266718…`,
+ltx `5bf0ef9e…`), `v0.3.1-20261014` (from `0124582`; base `0483ff50…`, aitoolkit `3bc32673…`,
 ltx `e568b43b…`), `v0.3.0-20261014` (from `f784947`,
 PR #10; base `eab5ddb9…`, aitoolkit `afe466d1…`, ltx `41a74204…`) and `v0.2.3-clean-20261011` (from `b7908618`;
 base `d41b8287…`, aitoolkit `fe09109d…`, ltx `40a0361f…`). The images carry no OCI revision label; this table is the record of
@@ -11,9 +13,9 @@ which commit they came from.
 
 | image suffix | public manifest digest |
 | --- | --- |
-| `base` | `sha256:3a809caeab99a707e99310227f81e84321cabb9c928d492449cbf67fe51c2542` |
-| `aitoolkit` | `sha256:7326671864e8a0210b5158a503d35dacc233e98e44560fe8ca722a67271e4ed6` |
-| `ltx` | `sha256:5bf0ef9ec2114f7853672a888c7ff5cdc29bfabb90c8fdc56116f3bb852c93b5` |
+| `base` | `sha256:bfcb30c7f768a57fa9bfd1d36eab8742cecb1634d6b0352d9c9f5a3708fb402d` |
+| `aitoolkit` | `sha256:24793dec0c0b6aa11bd9f39c258d98c8aeb17fe25d0fdfd5c5e5757342ebc14c` |
+| `ltx` | `sha256:4aeb4e3b50af518f025b1df2a980136674a3de14db8d0a98168e14b282350789` |
 
 Checked after the push: each tag resolves anonymously on GHCR to the digest above. The CPU
 control smoke described next has not been rerun for this tag; it ran against the pushed `v0.2.3` base image and passed (receipt
