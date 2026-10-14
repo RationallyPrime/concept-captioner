@@ -43,12 +43,23 @@ extension GPUJourneyView {
 }
 
 extension GPUJourneyView {
-    var repeatedRun: TrainingRun? {
-        workspace.runHistory.first { $0.runID == workspace.repeatSourceRunID }
-    }
-
     var trainingDatasetRepo: String {
         workspace.publishedRepeatRun?.datasetRepo ?? datasetRepo
+    }
+
+    /// Where the repeated run's inputs come from, told from the dataset training will actually use.
+    var repeatNotice: String {
+        if workspace.usesLocalDataset {
+            return "Saved settings are loaded. Training captures the current included media and saved captions."
+        }
+        guard let published = workspace.publishedRepeatRun else {
+            return "Saved settings are loaded. That run uploaded its inputs directly, so training uses this "
+                + "project's published dataset."
+        }
+        return published.datasetRevision == nil
+            ? "Saved settings are loaded. This run did not record a dataset revision; the latest revision of "
+            + "its dataset, \(published.datasetRepo), will be used."
+            : "The next run repeats a saved dataset revision. Settings above remain editable."
     }
 
     var trainingDatasetRevision: String? {

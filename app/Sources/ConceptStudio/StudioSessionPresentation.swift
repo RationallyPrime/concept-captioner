@@ -54,9 +54,13 @@ extension StudioSession {
     var trainingPrerequisites: [TrainingPrerequisite] {
         guard let project else { return [TrainingPrerequisite(missing: "open a project", step: .images)] }
         var missing: [TrainingPrerequisite] = []
-        // A repeat that recorded a published dataset trains on that, not on this project's media or publish.
+        // A repeat that recorded a published dataset trains on that, not on this project's media or publish;
+        // an epoch-counted model also needs the item count, which runs saved before it was recorded lack.
         let repeatsPublishedDataset = gpu.publishedRepeatRun != nil
-        if project.images.isEmpty, !repeatsPublishedDataset {
+        let repeatSuppliesMedia = gpu.publishedRepeatRun.map {
+            $0.itemCount != nil || gpu.effectiveModelRow.recipe.lengthUnit == .steps
+        } ?? false
+        if project.images.isEmpty, !repeatSuppliesMedia {
             missing.append(.init(missing: "import images or clips", step: .images))
         }
         if project.job.concepts.isEmpty {

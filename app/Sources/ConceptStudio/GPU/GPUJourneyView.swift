@@ -354,12 +354,7 @@ struct GPUJourneyView: View {
                     .editing || (!workspace.usesLocalDataset && trainingDatasetRepo.isEmpty))
             }
             if !workspace.repeatSourceRunID.isEmpty {
-                StudioNotice(workspace.usesLocalDataset
-                    ? "Saved settings are loaded. Training captures the current included media and saved captions."
-                    : repeatedRun?.datasetRevision == nil
-                    ? "Saved settings are loaded. This run did not record a dataset revision; "
-                    + "the current remote dataset will be used."
-                    : "The next run repeats a saved dataset revision. Settings above remain editable.")
+                StudioNotice(repeatNotice)
                 Button("Use this project's current dataset instead") {
                     session.useCurrentTrainingDataset()
                 }

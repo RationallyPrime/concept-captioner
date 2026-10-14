@@ -278,10 +278,12 @@ extension GPUWorkspace {
         }
     }
 
-    /// The run selected for Repeat when it recorded a published dataset: the dataset the repeat trains on. A
-    /// direct-upload run supplies settings only, so its repeat trains on this project's own inputs.
+    /// The run selected for Repeat when it recorded a published dataset that training will read: the dataset the
+    /// repeat trains on. A direct-upload run supplies settings only, and without a Hugging Face token training
+    /// uploads this project's own inputs, so in either case the repeat trains on the project's dataset.
     var publishedRepeatRun: TrainingRun? {
-        runHistory.first { $0.runID == repeatSourceRunID && !$0.datasetRepo.isEmpty }
+        guard !usesLocalDataset else { return nil }
+        return runHistory.first { $0.runID == repeatSourceRunID && !$0.datasetRepo.isEmpty }
     }
 
     /// Prefills editable settings; it never starts billing or submits training.
