@@ -64,7 +64,7 @@ apply.
 | `preview` | `training_samples` (the launcher can sample during training), `still` (comparison may produce one still frame) and `video` (`min_frames`, `max_frames`, `choices`, `default_frames`; `null` for images only). |
 | `captions` | `image_profile`, `video_profile`, `profile_prefix` (a project caption profile starting with it selects this model) and `titles` (display names of this row's profiles). |
 | `selection.follows_project_profile` | The selection may move to the project's profile model when the project's caption profile changes. |
-| `license` | `id`, `name`, `url`, `notice`, `show_notice`. With `show_notice` the picker shows the notice, a link and the download size, and the pushed model card carries the licence. |
+| `license` | `id`, `name`, `url`, `notice`, `show_notice`. With `show_notice` the picker shows the notice, a link and the download size, and the pushed model card carries the licence. `id` is the Hub's licence identifier when the Hub lists one (the card says `license: <id>`); otherwise the card says `license: other` with `id` as `license_name`, which the Hub accepts only as lowercase letters, digits, `-` and `.`. |
 | `usage_note` | Optional. A sentence about using a LoRA trained on this model, shown under the picker and in the model card's `## Use` section. |
 | `hooks` | Concern to hook name; an absent concern is the generic behaviour. |
 | `notes` | Free text for maintainers. Not displayed. |
