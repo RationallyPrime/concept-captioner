@@ -37,12 +37,13 @@ def latest_checkpoint(run_dir: Path, trainer: str, run_id: str) -> Path | None:
 def checkpoint_step(checkpoint: Path, trainer: str) -> int:
     if trainer == "ltx":
         match = re.search(r"step_(\d+)\.safetensors$", checkpoint.name)
-        state = checkpoint.parent / f"training_state_step_{match.group(1)}.pt" if match else None
-        if state is None or state.is_symlink() or not state.is_file():
+        step = match.group(1) if match else ""
+        state = checkpoint.parent / f"training_state_step_{step}.pt"
+        if not step or state.is_symlink() or not state.is_file():
             raise ValueError(
                 "LTX resume needs the matching training_state_step file on this storage"
             )
-        return int(match.group(1))
+        return int(step)
     with checkpoint.open("rb") as file:
         prefix = file.read(8)
         if len(prefix) != 8:

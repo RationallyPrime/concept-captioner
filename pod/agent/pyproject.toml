@@ -17,11 +17,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
-  "pytest>=8.4,<10",
-  "pytest-asyncio>=0.24,<2",
-  "ruff>=0.12,<1",
-]
 # On the pod the agent venv also carries tensorboard (service + preferred events reader),
 # huggingface_hub and datasets (for scripts/pull_dataset.py and push_lora.py).
 pod = [
@@ -30,6 +25,10 @@ pod = [
   "datasets>=3.0,<5",
   "Pillow>=10.4,<13",
 ]
+
+[dependency-groups]
+# ruff and ty come from the repository's mise.toml.
+dev = ["pytest>=8.4,<10", "pytest-asyncio>=0.24,<2"]
 
 [project.scripts]
 podagent = "podagent.__main__:main"
@@ -49,3 +48,7 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 ignore = ["E501", "RUF001", "RUF012"]
+
+[tool.ty.src]
+# Tests are not type-checked.
+include = ["src"]

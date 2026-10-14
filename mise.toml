@@ -1,0 +1,17 @@
+# Tool versions for this repository: local work and every CI job use these binaries.
+# Install with `mise install`. Versions change only through a pull request to this file.
+#
+# uv and ruff start from the Weave pins. ty starts later than the Weave pin: 0.0.63 rejects
+# correct code here (narrowing `Any` by isinstance, the `yaml = None` import fallback) that
+# 0.0.87 accepts. ty is pre-1.0; a release that rejects correct code is held back here with its
+# reason rather than worked around in the code.
+#
+# Xcode cannot come from mise; CI pins it in .github/workflows/ci.yml, and the version of mise
+# itself sits beside it there.
+
+[tools]
+uv = "0.12.1"
+ruff = "0.16.1"
+"pipx:ty" = "0.0.87"
+swiftlint = "0.65.1"
+swiftformat = "0.63.1"

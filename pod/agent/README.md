@@ -9,9 +9,9 @@ output directory at `/runs/{id}/files`, so a trained LoRA can be downloaded with
 The API is specified in `../docs/POD-SPEC.md`.
 
 ```bash
-uv venv && uv pip install -e ".[dev]"
-pytest -q
-ruff check . && ruff format --check .
+uv sync
+uv run pytest
+ruff check . && ruff format --check . && ty check   # versions from the repository's mise.toml
 
 # run locally with two fake GPUs and no Docker
 PODAGENT_TOKEN=local-dev-token-0123 PODAGENT_FAKE_GPUS=2 PODAGENT_WORKSPACE=/tmp/ws python -m podagent

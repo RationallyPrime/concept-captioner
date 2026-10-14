@@ -11,8 +11,9 @@ license = "MIT"
 requires-python = ">=3.11"
 dependencies = ["httpx>=0.27,<1"]
 
-[project.optional-dependencies]
-dev = ["pytest>=8.4,<10", "ruff>=0.12,<1"]
+[dependency-groups]
+# ruff and ty come from the repository's mise.toml.
+dev = ["pytest>=8.4,<10"]
 
 [project.scripts]
 podctl = "podctl.cli:main"
@@ -31,3 +32,7 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 ignore = ["E501", "RUF001", "RUF012"]
+
+[tool.ty.src]
+# Tests are not type-checked.
+include = ["src"]

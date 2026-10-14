@@ -334,7 +334,7 @@ class Supervisor:
         log sits in the run directory) raises ``TypeError`` when handed ``None``.
         """
         try:
-            return spec.log_path(None, self.settings.paths)  # type: ignore[arg-type]
+            return spec.log_path(None, self.settings.paths)
         except (TypeError, AttributeError):
             return None
 

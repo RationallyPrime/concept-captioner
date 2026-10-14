@@ -25,7 +25,7 @@ import contextlib
 import inspect
 import json
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -267,7 +267,7 @@ def create_app(settings: Settings | None = None, backend: GpuBackend | None = No
     settings.paths.ensure()
 
     @contextlib.asynccontextmanager
-    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         yield
         # Agent shutdown is container shutdown: take every running child down with it. The
         # supervisor waits for each child (SIGTERM, then SIGKILL), so keep that off the loop.
