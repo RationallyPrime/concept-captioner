@@ -29,7 +29,8 @@ func sha256(_ data: Data) -> String {
 actor UnreachableAgentTransport: HTTPTransport {
     private var stopped = false
     private var failedFirstStop: Bool
-    private let agentAvailable: Bool
+    private var agentAvailable: Bool
+    private var eventsMissing = false
     private let inferenceReady: Bool
     private let gpuCount: Int
     private var services: [String: String] = [:]
@@ -72,6 +73,15 @@ actor UnreachableAgentTransport: HTTPTransport {
 
     func failFiles(_ fail: Bool) {
         filesFail = fail
+    }
+
+    func agentReachable(_ available: Bool) {
+        agentAvailable = available
+    }
+
+    /// The agent answers a run's events with 404, as it does before the trainer creates the run directory.
+    func runEventsMissing(_ missing: Bool) {
+        eventsMissing = missing
     }
 
     func failList(_ fail: Bool) {
@@ -122,6 +132,7 @@ actor UnreachableAgentTransport: HTTPTransport {
         if url.host() != "api.runpod.io" {
             guard agentAvailable else { return HTTPResponse(status: 522) }
             agentRequests.append(request)
+            if eventsMissing, url.path().hasSuffix("/events") { return HTTPResponse(status: 404) }
             return try HTTPResponse(
                 status: 200,
                 body: JSONValue.object(agentReply(request, url: url)).pythonDumpsData()

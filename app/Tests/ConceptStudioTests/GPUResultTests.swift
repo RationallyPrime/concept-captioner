@@ -163,6 +163,31 @@ struct GPUResultTests {
     }
 
     @MainActor @Test
+    func aRunWithoutEventsYetIsNotAnErrorAndAResolvedErrorClears() async throws {
+        let (preferences, suite) = try temporaryPreferences()
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let transport = UnreachableAgentTransport(agentAvailable: true, inferenceReady: true)
+        let workspace = makeWorkspace(transport, preferences)
+        try workspace.configure(runpodKey: "provider-only", hubToken: "", imageName: "test")
+        await workspace.refreshOffers()
+        await workspace.rent()
+        let inputProject = try await captionedUploadProject(at: workspace.projectFolder)
+        workspace.projectFolder = inputProject.directory
+        defer { try? FileManager.default.removeItem(at: inputProject.directory) }
+        await workspace.train(datasetRepo: "test/images")
+        await transport.runEventsMissing(true)
+        await workspace.refresh()
+        #expect(!workspace.message.contains("could not complete"))
+        await transport.agentReachable(false)
+        await workspace.refresh()
+        #expect(workspace.message.contains("unreachable"))
+        await transport.agentReachable(true)
+        await workspace.refresh()
+        #expect(workspace.message.isEmpty)
+        await workspace.stopEverything()
+    }
+
+    @MainActor @Test
     func aPendingResultOnOtherStorageDoesNotBlockTraining() async throws {
         let (preferences, suite) = try temporaryPreferences()
         defer { preferences.removePersistentDomain(forName: suite) }

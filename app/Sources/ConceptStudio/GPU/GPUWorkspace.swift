@@ -135,9 +135,11 @@ final class GPUWorkspace {
     @ObservationIgnored var imageName = ""
     @ObservationIgnored var saved: SavedPod?
     @ObservationIgnored var lastActivity = Date()
+    /// The status line a failed refresh wrote; the next refresh that succeeds clears it.
+    @ObservationIgnored var refreshFailureMessage: String?
     /// Work the app does for the computer outside `perform`, such as publishing the dataset it trains on.
     /// The idle stop waits for it and counts idle time from when it ends.
-    @ObservationIgnored private(set) var appWorkInFlight = 0
+    @ObservationIgnored var appWorkInFlight = 0
     /// The stopped computer's host had no free GPU when asked to start; Remove and rent is the way out.
     var restartBlockedByHost = false
     @ObservationIgnored var monitorTask: Task<Void, Never>?
@@ -372,10 +374,12 @@ final class GPUWorkspace {
             ) }
             if settlementRevision == operationRevision,
                !isBusy { try await settleGeneration(agent, services: services) }
+            clearRefreshFailure()
         } catch is CancellationError {
             return
         } catch {
             message = error.localizedDescription
+            refreshFailureMessage = message
         }
         // A failed agent/proxy request must not suppress the provider-level idle stop, but a
         // finished LoRA that is neither pushed nor downloaded keeps the computer up, and so does a
@@ -485,16 +489,6 @@ extension GPUWorkspace {
 
     func noteActivity() {
         lastActivity = Date()
-    }
-
-    func beginAppWork() {
-        appWorkInFlight += 1
-        noteActivity()
-    }
-
-    func endAppWork() {
-        appWorkInFlight = max(0, appWorkInFlight - 1)
-        noteActivity()
     }
 
     var quotedHourlyRate: Double {
