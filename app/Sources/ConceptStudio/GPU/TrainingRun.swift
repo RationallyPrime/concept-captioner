@@ -278,6 +278,12 @@ extension GPUWorkspace {
         }
     }
 
+    /// The run selected for Repeat when it recorded a published dataset: the dataset the repeat trains on. A
+    /// direct-upload run supplies settings only, so its repeat trains on this project's own inputs.
+    var publishedRepeatRun: TrainingRun? {
+        runHistory.first { $0.runID == repeatSourceRunID && !$0.datasetRepo.isEmpty }
+    }
+
     /// Prefills editable settings; it never starts billing or submits training.
     func repeatSettings(from run: TrainingRun) {
         guard !isBusy,

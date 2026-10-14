@@ -81,7 +81,7 @@ extension GPUWorkspace {
                 throw StudioError.message("The training model changed during input preparation. "
                     + "Check the selected model and start again; no training was submitted.")
             }
-            let repeated = self.runHistory.first { $0.runID == self.repeatSourceRunID }
+            let repeated = self.publishedRepeatRun
             let repo = repeated?.datasetRepo ?? datasetRepo
             let revision = repeated.map(\.datasetRevision)
                 ?? (self.datasetRevision.isEmpty ? nil : self.datasetRevision)

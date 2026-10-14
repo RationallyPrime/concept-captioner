@@ -30,7 +30,7 @@ struct GPURunHistoryTests {
         return folder
     }
 
-    private func fixtureRun(trainer: String = "aitoolkit") -> TrainingRun {
+    private func fixtureRun(trainer: String = "aitoolkit", datasetRepo: String = "me/old-data") -> TrainingRun {
         var params: JSONObject = [
             "run_id": .string("saved-run"), "dataset": .object(["path": .string("/workspace/datasets/saved-run")]),
             "base_model": .string("black-forest-labs/FLUX.1-dev"), "steps": .int(200), "rank": .int(16),
@@ -45,7 +45,7 @@ struct GPURunHistoryTests {
             ])
         }
         return TrainingRun(
-            runID: "saved-run", trainer: trainer, datasetRepo: "me/old-data", datasetRevision: "old-sha",
+            runID: "saved-run", trainer: trainer, datasetRepo: datasetRepo, datasetRevision: "old-sha",
             datasetContainsVideo: trainer == "ltx", paramsJSON: JSONValue.object(params).pythonDumpsData(),
             volumeID: "storage",
             startedAt: Date(), updatedAt: Date(), result: TrainingResult(
@@ -512,5 +512,25 @@ extension GPURunHistoryTests {
         await workspace.downloadRun(selected)
         #expect(workspace.message.contains("saved storage"))
         #expect(await agent.listedRunIDs.isEmpty)
+    }
+}
+
+extension GPURunHistoryTests {
+    @MainActor @Test
+    func repeatOfADirectUploadRunTrainsOnTheProjectsPublishedDataset() async throws {
+        let (preferences, suite) = try temporaryPreferences()
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let folder = try temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let agent = HistoryAgent()
+        let workspace = connected(folder, preferences: preferences, agent: agent)
+        let run = fixtureRun(datasetRepo: "") // recorded by a direct upload: settings only
+        workspace.runHistory = [run]
+        workspace.repeatSettings(from: run)
+        workspace.datasetRevision = "project-sha"
+        await workspace.train(datasetRepo: "me/current-data")
+        let pull = try #require(await agent.starts.first { $0.service == "pull-dataset" })
+        #expect(pull.params["repo_id"]?.stringValue == "me/current-data")
+        #expect(pull.params["revision"]?.stringValue == "project-sha")
     }
 }

@@ -48,11 +48,11 @@ extension GPUJourneyView {
     }
 
     var trainingDatasetRepo: String {
-        repeatedRun?.datasetRepo ?? datasetRepo
+        workspace.publishedRepeatRun?.datasetRepo ?? datasetRepo
     }
 
     var trainingDatasetRevision: String? {
-        if let repeatedRun { return repeatedRun.datasetRevision }
+        if let published = workspace.publishedRepeatRun { return published.datasetRevision }
         return workspace.datasetRevision.isEmpty ? nil : workspace.datasetRevision
     }
 }
