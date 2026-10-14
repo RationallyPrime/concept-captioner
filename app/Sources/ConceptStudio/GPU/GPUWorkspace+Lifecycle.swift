@@ -95,6 +95,7 @@ extension GPUWorkspace {
         self.pod = nil
         saved = nil
         agent = nil
+        restartBlockedByHost = false
         if !demoMode {
             preferences.removeObject(forKey: Self.activePodKey)
             try? deleteAgentToken("pod.\(pod.id)")

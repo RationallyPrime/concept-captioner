@@ -31,7 +31,7 @@ struct GPUJourneyView: View {
         self.showsSpendControls = showsSpendControls
     }
 
-    private var datasetRepo: String {
+    var datasetRepo: String {
         session.repoID
     }
 
@@ -195,6 +195,7 @@ struct GPUJourneyView: View {
                 Text("Choose an available computer to see its price.")
                     .font(.callout).foregroundStyle(StudioStyle.supportingText)
             }
+            if workspace.pod == nil { prerequisitesNotice(beforeRenting: true) }
             Button(workspace.quotedHourlyRate > 0
                 ? "Rent computer · \(StudioMoney.perHour(workspace.quotedHourlyRate))"
                 : "Choose a computer first") {
@@ -209,6 +210,7 @@ struct GPUJourneyView: View {
                         + StudioMoney.perHour(workspace.saved?.hourlyRate ?? 0)) {
                             Task { await workspace.startStoppedComputer() }
                         }.disabled(workspace.isBusy)
+                    if workspace.restartBlockedByHost { restartBlockedNotice }
                     Text(workspace.outputCustodyExplanation)
                         .font(.callout).foregroundStyle(StudioStyle.supportingText)
                 }
@@ -222,7 +224,10 @@ struct GPUJourneyView: View {
                     .disabled(workspace.isBusy)
                     .help("Deletes the pod disk with the outputs that were never pushed or saved.")
                 } else {
-                    Button("Remove computer…", role: .destructive) { confirmTermination = true }
+                    Button(
+                        workspace.restartBlockedByHost ? "Remove it to rent a new one…" : "Remove computer…",
+                        role: .destructive
+                    ) { confirmTermination = true }
                         .disabled(workspace.hasUndeliveredPodOutputs)
                         .help("Push or save outputs from a pod disk before removing its computer.")
                 }
@@ -326,6 +331,7 @@ struct GPUJourneyView: View {
                         .disabled(workspace.isBusy || workspace.isTraining)
                 }.formStyle(.columns)
                 TrainingBudgetView(session: session, workspace: workspace)
+                prerequisitesNotice(beforeRenting: false)
                 DisclosureGroup("Advanced training controls") {
                     AdvancedTrainingControls(workspace: workspace).padding(.top, 12)
                         .disabled(workspace.isBusy || workspace.isTraining)
@@ -361,19 +367,6 @@ struct GPUJourneyView: View {
             Divider()
             RunHistoryView(session: session, workspace: workspace)
         }
-    }
-
-    private var repeatedRun: TrainingRun? {
-        workspace.runHistory.first { $0.runID == workspace.repeatSourceRunID }
-    }
-
-    private var trainingDatasetRepo: String {
-        repeatedRun?.datasetRepo ?? datasetRepo
-    }
-
-    private var trainingDatasetRevision: String? {
-        if let repeatedRun { return repeatedRun.datasetRevision }
-        return workspace.datasetRevision.isEmpty ? nil : workspace.datasetRevision
     }
 
     // MARK: Monitor
@@ -579,19 +572,5 @@ extension GPUJourneyView {
                 }
             }
         }
-    }
-}
-
-extension GPUJourneyView {
-    /// The open project's own training destination; another project's repository never shows here.
-    @ViewBuilder var trainingDestinationFields: some View {
-        TextField(
-            "Save trained model to",
-            text: Binding(get: { session.trainingOutputRepo }, set: { session.trainingOutputRepo = $0 }),
-            prompt: Text("your-name/model-name")
-        )
-        Toggle("Keep the trained model private", isOn: Binding(
-            get: { session.trainingOutputPrivate }, set: { session.trainingOutputPrivate = $0 }
-        ))
     }
 }

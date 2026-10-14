@@ -135,6 +135,11 @@ final class GPUWorkspace {
     @ObservationIgnored var imageName = ""
     @ObservationIgnored var saved: SavedPod?
     @ObservationIgnored var lastActivity = Date()
+    /// Work the app does for the computer outside `perform`, such as publishing the dataset it trains on.
+    /// The idle stop waits for it and counts idle time from when it ends.
+    @ObservationIgnored private(set) var appWorkInFlight = 0
+    /// The stopped computer's host had no free GPU when asked to start; Remove and rent is the way out.
+    var restartBlockedByHost = false
     @ObservationIgnored var monitorTask: Task<Void, Never>?
     @ObservationIgnored var operationTask: Task<Void, Never>?
     @ObservationIgnored var refreshTask: Task<Void, Never>?
@@ -375,7 +380,7 @@ final class GPUWorkspace {
         // A failed agent/proxy request must not suppress the provider-level idle stop, but a
         // finished LoRA that is neither pushed nor downloaded keeps the computer up, and so does a
         // run the agent still answers for whose result has not been settled yet.
-        if hasRunningPod, !isBusy, !resultNeedsSaving, !(agentAnswered && resultUnsettled),
+        if hasRunningPod, !isBusy, appWorkInFlight == 0, !resultNeedsSaving, !(agentAnswered && resultUnsettled),
            Date().timeIntervalSince(lastActivity) >= Double(idleMinutes * 60) {
             await stopEverything()
             if !hasRunningPod { message = "Stopped the idle computer to avoid further GPU charges." }
@@ -419,7 +424,11 @@ final class GPUWorkspace {
         operationRevision += 1
         isBusy = true
         let work = Task {
-            defer { self.isBusy = false }
+            defer {
+                self.isBusy = false
+                // Waiting on the app's own work (an upload, a download) is not idle time.
+                self.noteActivity()
+            }
             do {
                 try await action()
             } catch is CancellationError {
@@ -476,6 +485,16 @@ extension GPUWorkspace {
 
     func noteActivity() {
         lastActivity = Date()
+    }
+
+    func beginAppWork() {
+        appWorkInFlight += 1
+        noteActivity()
+    }
+
+    func endAppWork() {
+        appWorkInFlight = max(0, appWorkInFlight - 1)
+        noteActivity()
     }
 
     var quotedHourlyRate: Double {

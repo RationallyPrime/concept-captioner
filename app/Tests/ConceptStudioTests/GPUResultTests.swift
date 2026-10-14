@@ -140,6 +140,29 @@ struct GPUResultTests {
     }
 
     @MainActor @Test
+    func theAppsOwnWorkForTheComputerIsNotIdleTime() async throws {
+        let (preferences, suite) = try temporaryPreferences()
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let transport = UnreachableAgentTransport()
+        let workspace = makeWorkspace(transport, preferences)
+        try workspace.configure(runpodKey: "test", hubToken: "test", imageName: "test")
+        await workspace.refreshOffers()
+        await workspace.rent()
+        workspace.idleMinutes = 0
+        workspace.beginAppWork() // publishing the dataset this computer is waiting for
+        for _ in 0 ..< 5 {
+            await workspace.refresh()
+        }
+        #expect(workspace.hasRunningPod)
+        workspace.endAppWork()
+        for _ in 0 ..< 100 where workspace.hasRunningPod {
+            try await Task.sleep(for: .milliseconds(10))
+            await workspace.refresh()
+        }
+        #expect(workspace.pod?.status == "EXITED")
+    }
+
+    @MainActor @Test
     func aPendingResultOnOtherStorageDoesNotBlockTraining() async throws {
         let (preferences, suite) = try temporaryPreferences()
         defer { preferences.removePersistentDomain(forName: suite) }

@@ -63,7 +63,12 @@ extension StudioSession {
         let publishID = UUID()
         perform("Preparing your training dataset…") {
             self.activePublishID = publishID
-            defer { if self.activePublishID == publishID { self.activePublishID = nil } }
+            // A rented computer waiting for this dataset is not idle.
+            self.gpu.beginAppWork()
+            defer {
+                self.gpu.endAppWork()
+                if self.activePublishID == publishID { self.activePublishID = nil }
+            }
             // Captured before any check can throw, so a refusal is reported rather than read as a switch.
             let publishingDirectory = self.project?.directory.standardizedFileURL
             do {

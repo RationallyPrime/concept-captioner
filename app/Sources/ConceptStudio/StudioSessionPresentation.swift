@@ -48,6 +48,22 @@ extension StudioSession {
         trainingOutputRepo = suggested
     }
 
+    /// What is still to do before this project can train, in order, each with the step that does it. A dataset
+    /// counts as published once this project has recorded a publish. Shown before renting: a rented computer
+    /// bills while it waits for these.
+    var trainingPrerequisites: [TrainingPrerequisite] {
+        guard let project else { return [TrainingPrerequisite(missing: "open a project", step: .images)] }
+        var missing: [TrainingPrerequisite] = []
+        if project.images.isEmpty { missing.append(.init(missing: "import images or clips", step: .images)) }
+        if project.job.concepts.isEmpty {
+            missing.append(.init(missing: "define a concept and its trigger", step: .concepts))
+        }
+        if !gpu.usesLocalDataset, repoID.isEmpty || projectState.datasetRevision.isEmpty {
+            missing.append(.init(missing: "publish the training dataset", step: .publish))
+        }
+        return missing
+    }
+
     /// Change the project's app-only settings and save them with the project (not in demo mode).
     func updateProjectState(_ change: (inout ProjectAppState) -> Void) {
         var state = projectState
@@ -104,4 +120,10 @@ extension StudioSession {
     var canUndoMappingChange: Bool {
         !mappingUndo.isEmpty
     }
+}
+
+struct TrainingPrerequisite: Equatable {
+    /// Completes "Before training, …".
+    let missing: String
+    let step: StudioStep
 }
