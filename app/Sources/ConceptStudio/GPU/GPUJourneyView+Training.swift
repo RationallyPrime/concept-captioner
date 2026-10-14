@@ -16,16 +16,16 @@ extension GPUJourneyView {
 }
 
 extension GPUJourneyView {
-    /// What is still to do before training, with a way to the step for the first of it. Before renting it
-    /// says why to finish first: the computer bills while it waits.
-    @ViewBuilder func prerequisitesNotice(beforeRenting: Bool) -> some View {
+    /// What is still to do before training, with a way to the step for the first of it. Before renting or
+    /// restarting a computer it says why to finish first: the computer bills while it waits.
+    @ViewBuilder func prerequisitesNotice(beforeBilling: Bool) -> some View {
         let missing = session.trainingPrerequisites
         if let first = missing.first {
             StudioNotice(
                 "Before training, "
                     + ModelTable.sentenceList(missing.map(\.missing), conjunction: "and") + "."
-                    + (beforeRenting ? " A rented computer bills while it waits, so do this first "
-                        + "unless you are renting it to caption." : ""),
+                    + (beforeBilling ? " A running computer bills while it waits, so do this first "
+                        + "unless you need it to caption." : ""),
                 symbol: "exclamationmark.circle"
             )
             Button("Go to \(first.step.title)") { session.step = first.step }

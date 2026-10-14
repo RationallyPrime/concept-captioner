@@ -92,8 +92,10 @@ extension StudioSession {
         SessionKeyStore(secrets: secrets, vllmBaseURL: customBaseURL.isEmpty ? nil : customBaseURL)
     }
 
+    /// Called when the Hugging Face key changes; the GPU workspace's copy follows wherever the user is.
     func providerCredentialsDidChange() {
         providerCredentialRevision &+= 1
+        preparePublishing()
     }
 
     func providerModelCacheKey(for kind: String) -> ProviderModelCacheKey {

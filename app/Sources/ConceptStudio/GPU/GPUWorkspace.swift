@@ -131,7 +131,8 @@ final class GPUWorkspace {
     @ObservationIgnored let sleepGuard: SleepAssertion
     @ObservationIgnored var provider: (any GPUProvider)?
     @ObservationIgnored var agent: (any PodAgent)?
-    @ObservationIgnored var hubToken = ""
+    /// Observed: whether training reads a published dataset or uploads directly depends on it.
+    var hubToken = ""
     @ObservationIgnored var imageName = ""
     @ObservationIgnored var saved: SavedPod?
     @ObservationIgnored var lastActivity = Date()

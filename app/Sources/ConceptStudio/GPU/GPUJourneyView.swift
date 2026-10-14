@@ -195,7 +195,7 @@ struct GPUJourneyView: View {
                 Text("Choose an available computer to see its price.")
                     .font(.callout).foregroundStyle(StudioStyle.supportingText)
             }
-            if workspace.pod == nil { prerequisitesNotice(beforeRenting: true) }
+            if !workspace.hasRunningPod { prerequisitesNotice(beforeBilling: true) }
             Button(workspace.quotedHourlyRate > 0
                 ? "Rent computer · \(StudioMoney.perHour(workspace.quotedHourlyRate))"
                 : "Choose a computer first") {
@@ -331,7 +331,7 @@ struct GPUJourneyView: View {
                         .disabled(workspace.isBusy || workspace.isTraining)
                 }.formStyle(.columns)
                 TrainingBudgetView(session: session, workspace: workspace)
-                prerequisitesNotice(beforeRenting: false)
+                prerequisitesNotice(beforeBilling: false)
                 DisclosureGroup("Advanced training controls") {
                     AdvancedTrainingControls(workspace: workspace).padding(.top, 12)
                         .disabled(workspace.isBusy || workspace.isTraining)

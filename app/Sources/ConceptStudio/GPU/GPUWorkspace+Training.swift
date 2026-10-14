@@ -227,6 +227,9 @@ extension GPUWorkspace {
     func suggestedOutputRepo() async -> String? {
         guard !demoMode, !hubToken.isEmpty, let projectFolder,
               let url = URL(string: "https://huggingface.co/api/whoami-v2") else { return nil }
+        // Asked as Start is pressed: the idle stop must not take the computer while this answers.
+        beginAppWork()
+        defer { endAppWork() }
         var request = URLRequest(url: url, timeoutInterval: 20)
         request.setValue("Bearer \(hubToken)", forHTTPHeaderField: "Authorization")
         guard let response = try? await transport.send(request), response.status == 200,
