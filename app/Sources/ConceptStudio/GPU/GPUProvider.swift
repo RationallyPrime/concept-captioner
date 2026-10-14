@@ -292,8 +292,9 @@ struct RunPodProvider: GPUProvider {
         _ = try await call("pods/\(id)/action", method: "POST", body: ["action": .string("stop")])
     }
 
+    /// A pod that no longer exists (removed in RunPod's console or by another tool) counts as removed.
     func terminate(id: String) async throws {
-        _ = try await call("pods/\(id)", method: "DELETE")
+        _ = try await call("pods/\(id)", method: "DELETE", accepting: [404])
     }
 
     private struct Secret: Decodable {
@@ -348,7 +349,8 @@ struct RunPodProvider: GPUProvider {
     }
 
     private func call(
-        _ path: String, method: String = "GET", body: JSONObject? = nil, query: [URLQueryItem] = []
+        _ path: String, method: String = "GET", body: JSONObject? = nil, query: [URLQueryItem] = [],
+        accepting accepted: Set<Int> = []
     ) async throws -> Data {
         var components = URLComponents(url: origin.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { components.queryItems = query }
@@ -360,7 +362,7 @@ struct RunPodProvider: GPUProvider {
             request.httpBody = JSONValue.object(body).pythonDumpsData()
         }
         let response = try await transport.send(request)
-        guard (200 ..< 300).contains(response.status) else {
+        guard (200 ..< 300).contains(response.status) || accepted.contains(response.status) else {
             let problem = try? JSONValue(parsing: response.body).objectValue
             let detail = problem?["detail"]?.stringValue
                 ?? problem?["message"]?.stringValue ?? problem?["error"]?.stringValue
