@@ -43,10 +43,10 @@ SIDE_FILES = ("run.json", "config.yaml")
 SAMPLE_PATTERNS = ("samples/*", "*/samples/*")
 CARD_NAME = "README.md"
 RECEIPT_NAME = "push.json"
-# The Hub's licence identifiers (https://huggingface.co/docs/hub/en/repositories-licenses). A row
-# whose ``license.id`` is one of them goes into the card as ``license: <id>``; any other id is a
-# custom licence: ``license: other``, with the id as ``license_name`` and the url as
-# ``license_link``.
+# The Hub's licence identifiers (https://huggingface.co/docs/hub/en/repositories-licenses), less
+# ``other``, its custom-licence marker. A row whose ``license.id`` is one of them goes into the
+# card as ``license: <id>``; any other id is a custom licence: ``license: other``, with the id as
+# ``license_name`` and the url as ``license_link``.
 HUB_LICENSES = frozenset(
     {
         "apache-2.0",
@@ -131,7 +131,6 @@ HUB_LICENSES = frozenset(
         "grok2-community",
         "gemma",
         "unknown",
-        "other",
     }
 )
 
