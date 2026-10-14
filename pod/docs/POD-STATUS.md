@@ -1,8 +1,9 @@
 # POD-STATUS
 
 State after the 2026-10-11 source review repairs and the Phase 2 H3 source additions. The
-current published tag, `v0.3.0-20261014`, is a clean build of PR #10 at `f784947` (the model table);
-the previous tag, `v0.2.3-clean-20261011`, is a clean build of `main` at
+current published tag, `v0.3.1-20261014`, is a clean build of `0124582` (regularisation sets and REPA
+on top of the model table); `v0.3.0-20261014` is a clean build of PR #10 at `f784947` (the model table);
+the tag before, `v0.2.3-clean-20261011`, is a clean build of `main` at
 `b79086183bba40e8120f0cba1ee59173f10108a5` (review repairs, direct dataset upload and the H3
 additions included) with the repository Dockerfiles and no overlay; it has had anonymous
 tag-to-digest checks and a CPU smoke (2026-10-12). The owner/Claude subsequently
@@ -36,8 +37,8 @@ hash and billing bucket, is in
   (FLUX/H3) and LTX launchers, LoRA push. H3 still-image training has the owner/Claude runtime acceptance above;
   clip training, external warm-start, Resume and matched generation remain unexercised live.
 - **podctl** (`pod/podctl`): command-line client for the agent.
-- **Images**, public on GHCR under tag `v0.3.0-20261014` (clean build from commit
-  `f784947`; digests in [images/README](../images/README.md)): `concept-captioner-pod-base`,
+- **Images**, public on GHCR under tag `v0.3.1-20261014` (clean build from commit
+  `0124582`; digests in [images/README](../images/README.md)): `concept-captioner-pod-base`,
   `-aitoolkit`, `-ltx`; plus a fake image for compose tests. Public RunPod template
   `87fxs5v8fn` points at the base image; it carries no token, and the agent refuses to start
   without one.

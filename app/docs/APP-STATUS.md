@@ -300,9 +300,11 @@ including rejected unauthenticated and out-of-scope requests. This proves backen
 not native WebKit rendering. Both new proof pods used one 32 GB GPU and 62 GB host RAM; these
 small recipes do not establish a memory guarantee for other datasets or settings.
 
-Current trainer images are published under `v0.3.0-20261014`, a clean build of PR #10 at `f784947`
-(the earlier `v0.2.3-clean-20261011` was built from `main` at `b7908618`) (digests in `pod/images/README.md`), and verified by anonymous tag-to-digest checks. The
-app default uses this tag. The owner/Claude H3 still-image training run used this clean tag;
+Current trainer images are published under `v0.3.1-20261014`, a clean build of the regularisation and
+REPA change at `0124582` (the earlier `v0.3.0-20261014` was built from PR #10 at `f784947`, and
+`v0.2.3-clean-20261011` from `main` at `b7908618`) (digests in `pod/images/README.md`), and verified by
+anonymous tag-to-digest checks. The app default uses this tag. The owner/Claude H3 still-image training
+run used `v0.2.3-clean-20261011`;
 the earlier bounded FLUX/LTX proofs used the r1/r2 tags, which stay published. Their
 separate scopes and limits are recorded in POD-STATUS.
 

@@ -1,17 +1,18 @@
 # images
 
-Current public release: `ghcr.io/rationallyprime/concept-captioner-pod-{base,aitoolkit,ltx}:v0.3.0-20261014`,
-a **clean build from commit `f784947`** (`model-table`, merged as PR #10: the model table and the Z-Image and
-Qwen-Image-2.1 rows): the three Dockerfiles as committed, built on cx53 with `docker buildx build` and no
-overlay. The previous release, `v0.2.3-clean-20261011` (from `b7908618`; base `d41b8287…`, aitoolkit `fe09109d…`,
-ltx `40a0361f…`), stays published. The images carry no OCI revision label; this table is the record of
+Current public release: `ghcr.io/rationallyprime/concept-captioner-pod-{base,aitoolkit,ltx}:v0.3.1-20261014`,
+a **clean build from commit `0124582`** (regularisation sets and REPA on top of the model table; the aitoolkit
+build applied the three REPA patches with `git am`): the three Dockerfiles as committed, built on cx53 with
+`docker buildx build` and no overlay. The previous releases stay published: `v0.3.0-20261014` (from `f784947`,
+PR #10; base `eab5ddb9…`, aitoolkit `afe466d1…`, ltx `41a74204…`) and `v0.2.3-clean-20261011` (from `b7908618`;
+base `d41b8287…`, aitoolkit `fe09109d…`, ltx `40a0361f…`). The images carry no OCI revision label; this table is the record of
 which commit they came from.
 
 | image suffix | public manifest digest |
 | --- | --- |
-| `base` | `sha256:eab5ddb98ad490a95fe8826a7d48e819cb3a57fdd50ff6c258eafcfec4b60302` |
-| `aitoolkit` | `sha256:afe466d1b75e8a4398eb8dc099fcb96d591729d757db4d436a2ab483aa272966` |
-| `ltx` | `sha256:41a7420463c8bfa7a97d199f3c91ee2d46895cb71a33bd7e57744f6067b2c7d5` |
+| `base` | `sha256:0483ff5070355a9739510766819429118283471ded17107bac939645792e536d` |
+| `aitoolkit` | `sha256:3bc32673e1c0e9da00d83c71fe346b8785d02e8687015eff315cc4b53b536629` |
+| `ltx` | `sha256:e568b43b5bb9c7735b83839f5826c1ef6e7ae7accb53a53e585fed41fe0e1d2c` |
 
 Checked after the push: each tag resolves anonymously on GHCR to the digest above. The CPU
 control smoke described next has not been rerun for this tag; it ran against the pushed `v0.2.3` base image and passed (receipt
