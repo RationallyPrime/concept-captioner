@@ -1,9 +1,10 @@
 # Running ConceptStudio
 
-The development preview is `app/dist/ConceptStudio.app`. Double-click it in Finder. It is
-unsigned; this preview has not been approved for distribution. If macOS blocks it, use the
-explicit Open Anyway action in System Settings → Privacy & Security after attempting to open
-the app. The app needs macOS 15 or newer. It needs no Python, terminal, GPU or development
+The development preview is `app/dist/ConceptStudio.app`. Double-click it in Finder. A debug
+build from source is unsigned: if macOS blocks it, use the explicit Open Anyway action in System
+Settings → Privacy & Security after attempting to open the app. A release build signed with a
+Developer ID and notarised (see [Building and distribution](#building-and-distribution)) opens
+normally; on first use, macOS asks once per saved key whether the app may read it from Keychain. The app needs macOS 15 or newer. It needs no Python, terminal, GPU or development
 environment to run.
 
 ## First run: the offline demo
@@ -168,7 +169,7 @@ and verifies the authenticated vLLM model endpoint. The app binds the in-memory 
 that user-selected endpoint; it is never copied into `job.yaml`. Caption and publish before
 starting training on a one-GPU computer. ConceptStudio automatically selects the included
 training image for the chosen trainer. A custom training image is optional in Advanced
-Settings; clearing and saving leaves the field blank (**Automatic**) and uses the current default
+Settings (shown with **Advanced user** on); clearing and saving leaves the field blank (**Automatic**) and uses the current default
 for the selected trainer when renting.
 
 The GPU list filters stock to the selected network volume’s data center. **No saved storage**
@@ -177,6 +178,24 @@ it. Storage charges continue while stopped. Start the same stopped computer to r
 uncollected results; the app refuses removal while those results remain unsettled or unsaved.
 A network volume can instead follow replacement computers in its own data center. RunPod’s
 reported refusal text is shown when a rental fails.
+
+Before renting, GPU pods lists anything still needed before training can start (media, a concept
+with its trigger, captions for a direct upload, or a published dataset) with a button to the
+step for the first item, because a rented computer bills while it waits. Rent stays available,
+since renting to caption on the computer is a real workflow. The same list appears above Start
+training. Work the app does for the computer, such as publishing the dataset it will train on,
+holds off the idle stop, and the idle countdown restarts when that work ends. When RunPod
+refuses to start a stopped computer because its host has no free GPU, the app says so and offers
+**Remove it to rent a new one…**, stating what removing it deletes from its pod disk.
+
+**Settings → Advanced user** (off by default) reveals the detailed controls: custom servers and
+training images in Settings, model and batch controls on Captioning, multiple concepts and
+caption overrides on Concepts, the starting-model field and Advanced training controls on
+Training. Turning it off resets nothing; each screen lists the non-default settings still in
+force. With it on, the model picker also offers 20 further AI Toolkit architectures marked
+**Unverified recipe**: AI Toolkit's own UI defaults at the pinned commit, each with its licence
+and the result of an upstream issue check, and no GPU-measured recipe behind them. They need a
+pod image built from a table that includes them.
 
 Training steps have a number field. For H3, Advanced exposes checkpoint cadence and retention,
 saved precision and image resolution buckets. The current Circlestone adapter requires
@@ -210,9 +229,9 @@ again when you reopen it; the copied files remain, but the unsubmitted selection
 **Resume latest checkpoint** instead continues a saved run on its original storage using
 that run's checkpoint and state.
 
-The default `v0.2.3-clean-20261011` images include these H3 additions. They have not yet run
-H3 training or generation on a rented GPU; source tests and clip inspection do not establish
-successful GPU execution.
+The default images have included these H3 additions since `v0.2.3-clean-20261011`. H3
+still-image training has completed on a rented GPU; H3 clip training, external warm-start,
+same-run Resume and matched H3 generation have not yet run there.
 
 With a configured Hub token, publishing sends included training targets and saved sidecars at the dataset root, imagefolder metadata, and
 `concept-captioner/job.yaml` in one Hub commit. The image names remain the shared sample IDs.
@@ -223,8 +242,8 @@ Without a Hub token, Publish shows **Check training data**. It checks the includ
 saved captions locally. **Start training** then captures a temporary immutable copy, uploads
 files directly through the authenticated pod agent and waits for dataset installation before
 launching the trainer. Each file is limited to 2 GiB and the dataset to 20 GiB. Editing is held
-only while the copies are captured. The default `v0.2.3-clean-20261011` agent includes this
-route; older r2 images do not. No Hub dataset account is needed, but access requirements for a
+only while the copies are captured. The default images have included this route since
+`v0.2.3-clean-20261011`; older r2 images do not. No Hub dataset account is needed, but access requirements for a
 gated base model such as FLUX.1-dev still apply.
 
 GPU rental displays
@@ -264,6 +283,12 @@ saved in the project gallery. A failed/incomplete comparison keeps downloaded pa
 shows a failure message; it is not presented as a saved complete pair. Unsupported model/trainer combinations show an explanation.
 Save trained model to this Mac retrieves the actual model files.
 
+**Save trained model to** on Training belongs to the open project. Signed in to Hugging Face, a
+project with no destination gets `<account>/<project>-lora`, which you can change; without a
+Hub token the result is saved in the project's results folder. Each run keeps the destination
+and privacy it started with, so a later push of a finished run never follows a different
+project's field.
+
 Saved training runs retain the dataset revision reported by the agent, settings, available
 checkpoints, outputs and recorded cost information. Load settings for repeat copies the selected
 run's settings into Training; edit them before starting a new run. It initially reuses that
@@ -286,12 +311,19 @@ Developers can build the preview from the repository root:
 scripts/build-app.sh debug
 # app/dist/ConceptStudio.app
 CONCEPTSTUDIO_SIGNING_IDENTITY='Developer ID Application: Your Name (TEAMID)' scripts/build-app.sh release
+# signed and notarised, with a notarytool keychain profile stored once:
+CONCEPTSTUDIO_SIGNING_IDENTITY='Developer ID Application: Your Name (TEAMID)' \
+  CONCEPTSTUDIO_NOTARY_PROFILE=<profile> scripts/build-app.sh release
 ```
 
 The script copies the executable and SwiftPM resource bundles and writes the app Info.plist.
 Debug builds remain unsigned unless a signing identity is supplied. Release builds require the
 named Developer ID Application identity in Keychain, sign with the declared sandbox entitlements,
-hardened runtime and timestamp, then verify the signature. Reusing the same identity gives
+hardened runtime and timestamp, then verify the signature and check that the sandbox entitlement is present. With
+`CONCEPTSTUDIO_NOTARY_PROFILE` set (a profile stored once with
+`xcrun notarytool store-credentials <profile>`), the script zips the app, submits it to Apple's
+notary service, waits, staples the ticket and assesses the result with `spctl`; nothing secret
+passes through the script. Reusing the same identity gives
 releases a stable code identity; this does not restore permissions already lost by a differently
 signed development build. The script does not launch the app. Tests use Swift Testing;
 `swift test` and `swiftlint lint --strict`
@@ -316,11 +348,10 @@ use the actual app for the human walkthrough. Ordinary `swift test` skips the re
 security-scoped bookmarks and network-client access. The bundle declares its Photos usage
 description; signed Photos-picker access still needs native verification. Network-server permission
 allows the temporary ChatGPT and OpenRouter sign-in callbacks, bound only to `127.0.0.1`; it is closed when
-sign-in finishes, is cancelled or times out. Distribution still needs a Developer ID certificate,
-the release signing command above, a zipped app or disk image submitted through `xcrun notarytool`,
-and a stapled notarization ticket. Only an Apple Development identity was present during the
-2026-10-12 source check, so no Developer ID signing or notarization was performed. See
+sign-in finishes, is cancelled or times out. On 2026-10-14 a release build was signed with a
+Developer ID, notarised (accepted) and stapled, and that sandboxed build completed a full training
+run: Keychain access, Hub publishing, renting, the pod agent, training, the push to the Hub and the
+idle stop (see [APP-STATUS](APP-STATUS.md#end-to-end-run-through-the-app-2026-10-14)). There is no
+public download yet. Photos-picker access and permission and bookmark persistence across builds
+still need verification in the signed build. See
 [Apple's distribution signing procedure](https://developer.apple.com/documentation/xcode/creating-distribution-signed-code-for-the-mac/).
-Verify
-Keychain, Photos permission and bookmark persistence in the signed sandboxed build before
-public distribution; compile-time compatibility does not establish that runtime evidence.

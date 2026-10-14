@@ -1,7 +1,16 @@
 # ConceptStudio app status
 
-Updated 2026-10-12 for the walkthrough/glossary integration. The baseline includes all seven hardening lanes and
-follow-up `cd5f746`, with the review corrections and owner acceptance below. Source checks,
+Updated 2026-10-14. A Developer ID-signed, notarised build has completed a full training run
+driven only through its own interface: rent, publish, regularisation images, training with REPA,
+the push to the Hub on finish, the saved-run record and the idle stop. See
+[the run below](#end-to-end-run-through-the-app-2026-10-14). The app defaults to the
+`v0.3.3-20261014` pod images. The model table has five verified recipes, and an **Advanced user**
+switch in Settings gathers the detailed controls and 20 unverified AI Toolkit recipes. There is
+no public download yet. The sections that follow are dated records; each keeps the scope of
+what was tested at the time.
+
+The 2026-10-12 baseline, for the walkthrough/glossary integration, includes all seven hardening
+lanes and follow-up `cd5f746`, with the review corrections and owner acceptance below. Source checks,
 native offline demo checks and bounded FLUX/LTX generation, resume and video training checks
 have completed. The GPU proofs predate the review repairs: FLUX used r1; LTX used r2.
 The current `v0.2.3-clean-20261011` images contain the review repairs, direct upload and the H3
@@ -35,7 +44,8 @@ and **315 pod-script tests** passed. Strict SwiftLint reports zero violations; S
 Python Ruff/format are clean. Independent source
 review accepted project/provider/UI changes; the integration review closed startup settlement
 and output-custody defects. Visual/native checks and delivery receipts are recorded in the repair
-record. Developer ID signing remains unavailable on this Mac.
+record. Developer ID signing was not yet available on this Mac at that point; it was set up on
+2026-10-14.
 
 ## Model table
 
@@ -53,6 +63,22 @@ Qwen-Image-2.1 count their training length in epochs (the app sends steps) and s
 notice and first-download size under the picker. Both compare through the `aitoolkit_arch_image`
 generator hook; Z-Image's picker note says a Z-Image LoRA works on Z-Image-Turbo at about twice the
 strength. Qwen-Image-2.1 is offered only on GPUs with at least 80 GB.
+
+Each row has a `recipe_status`. The five rows above are `verified`. Twenty `unverified` rows carry AI
+Toolkit's own UI defaults for further architectures at the pinned commit (FLUX.2, the FLUX.2 klein
+models, Chroma, SDXL, Lumina 2, HiDream-O1, Krea 2 and others), each with its licence notice, a
+conservative GPU floor and a `training_notice` from an upstream issue check. The picker offers them
+only while **Settings → Advanced user** is on, labelled *Unverified recipe*. No GPU run has used
+one; they train once a pod image is built from a table that includes them. Superseded models get
+no row (owner decision, 2026-10-14; listed in [model-table.md](../../docs/model-table.md)).
+
+## Advanced user switch
+
+**Settings → Advanced user**, off by default and remembered per install, shows or hides the five
+detailed areas: custom servers and training images (Settings), model and batch controls
+(Captioning), multiple concepts and caption overrides (Concepts, two places), and the starting-model
+field with Advanced training controls (Training). Turning it off resets nothing: each screen
+lists the non-default settings still in force, and says to turn the switch on to edit them.
 
 ## Regularisation images and REPA
 
@@ -315,6 +341,42 @@ they supersede the earlier pending account/captioning notes. The OpenRouter cred
 was not separately recorded, so this does not prove a particular OAuth callback URL. These
 checks do not establish a quality comparison or every model's video support.
 
+## End-to-end run through the app, 2026-10-14
+
+The first training run driven entirely through the app's interface used a Developer ID-signed,
+notarised and stapled release build. On first use, the notarised build asked once per stored key
+for Keychain access. The project used a real single-person image dataset. In order:
+
+- **Publish:** the app published the dataset to a private Hub repository.
+- **Rent:** it rented one RTX PRO 6000 (96 GB) on the `v0.3.3-20261014` AI Toolkit image, with a
+  persistent pod disk.
+- **Regularisation:** the `draw-regularization` service drew 40 regularisation images with the
+  base model, and the project's captioner described them without the trigger.
+- **Training:** Qwen-Image-2.1 trained for 10,004 steps with regularisation and REPA (DINOv2
+  giant, block 8, weight 0.5), saving checkpoints every 500 steps. It took 1 h 19 min.
+- **Push:** when the trainer finished, the agent pushed the final LoRA to a private Hub model
+  repository.
+- **Record:** Saved runs recorded the model, dataset, length, regularisation, REPA, destination
+  and the run's GPU cost: US$3.99 against a US$10 run budget.
+- **Idle stop:** the app stopped the idle computer by itself.
+
+The run surfaced five problems, all since fixed:
+
+- Removing a computer that no longer existed under the current RunPod key failed with a 404
+  (#16).
+- The training destination carried over from another project.
+- Renting was possible before publishing, and the idle stop counted the app's own upload as idle
+  time. A stopped computer's host then had no free GPU, which needed a clear way out.
+- A stale "(404)" status line remained while the trainer had not yet created its events.
+- The run-budget field had no label.
+
+PR #17 fixed the last four. Only the final LoRA was pushed automatically; the intermediate
+checkpoints stayed on the pod disk until copied separately. This run establishes that the signed
+sandboxed build and the v0.3.3 images work end to end. It says nothing about the trained model's
+quality, which is evaluated separately.
+
+## Remaining acceptance and limits
+
 Owner acceptance and distribution still pending:
 
 - Live checks of direct upload, storage cleanup and repaired generation/Resume on the
@@ -326,8 +388,9 @@ Owner acceptance and distribution still pending:
   handshake are verified separately; no GPU was restarted solely for this UI check.
 - A follow-up walkthrough of these repairs. The owner/Claude walkthrough and first real
   H3 still-image training run have completed; this new UI has separate acceptance below.
-- VoiceOver acceptance, Photos permission/bookmark persistence in a signed sandboxed build,
-  Developer ID signing and notarization. The preview remains unsigned.
+- VoiceOver acceptance, and Photos permission and bookmark persistence across builds in the
+  signed sandboxed build. Developer ID signing and notarisation are done (2026-10-14); a public
+  download is not yet published.
 
 The app's budget and idle limits run on the Mac. They cannot stop a rented computer while the
 app is absent or the Mac is asleep. Launch reconciliation resumes those guards. Separately
