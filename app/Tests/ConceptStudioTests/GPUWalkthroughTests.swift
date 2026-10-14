@@ -181,7 +181,10 @@ struct GPUWalkthroughTests {
             "save_every": .int(300), "max_step_saves_to_keep": .int(40), "dtype": .string("float32"),
         ]))
         #expect(params["extra"]?.objectValue?["train"]?.objectValue?["do_guidance_loss"] == .bool(false))
-        workspace.nativeRecipe = try NativeTrainingRecipe.load(Data(H3TrainingTests.recipe.utf8))
+        workspace.nativeRecipe = try NativeTrainingRecipe.load(
+            Data(H3TrainingTests.recipe.utf8),
+            row: H3TrainingTests.h3Row
+        )
         workspace.checkpointEvery = 123
         workspace.checkpointRetention = 8
         workspace.checkpointPrecision = "bfloat16"

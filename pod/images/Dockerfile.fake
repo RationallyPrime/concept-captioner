@@ -16,6 +16,8 @@ RUN pip install --no-cache-dir /opt/src/agent \
 COPY pod/images/entrypoint.sh /opt/pod/entrypoint.sh
 COPY pod/scripts/*.py /opt/pod/scripts/
 COPY app/Sources/ConceptStudio/Resources/Training/h3-recipe-fields.json /opt/pod/scripts/h3-recipe-fields.json
+# The model table (the app's own file); the scripts and the agent read it as /opt/pod/scripts/model-table.json.
+COPY app/Sources/ConceptStudio/Resources/Training/model-table.json /opt/pod/scripts/model-table.json
 # One LTX rule file (preprocess allowlist, pinned Hub source) for the API and the isolated wrapper.
 COPY pod/agent/src/podagent/ltx_rules.py /opt/pod/agent/src/podagent/ltx_rules.py
 RUN chmod +x /opt/pod/entrypoint.sh

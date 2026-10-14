@@ -174,7 +174,7 @@ struct StudioProject {
         try FileManager.default.createDirectory(at: images, withIntermediateDirectories: true)
         let project = try StudioProject(
             directory: directory,
-            job: Job(profile: "flux-image", concepts: []),
+            job: Job(profile: ModelTable.shared.defaultRow.captions.imageProfile, concepts: []),
             images: []
         )
         guard !FileManager.default.fileExists(atPath: project.jobURL.path) else {

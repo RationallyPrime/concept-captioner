@@ -1,0 +1,483 @@
+{
+  "format": "conceptstudio-model-table",
+  "version": 1,
+  "default_model": "flux1-dev",
+  "trainers": {
+    "aitoolkit": {
+      "min_cuda": "13.0",
+      "default_model": "flux1-dev"
+    },
+    "ltx": {
+      "min_cuda": "13.0",
+      "default_model": "ltx-2"
+    }
+  },
+  "models": [
+    {
+      "id": "flux1-dev",
+      "display_name": "FLUX.1-dev",
+      "short_name": "FLUX",
+      "trainer": "aitoolkit",
+      "model_ref": "black-forest-labs/FLUX.1-dev",
+      "source": {
+        "revision": null,
+        "gated": true,
+        "first_download_gb": 33.8,
+        "download_note": "Diffusers transformer, both text encoders, VAE, tokenizers and scheduler. AI Toolkit downloads them on first use; the revision is not pinned."
+      },
+      "architecture": {
+        "arch": "flux",
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": null,
+        "gradient_checkpointing": true,
+        "model_extra": {
+          "is_flux": true
+        }
+      },
+      "family_match": {
+        "substrings": ["flux"],
+        "tokens": []
+      },
+      "resolution": {
+        "choices": [512, 768, 1024],
+        "default": [512],
+        "multiple": false
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 200
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 16,
+        "alpha": 16,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "float16",
+          "editable": false
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 32,
+        "verify_on_pod": false,
+        "note": "The included FLUX and LTX defaults were tested on 32 GB GPUs.",
+        "verify_message": null
+      },
+      "video": null,
+      "preview": {
+        "training_samples": true,
+        "still": true,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "flux-image",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "flux-image": "FLUX · image captions"
+        }
+      },
+      "selection": {
+        "follows_project_profile": true
+      },
+      "license": {
+        "id": "flux-1-dev-non-commercial-license",
+        "name": "FLUX.1 [dev] Non-Commercial License",
+        "url": "https://huggingface.co/black-forest-labs/FLUX.1-dev/blob/main/LICENSE.md",
+        "notice": "FLUX.1-dev is released under the FLUX.1 [dev] Non-Commercial License. Read it before using this model, a LoRA trained on it, or their outputs commercially. The download needs a Hugging Face token from an account that has accepted the licence on the model page.",
+        "show_notice": false
+      },
+      "hooks": {
+        "generator": "aitoolkit_image"
+      },
+      "notes": "Default model. Image-only. AI Toolkit FLUX settings: 8-bit quantised transformer, bf16 training, gradient checkpointing, AdamW8bit, flowmatch."
+    },
+    {
+      "id": "ltx-2",
+      "display_name": "LTX-2",
+      "short_name": "LTX",
+      "trainer": "ltx",
+      "model_ref": "Lightricks/LTX-2",
+      "source": {
+        "revision": "dfcc2108383fe1aaa0584bdf55d368a4bdadd90c",
+        "gated": false,
+        "first_download_gb": 92.1,
+        "download_note": "The 22 files launch_ltx.py prepares at the pinned revision: the ltx-2-19b-dev checkpoint, the Gemma text encoder and its tokenizer."
+      },
+      "architecture": {
+        "arch": null,
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {}
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [512, 768, 1024],
+        "default": [512],
+        "multiple": false
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 200
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 16,
+        "alpha": 16,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": null,
+          "editable": false
+        }
+      },
+      "trainer_options": {
+        "run_extra": {
+          "optimization": {
+            "optimizer_type": "adamw8bit"
+          },
+          "acceleration": {
+            "quantization": "int8-quanto",
+            "load_text_encoder_in_8bit": true,
+            "offload_optimizer_during_validation": true
+          },
+          "preprocess": {
+            "args": ["--load-text-encoder-in-8bit", "--vae-tiling", "--skip-audio"]
+          }
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 32,
+        "verify_on_pod": false,
+        "note": "The included FLUX and LTX defaults were tested on 32 GB GPUs.",
+        "verify_message": null
+      },
+      "video": {
+        "title": "LTX",
+        "frame_law": {
+          "first": 1,
+          "step": 8
+        },
+        "fixed_fps": null,
+        "min_frames": 9,
+        "initial_frames": 33,
+        "duration_choices": [9, 17, 33, 49, 97, 129, 257],
+        "select_whole_clip": false
+      },
+      "preview": {
+        "training_samples": true,
+        "still": false,
+        "video": {
+          "min_frames": 9,
+          "max_frames": 257,
+          "choices": [17, 49, 97, 129],
+          "default_frames": 49
+        }
+      },
+      "captions": {
+        "image_profile": "ltx-image",
+        "video_profile": "ltx-video",
+        "profile_prefix": "ltx-",
+        "titles": {
+          "ltx-image": "LTX · image captions",
+          "ltx-video": "LTX · video captions"
+        }
+      },
+      "selection": {
+        "follows_project_profile": true
+      },
+      "license": {
+        "id": "ltx-2-community-license-agreement",
+        "name": "LTX-2 Community License Agreement",
+        "url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE",
+        "notice": "LTX-2 is released under the LTX-2 Community License Agreement. Read its terms before using this model, a LoRA trained on it, or their outputs commercially.",
+        "show_notice": false
+      },
+      "hooks": {
+        "generator": "ltx_one_stage",
+        "run_extra": "ltx_video_buckets"
+      },
+      "notes": "Separate LTX-2 trainer image (launch_ltx.py). Images and 8n+1-frame clips. The pinned Hub source and preprocess allowlist live in pod/agent/src/podagent/ltx_rules.py; this row mirrors them."
+    },
+    {
+      "id": "minimax-h3",
+      "display_name": "MiniMax H3",
+      "short_name": "H3",
+      "trainer": "aitoolkit",
+      "model_ref": "Comfy-Org/MiniMax-H3",
+      "source": {
+        "revision": "e5eb578a89295337b8ff433a035929ce0279e0b6",
+        "gated": false,
+        "first_download_gb": 98.2,
+        "download_note": "The four BF16 components named in h3-recipe-fields.json at the pinned revision (DiT 40.2 GB, Qwen3-VL text encoder 51.5 GB, video and audio VAEs), plus the 0.6 GB Circlestone training adapter."
+      },
+      "architecture": {
+        "arch": "minimax_h3",
+        "dtype": "bf16",
+        "quantize": false,
+        "quantize_text_encoder": false,
+        "gradient_checkpointing": true,
+        "model_extra": {}
+      },
+      "family_match": {
+        "substrings": ["minimax", "hailuo"],
+        "tokens": ["h3"]
+      },
+      "resolution": {
+        "choices": [512, 768, 1024],
+        "default": [768, 1024],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 200
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw",
+        "rank": 16,
+        "alpha": 16,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 300,
+          "keep": 40,
+          "dtype": "float32",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 96,
+        "verify_on_pod": true,
+        "note": "H3's known training reference used a 96 GB GPU; recipe and resolution still affect fit.",
+        "verify_message": "This H3 recipe's known reference used a 96 GB GPU. Choose a computer with at least that memory before uploading inputs. Fit still depends on the recipe."
+      },
+      "video": {
+        "title": "MiniMax H3",
+        "frame_law": {
+          "first": 5,
+          "step": 17
+        },
+        "fixed_fps": 24,
+        "min_frames": 5,
+        "initial_frames": 39,
+        "duration_choices": null,
+        "select_whole_clip": true
+      },
+      "preview": {
+        "training_samples": true,
+        "still": true,
+        "video": {
+          "min_frames": 5,
+          "max_frames": 257,
+          "choices": [1, 5, 22, 39, 73, 124, 243],
+          "default_frames": 39
+        }
+      },
+      "captions": {
+        "image_profile": "h3-still",
+        "video_profile": "h3-video",
+        "profile_prefix": "h3-",
+        "titles": {
+          "h3-still": "H3 · still-image captions",
+          "h3-video": "H3 · video captions"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "minimax-h3-community-license-agreement",
+        "name": "MiniMax H3 Community License Agreement",
+        "url": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE",
+        "notice": "MiniMax H3 and the Circlestone training adapter are released under the MiniMax H3 Community License Agreement. Read its terms before using this model, a LoRA trained on it, or their outputs commercially.",
+        "show_notice": false
+      },
+      "hooks": {
+        "trainer_config": "minimax_h3",
+        "native_recipe": "minimax_h3",
+        "generator": "minimax_h3"
+      },
+      "notes": "AI Toolkit minimax_h3 registration, BF16 DiT and Qwen encoder, frozen Circlestone image-training adapter (guidance preservation loss must stay off while it is used). Images and 17n+5-frame clips at exactly 24 fps. Native recipe import and warm start. The quality recipe lives in pod/scripts/h3_recipe.py; this row mirrors it."
+    },
+    {
+      "id": "z-image",
+      "display_name": "Z-Image",
+      "short_name": "Z-Image",
+      "trainer": "aitoolkit",
+      "model_ref": "Tongyi-MAI/Z-Image",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 20.5,
+        "download_note": "Diffusers transformer (12.3 GB), Qwen3 text encoder (8.0 GB), VAE, tokenizer and scheduler. AI Toolkit downloads them on first use; the revision is not pinned."
+      },
+      "architecture": {
+        "arch": "zimage",
+        "dtype": "bf16",
+        "quantize": false,
+        "quantize_text_encoder": false,
+        "gradient_checkpointing": false,
+        "model_extra": {}
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [512, 768, 1024],
+        "default": [768],
+        "multiple": false
+      },
+      "recipe": {
+        "length": {
+          "unit": "epochs",
+          "value": 150
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 500,
+          "keep": 20,
+          "dtype": "bf16",
+          "editable": false
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 96,
+        "verify_on_pod": false,
+        "note": "Z-Image's default recipe (768 px, no gradient checkpointing) is set up for 96 GB GPUs.",
+        "verify_message": null
+      },
+      "video": null,
+      "preview": {
+        "training_samples": true,
+        "still": true,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "flux-image",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "flux-image": "FLUX · image captions"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "apache-2.0",
+        "name": "Apache License 2.0",
+        "url": "https://github.com/Tongyi-MAI/Z-Image/blob/main/LICENSE",
+        "notice": "Z-Image is released under the Apache License 2.0. Read its terms before redistributing the model or a LoRA trained on it.",
+        "show_notice": true
+      },
+      "usage_note": "A LoRA trained on Z-Image also works on Z-Image-Turbo, at about twice the strength.",
+      "hooks": {
+        "generator": "aitoolkit_arch_image"
+      },
+      "notes": "Undistilled base model, AI Toolkit arch zimage (not zimage_l2p), read from the standard diffusers layout (transformer/, text_encoder/ Qwen3, tokenizer/, vae/) that AI Toolkit's ZImageModel expects. bf16, no quantisation, no gradient checkpointing, 768 px, AdamW at 1e-4, rank and alpha 32, batch 1, 150 epochs. Checkpoint cadence is in steps: every 500 steps, newest 20 kept. A LoRA trained on this base model works on Z-Image-Turbo at about twice the strength; that is shown as a note in the picker and on the model card and is never applied automatically."
+    },
+    {
+      "id": "qwen-image-2.1",
+      "display_name": "Qwen-Image-2.1",
+      "short_name": "Qwen",
+      "trainer": "aitoolkit",
+      "model_ref": "Qwen/Qwen-Image-2.1",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 32.5,
+        "download_note": "The bf16 transformer (14.2 GB), the bf16 Qwen3-VL-8B text encoder (17.5 GB) and the VAE (0.7 GB) from the Comfy-Org/Qwen-Image-2.1 repack, plus the processor and configs from Qwen/Qwen-Image-2.1 (under 0.1 GB). AI Toolkit downloads them on first use into its own models folder (MODELS_PATH, by default /opt/ai-toolkit/models), which is on the pod's container disk rather than the /workspace volume, so the download repeats on a new pod. The revisions are not pinned."
+      },
+      "architecture": {
+        "arch": "qwen_image_2",
+        "dtype": "bf16",
+        "quantize": false,
+        "quantize_text_encoder": false,
+        "gradient_checkpointing": false,
+        "model_extra": {}
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [512, 768],
+        "default": [768],
+        "multiple": false
+      },
+      "recipe": {
+        "length": {
+          "unit": "epochs",
+          "value": 400
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 8,
+          "dtype": "bf16",
+          "editable": false
+        }
+      },
+      "trainer_options": {
+        "process": {
+          "train": {
+            "timestep_type": "shift",
+            "lr_scheduler": "constant_with_warmup",
+            "lr_scheduler_params": {
+              "num_warmup_steps": 50
+            },
+            "cache_text_embeddings": true
+          }
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 80,
+        "verify_on_pod": false,
+        "note": "Qwen-Image-2.1 trains in bf16 with no quantisation, so it needs a large card.",
+        "verify_message": null
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "qwen-research",
+        "name": "Qwen Research License Agreement",
+        "url": "https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE",
+        "notice": "Qwen-Image-2.1 is released under the Qwen Research License Agreement, which allows non-commercial research or evaluation use only; commercial use needs a separate licence from its authors. If you share a LoRA made with it, the licence requires \"Built with Qwen\" or \"Improved using Qwen\" in the LoRA's documentation.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "AI Toolkit qwen_image_2 (one architecture for text-to-image and editing; this row trains plain text-to-image LoRAs). bf16, no quantisation, no gradient checkpointing, 768 px, AdamW at 1e-4 with a 50-step constant warmup, rank and alpha 32, timestep_type shift (AI Toolkit's own default for this architecture), cached text embeddings (the trainer then unloads the 17.5 GB text encoder from the GPU after caching), batch 1, 400 epochs. Checkpoint cadence is in steps: every 250 steps, newest 8 kept. 1024 px is not offered. Preview is off: aitoolkit_image builds the legacy StableDiffusion class, which does not serve qwen_image_2. Weights come from the Comfy-Org repack through AI Toolkit's own resolver, which picks the bf16 files when quantisation is off."
+    }
+  ]
+}

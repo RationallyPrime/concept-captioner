@@ -17,7 +17,7 @@ struct CaptioningView: View {
 
     var captionFormatSelection: Binding<String> {
         Binding(
-            get: { session.project?.job.profile ?? "flux-image" },
+            get: { session.project?.job.profile ?? ModelTable.shared.defaultRow.captions.imageProfile },
             set: { profile in
                 guard !session.demoMode else { return }
                 session.project?.job.profile = profile
@@ -52,7 +52,7 @@ struct CaptioningView: View {
                             ).disabled(session.busy)
                         }
                         Picker("Caption format", selection: captionFormatSelection) {
-                            ForEach(profiles, id: \.self) { Text(profileTitle($0)).tag($0) }
+                            ForEach(profiles, id: \.self) { Text(Self.profileTitle($0)).tag($0) }
                         }.disabled(session.demoMode)
                     }.formStyle(.columns).disabled(session.busy)
                     if !session.demoMode && !(session.endpointKind == "openai" && session.openAIUsesChatGPT) {
@@ -332,18 +332,14 @@ struct CaptioningView: View {
     }
 
     private var profiles: [String] {
-        (try? session.selectedSkill().profiles()) ?? [session.project?.job.profile ?? "flux-image"]
+        (try? session.selectedSkill().profiles())
+            ?? [session.project?.job.profile ?? ModelTable.shared.defaultRow.captions.imageProfile]
     }
 
-    private func profileTitle(_ profile: String) -> String {
-        [
-            "flux-image": "FLUX · image captions",
-            "ltx-image": "LTX · image captions",
-            "ltx-video": "LTX · video captions",
-            "h3-still": "H3 · still-image captions",
-            "h3-video": "H3 · video captions",
-            "plain": "Plain prose",
-        ][profile] ?? profile
+    /// The title the table gives a profile, "Plain prose" for the one profile no model owns, else the profile.
+    static func profileTitle(_ profile: String) -> String {
+        if profile == "plain" { return "Plain prose" }
+        return ModelTable.shared.captionTitles[profile] ?? profile
     }
 }
 

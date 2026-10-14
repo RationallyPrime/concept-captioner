@@ -1,6 +1,6 @@
 # App walkthrough with the owner, 2026-10-11
 
-Hákon and Claude walk ConceptStudio screen by screen on a build of `main` (1515c50). Decisions
+The owner and Claude walk ConceptStudio screen by screen on a build of `main` (1515c50). Decisions
 below are the owner's unless marked as observations. Each becomes work for the app seat once the
 walkthrough is done.
 
@@ -45,7 +45,7 @@ Verified working live: ChatGPT plan connection test, OpenRouter key usage refres
 Side note: two copies of the app (main and the app seat's working copy) share one set of
 preferences; the stale copy can write an old training image override back.
 
-## Real project (Diffusion-Fun: 22 new video stills joining a captioned 47-photo set)
+## Real project (22 new video stills joining a captioned 47-photo set)
 
 7. **Observation: a new project starts with the demo's concept.** Its job.yaml held the demo's
    fictional `NORA7` person and the FLUX caption format. A real project should start without a
@@ -71,7 +71,7 @@ preferences; the stale copy can write an old training image override back.
     hand. Add a way to accept suggestions, at least all of them at once, with per-sample review
     still possible.
    For this project, all 69 mappings were written directly into job.yaml with the project closed
-   (30 Erla, 30 Gunnar, 9 pairs; the old set's from its reviewed captions, the new frames by eye),
+   (30 and 30 single-subject mappings, 9 pairs; the old set's from its reviewed captions, the new frames by eye),
    then validated with the CLI and confirmed by the app on reopening.
 13. **Decided: model lists come from the provider.** Captioning shows a model dropdown for ChatGPT
     but only a free-text field for other providers, and switching provider (to Google Gemini)
@@ -121,12 +121,12 @@ preferences; the stale copy can write an old training image override back.
 
 ## First real training run (2026-10-12)
 
-Diffusion-Fun / Grease: 69 samples (47 earlier captioned photos + 22 new video stills captioned with
-`gemini-flash-latest`, H3 still format), published privately as `RationallyPrime/Grease` at
+The project: 69 samples (47 earlier captioned photos + 22 new video stills captioned with
+`gemini-flash-latest`, H3 still format), published privately to the Hub at
 `6102d707`. MiniMax-H3 (`Comfy-Org/MiniMax-H3` + pinned training adapter), AI Toolkit image
 `v0.2.3-clean-20261011`, one RTX PRO 6000 in CA-MTL-3 with a new 300 GB network volume. 3,000 steps,
 1,024 px, rank/alpha 32 on blocks 20–49, accumulation 2, lr 1e-4, about 1.1 steps/s. The LoRA
-(179 MB) was pushed to private `RationallyPrime/grease-erla-gunnar-h3-v3`; the pod was stopped after
+(179 MB) was pushed to a private model repo; the pod was stopped after
 72 minutes (about $3 GPU). Pod env held only RunPod secret placeholders (ticket 3 confirmed live).
 
 Recipe questions for the app seat. Corrected 2026-10-12: the owner's two earlier runs used different
@@ -146,7 +146,5 @@ training adapters, and the app recipe follows v2, not v1.
     adapter, the guidance loss belongs with that choice.
 25. **Resolution:** one value only (512, 768 or 1,024); v1 and v2 used buckets 768 and 1,024.
 
-Owner's verdict on the comparison renders (same seed and graphs, 2026-10-12): v3 gives the best Gunnar
-but loses Erla's likeness. Next experiment: an Erla-only adapter on v1's recipe.
 26. **Observation: steppers for large values.** Training steps moves in 25s with no text entry;
     reaching 3,000 took a long hold. A number field would serve better.

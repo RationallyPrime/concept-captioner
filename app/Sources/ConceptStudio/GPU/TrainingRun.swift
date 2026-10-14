@@ -69,26 +69,60 @@ struct TrainingRun: Codable, Equatable, Identifiable {
         }
     }
 
+    /// The table's row for this run's trainer and base model, if it has one (a custom model has none).
+    func modelRow(in table: ModelTable = .shared) -> ModelRow? {
+        table.exact(trainer: trainer, baseModel: baseModel)
+    }
+
+    /// The row whose defaults and capabilities apply to this run: the exact row, else the trainer's default.
+    func effectiveModelRow(in table: ModelTable = .shared) -> ModelRow {
+        table.effective(trainer: trainer, baseModel: baseModel)
+    }
+
+    /// Whether comparison generation can run this run's checkpoints: its exact row names a generator.
+    func supportsGeneration(in table: ModelTable) -> Bool {
+        modelRow(in: table)?.hooks.generator != nil
+    }
+
+    /// Whether comparisons of this run are clips rather than images.
+    func generatesVideo(in table: ModelTable) -> Bool {
+        effectiveModelRow(in: table).preview.video != nil
+    }
+
+    /// The frame count a comparison starts with. A model without preview clips generates one frame.
+    func defaultGenerationFrames(in table: ModelTable) -> Int {
+        effectiveModelRow(in: table).preview.video?.defaultFrames ?? 1
+    }
+
+    /// The rate comparison clips are generated at: the model's fixed rate, else 24 fps.
+    func generationFrameRate(in table: ModelTable) -> Int {
+        effectiveModelRow(in: table).video?.fixedFPS ?? Self.defaultGenerationFrameRate
+    }
+
+    static let defaultGenerationFrameRate = 24
+
     var supportsGeneration: Bool {
-        (trainer == "aitoolkit" && baseModel == "black-forest-labs/FLUX.1-dev")
-            || isH3
-            || (trainer == "ltx" && baseModel == "Lightricks/LTX-2")
+        supportsGeneration(in: .shared)
     }
 
     var isH3: Bool {
-        trainer == "aitoolkit" && baseModel == GPUWorkspace.h3BaseModel
+        modelRow()?.hooks.nativeRecipe == .minimaxH3
     }
 
     var generatesVideo: Bool {
-        trainer == "ltx" || isH3
+        generatesVideo(in: .shared)
     }
 
     var defaultGenerationFrames: Int {
-        isH3 ? 39 : 49
+        defaultGenerationFrames(in: .shared)
+    }
+
+    var generationFrameRate: Int {
+        generationFrameRate(in: .shared)
     }
 
     var generationFrameChoices: [Int] {
-        isH3 ? [1, 5, 22, 39, 73, 124, 243] : [17, 49, 97, 129]
+        effectiveModelRow().preview.video?.choices ?? []
     }
 }
 
@@ -251,11 +285,12 @@ extension GPUWorkspace {
         }
         trainer = run.trainer
         baseModel = run.baseModel
-        steps = run.targetSteps
+        let row = run.effectiveModelRow(in: modelTable)
         rank = run.rank
         alpha = run.params["alpha"]?.intValue ?? rank
         batchSize = run.params["batch_size"]?.intValue ?? 1
         accumulation = run.params["gradient_accumulation"]?.intValue ?? 1
+        steps = lengthToRepeat(run, row: row)
         nativeRecipe = nil
         nativeRecipeOriginal = nil
         initialCheckpoint = nil
@@ -263,17 +298,22 @@ extension GPUWorkspace {
         if let values = run.params["resolution"]?.arrayValue?.compactMap(\.intValue) {
             trainingResolutions = values
         } else if let value = run.params["resolution"]?.intValue { trainingResolutions = [value] }
-        checkpointEvery = run.params["save_every"]?.intValue ?? (run.isH3 ? 300 : 250)
+        checkpointEvery = run.params["save_every"]?.intValue ?? row.recipe.checkpoints.every
         let save = run.params["extra"]?.objectValue?["save"]?.objectValue ?? [:]
-        checkpointRetention = save["max_step_saves_to_keep"]?.intValue ?? (run.isH3 ? 40 : 4)
-        checkpointPrecision = save["dtype"]?.stringValue ?? (run.isH3 ? "float32" : "float16")
-        let train = run.params["extra"]?.objectValue?["train"]?.objectValue ?? [:]
-        guidanceLoss = train["do_guidance_loss"]?.boolValue ?? false
-        guidanceTargetText = String(
-            data: (train["guidance_loss_target"] ?? .double(3.5)).pythonDumpsData(), encoding: .utf8
-        ) ?? "3.5"
+        checkpointRetention = save["max_step_saves_to_keep"]?.intValue ?? row.recipe.checkpoints.keep
+        checkpointPrecision = save["dtype"]?.stringValue ?? modelTable.checkpointPrecision(for: row)
+        if let hook = run.modelRow(in: modelTable)?.hooks.nativeRecipe {
+            let train = run.params["extra"]?.objectValue?["train"]?.objectValue ?? [:]
+            guidanceLoss = train["do_guidance_loss"]?.boolValue ?? false
+            guidanceTargetText = String(
+                data: (train["guidance_loss_target"] ?? .double(3.5)).pythonDumpsData(), encoding: .utf8
+            ) ?? hook.defaultGuidanceTarget
+        } else {
+            guidanceLoss = false
+            guidanceTargetText = Self.defaultGuidanceTarget
+        }
         triggerWords = run.params["triggers"]?.arrayValue?.compactMap(\.stringValue).joined(separator: ",") ?? ""
-        profile = run.params["profile"]?.stringValue ?? "flux-image"
+        profile = run.params["profile"]?.stringValue ?? modelTable.defaultRow.captions.imageProfile
         seed = run.params["seed"]?.intValue ?? 42
         if let cap = run.gpuBudgetUSD { runBudget = cap }
         datasetContainsVideo = run.datasetContainsVideo
@@ -284,6 +324,13 @@ extension GPUWorkspace {
             + "Dataset: \(run.datasetDescription)."
     }
 
+    /// A saved run holds optimizer steps. A model that counts epochs shows them as passes over the current items.
+    private func lengthToRepeat(_ run: TrainingRun, row: ModelRow) -> Int {
+        guard row.recipe.lengthUnit == .epochs, datasetItemCount > 0 else { return run.targetSteps }
+        let perStep = Double(max(1, batchSize * accumulation))
+        return max(1, Int((Double(run.targetSteps) * perStep / Double(datasetItemCount)).rounded()))
+    }
+
     func resumeRun(
         _ run: TrainingRun, totalSteps: Int, captureLocal: (@MainActor () async throws -> LocalTrainingDataset)? = nil
     ) async {
@@ -292,7 +339,7 @@ extension GPUWorkspace {
                   self.currentVolumeID == run.volumeID else {
                 throw StudioError.message("Resume needs the same trainer and this run's saved storage.")
             }
-            try Self.validateH3Guidance(run)
+            try Self.validateH3Guidance(run, table: self.modelTable)
             guard totalSteps > run.latestStep, !self.resultNeedsSaving else {
                 throw StudioError.message("Retrieve pending outputs first, then choose a total above the latest step.")
             }
@@ -322,7 +369,9 @@ extension GPUWorkspace {
                 throw StudioError.message("Finish the current GPU action before resuming training.")
             }
             let plan = try await agent.plan()
-            if run.isH3 { try await self.validateH3Computer(agent, gpus: plan.train?.gpus ?? []) }
+            if let row = run.modelRow(in: self.modelTable), row.gpu.verifyOnPod {
+                try await self.verifyGPUMemory(agent, gpus: plan.train?.gpus ?? [], row: row)
+            }
             var params = run.params
             params["steps"] = .int(totalSteps)
             params["resume"] = .bool(true)

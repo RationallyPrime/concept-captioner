@@ -22,7 +22,7 @@ runtime behavior disagrees with the contract, repair the implementation and reco
 - Use synthetic or explicitly authorized test data. Bound operational checks; do not turn them
   into a quality-training campaign. Secure outputs and stop paid compute when useful work ends.
 - Ordinary commits and pushes to the lab repository are authorized. Re-staging remains deferred
-  until Hákon requests it.
+  until the owner requests it.
 
 ## What must be shown to work, in order
 

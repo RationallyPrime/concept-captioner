@@ -48,7 +48,7 @@ extension GPUWorkspace {
                 offer: offer, count: gpuCount,
                 image: (override.isEmpty ? StudioSession.defaultPodImageName : override)
                     .replacingOccurrences(of: "{trainer}", with: trainer),
-                minCudaVersion: Self.minimumCUDA(trainer), volume: volume, env: credentials.env
+                minCudaVersion: modelTable.minimumCUDA(trainer), volume: volume, env: credentials.env
             ))
         } catch {
             try? await provider.deleteSecret(name: credentials.agentSecret)

@@ -36,7 +36,7 @@ are distinguished in [POD-STATUS](../docs/POD-STATUS.md).
 
 | file | purpose |
 | --- | --- |
-| `Dockerfile.base` | CUDA 12.8 runtime + CPython 3.12 + uv; `/opt/venvs/vllm` (vLLM and its torch), `/opt/venvs/agent` (podagent[pod], concept-captioner[hf], tensorboard, huggingface_hub, datasets, Pillow); `/opt/pod/scripts/*.py` plus `ltx_rules.py`; entrypoint. The build fails if a flag in the agent's vLLM allowlist is absent from the installed vLLM (`check_vllm_flags.py`) |
+| `Dockerfile.base` | CUDA 12.8 runtime + CPython 3.12 + uv; `/opt/venvs/vllm` (vLLM and its torch), `/opt/venvs/agent` (podagent[pod], concept-captioner[hf], tensorboard, huggingface_hub, datasets, Pillow); `/opt/pod/scripts/*.py` plus `model-table.json` (the model table) and `ltx_rules.py`; entrypoint. The build fails if a flag in the agent's vLLM allowlist is absent from the installed vLLM (`check_vllm_flags.py`) |
 | `Dockerfile.aitoolkit` | base + `ostris/ai-toolkit` at a pinned commit in `/opt/ai-toolkit`, venv `/opt/venvs/aitoolkit` with upstream's own torch/flash-attn/NATTEN stack |
 | `Dockerfile.ltx` | base + `Lightricks/LTX-2` at a pinned commit in `/opt/ltx-2` (uv workspace), venv `/opt/venvs/ltx` plus TensorBoard 2.21.0 (pinned, with an event write/read check) |
 | `Dockerfile.fake` | `python:3.12-slim` + podagent only, for `compose.fake.yaml` (no CUDA, no trainers) |
@@ -53,7 +53,8 @@ are distinguished in [POD-STATUS](../docs/POD-STATUS.md).
 /opt/venvs/ltx/                     LTX-2 workspace, torch 2.13.0+cu132         (ltx image; freeze.txt)
 /opt/ai-toolkit/  /opt/ltx-2/       the trainers' checkouts (ltx-2 also holds the uv.lock the build resolved)
 /opt/src/{concept-captioner,podagent}  the sources the agent venv was installed from (record only)
-/opt/pod/scripts/*.py               pull_dataset.py, push_lora.py, launch_aitoolkit.py, launch_ltx.py, generate_results.py
+/opt/pod/scripts/*.py               pull_dataset.py, push_lora.py, launch_aitoolkit.py, launch_ltx.py, generate_results.py, model_table.py
+/opt/pod/scripts/model-table.json    the model table (copied from app/Sources/ConceptStudio/Resources/Training/)
 /opt/pod/entrypoint.sh
 /workspace                          the network volume (POD-SPEC §6.4); nothing of value lives elsewhere
 ```

@@ -80,11 +80,7 @@ struct GPUJourneyView: View {
         VStack(alignment: .leading, spacing: StudioStyle.contentSpacing) {
             StudioSection(
                 title: "Choose a training computer",
-                subtitle: "A GPU is the part that does the training. These have at least "
-                    + "\(workspace.requiredGPUMemoryGB) GB of memory per GPU. "
-                    + (workspace.isH3Training ? "H3's known training reference used a 96 GB GPU; "
-                        + "recipe and resolution still affect fit." : "The included FLUX and LTX defaults were tested "
-                        + "on 32 GB GPUs.")
+                subtitle: workspace.computerSubtitle
             ) {
                 Form {
                     trainerPicker
@@ -245,20 +241,32 @@ struct GPUJourneyView: View {
         }
     }
 
-    private var trainerPicker: some View {
+    /// The picker and, for a model whose licence notice is on, the notice, a link to the licence and the size of the
+    /// first download. All are direct children of the surrounding form, so a model without a notice lays out as a
+    /// bare picker.
+    @ViewBuilder private var trainerPicker: some View {
         Picker("Training model", selection: Binding(
             get: { workspace.baseModel },
             set: { workspace.chooseTrainingModel($0) }
         )) {
-            Text("FLUX.1-dev · images").tag("black-forest-labs/FLUX.1-dev")
-            Text("LTX-2 · images and video").tag("Lightricks/LTX-2")
-            Text("MiniMax H3 · images and video").tag(GPUWorkspace.h3BaseModel)
-            if !["black-forest-labs/FLUX.1-dev", "Lightricks/LTX-2", GPUWorkspace.h3BaseModel]
-                .contains(workspace.baseModel) {
-                Text("Custom · \(workspace.baseModel)").tag(workspace.baseModel)
+            ForEach(workspace.trainingModelOptions, id: \.tag) { option in
+                Text(option.label).tag(option.tag)
             }
         }
         .disabled(workspace.isBusy || workspace.isTraining)
+        if let disclosure = workspace.trainingModelDisclosure {
+            Text(disclosure.notice).font(.callout).foregroundStyle(StudioStyle.supportingText)
+                .fixedSize(horizontal: false, vertical: true)
+            if let link = URL(string: disclosure.licenseURL) {
+                Link(disclosure.licenseName, destination: link).font(.callout)
+            }
+            Text(disclosure.download).font(.callout).foregroundStyle(StudioStyle.supportingText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        if let note = workspace.exactModelRow?.usageNote {
+            Text(note).font(.callout).foregroundStyle(StudioStyle.supportingText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     // MARK: Training
@@ -313,14 +321,10 @@ struct GPUJourneyView: View {
             Divider()
             TrainingInitializationView(workspace: workspace)
             Divider()
-            StudioSection(
-                title: "Run settings",
-                subtitle: "A training step updates the model using a batch of your examples. More steps take longer; "
-                    + "compare saved checkpoints to find the best result."
-            ) {
+            StudioSection(title: "Run settings", subtitle: workspace.trainingLengthSubtitle) {
                 Form {
-                    TextField("Training steps", value: $workspace.steps, format: .number.grouping(.never))
-                        .help("Enter a positive whole number of training updates, such as 3000.")
+                    TextField(workspace.trainingLengthLabel, value: $workspace.steps, format: .number.grouping(.never))
+                        .help(workspace.trainingLengthHelp)
                         .disabled(workspace.isBusy || workspace.isTraining)
                 }.formStyle(.columns)
                 TrainingBudgetView(session: session, workspace: workspace)

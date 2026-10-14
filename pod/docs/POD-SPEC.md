@@ -21,7 +21,8 @@ pod/
   agent/        Python package "podagent": FastAPI control agent (port 8800)
   podctl/       Python package "podctl": terminal client over the agent's HTTP API
   images/       Dockerfiles (base, aitoolkit, ltx, fake), entrypoint, compose for fake mode
-  scripts/      pull_dataset.py, restore_dataset.py, push_lora.py, launch_aitoolkit.py, launch_ltx.py, generate_results.py
+  scripts/      pull_dataset.py, restore_dataset.py, push_lora.py, launch_aitoolkit.py, launch_ltx.py, generate_results.py,
+                model_table.py (reads the model table, 4.4)
   docs/         this spec, POD-STATUS.md
 ```
 
@@ -628,17 +629,23 @@ they expose no port and use the same supervisor/GPU reservation as training. The
 | `width`, `height` | integers 64–2048, each a multiple of 32 | 512, 512 |
 | `inference_steps` | integer 1–100 | 20 |
 | `guidance_scale` | number 0–20 | 4 |
-| `num_frames` | integer 1–257; FLUX requires 1, LTX requires 8n+1, H3 accepts 1 or 17n+5 (5–243) | 1 |
-| `frame_rate` | number greater than 0 and at most 60; H3 requires exactly 24 | 24 |
+| `num_frames` | integer 1–257; the source model's frame law from the model table (4.4): FLUX and Z-Image require 1, LTX requires 8n+1, H3 accepts 1 or 17n+5 (5–243) | 1 |
+| `frame_rate` | number greater than 0 and at most 60; a model with a fixed cadence requires it (H3: exactly 24) | 24 |
 
 Validation refuses an existing generation directory and an unavailable source config or
 checkpoint before `prepare()` creates anything. Prompt override refusal preserves identical
 requested settings for both arms; prompts are argv values, never shell input.
 
-`black-forest-labs/FLUX.1-dev` and `Comfy-Org/MiniMax-H3` on AI Toolkit, and
-`Lightricks/LTX-2` on LTX are implemented in source. Other families return
-`422 invalid_params` before creating a generation run. H3 also requires the source run’s
-saved `native-config.json`; preparation captures it as private `source-native-config.json`.
+A source run is admitted when the model table (4.4) has a row for its `base_model` on this
+trainer that names a `generator` hook: today `black-forest-labs/FLUX.1-dev`,
+`Comfy-Org/MiniMax-H3` and `Tongyi-MAI/Z-Image` on AI Toolkit, and `Lightricks/LTX-2` on LTX.
+Other models return `422 invalid_params` before creating a generation run, naming the trainer's
+default model (`This generation path supports <model_ref> checkpoints only`). The frame count and frame
+rate are then checked against the row's `video` law and fixed cadence, in this order: an
+image-only row takes `num_frames` 1; a video row takes 1 frame (when it previews stills) or
+`first + k·step` frames; a fixed cadence takes exactly that rate. The `minimax_h3` and
+`aitoolkit_arch_image` hooks also require the source run’s saved `native-config.json`; preparation
+captures it as private `source-native-config.json`.
 Its training dataset may contain stills, clips or both; output choice is independent: 1 frame
 produces PNG, 17n+5 frames produce MP4 at 24 fps.
 The checkpoint must be a regular, non-symlink `.safetensors` output of the source run.
@@ -832,10 +839,10 @@ before exiting, so the supervisor never frees GPUs a trainer still holds.
 | `<run>/output` | `process[0].training_folder` |
 | `triggers` | run metadata only; no `process[0].trigger_word` is injected |
 | `rank`, `alpha` | `network.{type: lora, linear, linear_alpha}` |
-| `save_every` | `save.save_every` (+ `dtype: float16`, `max_step_saves_to_keep: 4`) |
+| `save_every` | `save.save_every` (+ `dtype` and `max_step_saves_to_keep` from the model's row; FLUX `float16`, 4) |
 | `dataset.path`, `caption_ext`, `resolution` | `datasets[0].{folder_path, caption_ext, resolution, cache_latents_to_disk: true, caption_dropout_rate: 0.05}` |
-| `steps`, `learning_rate`, `batch_size`, `gradient_accumulation` | `train.{steps, lr, batch_size, gradient_accumulation_steps}` + `dtype: bf16`, `optimizer: adamw8bit`, `noise_scheduler: flowmatch`, `gradient_checkpointing: true`, `train_text_encoder: false` |
-| `base_model` | `model.name_or_path` (+ `is_flux: true, quantize: true` for FLUX; H3 uses the pinned `minimax_h3` BF16 recipe below) |
+| `steps`, `learning_rate`, `batch_size`, `gradient_accumulation` | `train.{steps, lr, batch_size, gradient_accumulation_steps}` + `dtype`, `optimizer`, `gradient_checkpointing` from the model's row (FLUX `bf16`, `adamw8bit`, `true`), `noise_scheduler: flowmatch`, `train_text_encoder: false` |
+| `base_model` | `model.name_or_path` (+ the row's `arch`, extra model keys and `quantize` / `quantize_te`; FLUX `arch: flux, is_flux: true, quantize: true`; H3 uses the pinned `minimax_h3` BF16 recipe below) |
 | `sample_every`, `sample_prompts`, `seed` | `sample.{sample_every, prompts, seed, width/height = max(resolution), sampler: flowmatch, guidance_scale: 4, sample_steps: 20}` |
 | `extra` | deep-merged last |
 
@@ -1049,6 +1056,57 @@ and the missing dataset's recovery facts before preparation. Both wrappers use
 starting the trainer. The missing-folder recovery requirement is in 3.7; it does not authorize changing model, dataset revision or
 hyperparameters under Resume.
 
+### 4.4 The model table (`scripts/model_table.py`, `scripts/model-table.json`)
+
+Which models exist, and what each one needs, is one JSON file read by the app, the agent and
+the scripts: `docs/model-table.md` is its format and the checklist for adding a model. The file
+is `app/Sources/ConceptStudio/Resources/Training/model-table.json`, which the app bundles; both
+images `COPY` it to `/opt/pod/scripts/model-table.json`. `model_table.py` (stdlib only, answers
+`--help` like every script) reads that image path when it exists, else the file in the checkout
+it sits in. The wrappers run under `python -I` and cannot import siblings, so they load
+`model_table.py` with `runpy` the way they load `h3_recipe.py`; the agent loads it from
+`paths.scripts`, else the checkout (`catalog._model_table`). Order of rows is order of the
+family match and of the names in messages.
+
+Three lookups, and which site uses which:
+
+- **Exact row**, `model_ref` equal to `run.json`'s `base_model` on the service's trainer. Hooks,
+  generation, the recipe keys and the first choice for the `model` block use it.
+- **Effective row**, the exact row or the trainer's `default_model`. Capabilities use it (the app).
+- **Family match**, AI Toolkit only: when there is no exact row, the first row whose
+  `family_match` fits the lowercased name (`flux`; `minimax`, `hailuo` or the token `h3`) supplies
+  the `model` block, so custom paths such as `/workspace/models/MiniMax-H3` still get
+  `arch: minimax_h3`. It never enables a hook, generation or any other row behaviour. A name that
+  matches nothing gets `name_or_path` only, and `extra.model.arch` has to supply the rest.
+
+What the pod does with a row:
+
+| Site | Reads |
+| --- | --- |
+| `launch_aitoolkit.py` `model_block` | `architecture`: `arch`, `model_extra` (in order), `quantize`, `quantize_text_encoder` (written as `quantize_te` when not null) |
+| `launch_aitoolkit.py` `build_native_config` | for an exact row without a `trainer_config` hook: `train.dtype`, `train.gradient_checkpointing`, `train.optimizer`, `save.dtype` (when not null), `save.max_step_saves_to_keep`, then the row's `trainer_options.process` keys deep-merged, written over the skeleton before `extra` merges (`extra` wins) |
+| `generate_results.py` | the exact row with a `generator` hook, else `Generation supports <display names>`; the row's frame law and cadence; for `aitoolkit_image`, the row's model settings; for `aitoolkit_arch_image`, the saved native config |
+| `push_lora.py` `model_card` | `license`: with `show_notice`, `license: other`, `license_name`, `license_link` in the front matter and a closing `## Licence` section; `usage_note`: the last paragraph of `## Use`; otherwise the card is unchanged |
+| `catalog.py` | the exact row for generation admission (above), external initialization (a `native_recipe` hook), and the `trainer_config` / `generator` hooks' preparation |
+
+**Hooks.** A hook is a named strategy for one concern; the row names it, `model_table.HOOKS`
+registers the names and each consumer keeps its dispatch beside the code that calls it. A name
+the registry does not know fails in `hook()`. No other code tests a model's name.
+
+| Concern | Name | Pod implementation |
+| --- | --- | --- |
+| `trainer_config` | `minimax_h3` | `launch_aitoolkit.TRAINER_CONFIG_HOOKS`: `minimax_h3_trainer_config` (H3 quality recipe, dataset groups, initialization, guidance check, model config) and `minimax_h3_prelaunch` (`h3_recipe.download_assets`); the agent's half is `catalog._minimax_h3_trainer_config` (the effective recipe written into run.json) |
+| `native_recipe` | `minimax_h3` | `catalog._NATIVE_RECIPE_RULES`: external initialization is admitted for the row, read through `h3_recipe.read_initialization` |
+| `generator` | `aitoolkit_image` | `generate_results.flux_generate`: still images through ai-toolkit with the row's model settings |
+| `generator` | `aitoolkit_arch_image` | `generate_results.arch_generate`: still images from the model class `get_model_class` returns for the row's `arch`, with the trained LoRA bound as a network (`bind_h3_network`, the trainer's own construction) from the saved native config; base side at network multiplier 0. The agent requires and captures `native-config.json` |
+| `generator` | `ltx_one_stage` | `generate_results.ltx_generate` / `ltx_command` |
+| `generator` | `minimax_h3` | `generate_results.h3_generate` and `h3_manifest`; the agent requires and captures `native-config.json` |
+| `run_extra` | `ltx_video_buckets` | none: the app applies it |
+
+Trainer-level code does not read the table: the launchers' shared block, `launch_ltx.py`,
+`ltx_rules.py`, `h3_recipe.py`, `h3_dataset.py`, `checkpoints.py`, `storage.py`, `plan.py` and the
+service catalog's trainer entries. The LTX-2 and H3 rows mirror pins and recipes those files own.
+
 ## 5. GPU inventory backend
 
 ```python
@@ -1220,7 +1278,9 @@ Creates the model repo if needed (`HfApi.create_repo(exist_ok=True)`), uploads w
 `upload_folder` and `allow_patterns`: the final `*.safetensors` (newest when there are several,
 unless `--all-checkpoints`), `run.json`, `config.yaml`, `samples/*` (unless `--no-samples`), and a
 generated `README.md` model card (base model, triggers, steps, rank, profile, dataset name, the
-`concept-captioner` version). Prints the repo URL. Exit 1 when no `.safetensors` is found.
+`concept-captioner` version). When the base model's row in the model table (4.4) has
+`license.show_notice`, the card also carries the licence (front matter and a closing `## Licence`
+section). Prints the repo URL. Exit 1 when no `.safetensors` is found.
 
 ### 7.3 Launch wrappers
 

@@ -187,10 +187,12 @@ guidance loss off (target 3.5). Imported recipes and saved-run repeats retain th
 settings. The earlier v1 recipe enabled guidance loss; v2 and the successful v3 run disabled
 it. Generation guidance is a different control.
 
-FLUX and LTX offers use GPUs with at least 32 GB of memory. H3's BF16 recipe uses a 96 GB
-GPU as its known reference; the app checks the connected computer's actual GPU inventory
-before transferring training inputs. This is an admission requirement, not a guarantee that
-every H3 batch or resolution will fit. The app also requests at least
+FLUX and LTX offers use GPUs with at least 32 GB of memory. Qwen-Image-2.1 trains in bf16 with no
+quantisation and is offered only on GPUs with at least 80 GB; the picker shows its Qwen Research
+License notice (non-commercial use) and the size of its first download (about 32.5 GB). H3's BF16
+recipe uses a 96 GB GPU as its known reference; the app checks the connected computer's actual GPU
+inventory before transferring training inputs. This is an admission requirement, not a guarantee
+that every H3 batch or resolution will fit. The app also requests at least
 60 GB of host RAM per GPU for model loading. Its LTX defaults use 8-bit text-encoder loading,
 quantized training, an 8-bit optimizer and tiled image preparation. A two-step 512-pixel,
 rank-16 LTX run succeeded on one 32 GB GPU with a 125 GB host; a smaller 256-pixel, rank-2 run

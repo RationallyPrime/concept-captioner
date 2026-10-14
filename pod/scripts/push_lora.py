@@ -15,7 +15,9 @@ What goes up, as ``upload_folder`` allow-patterns relative to DIR:
   ``--no-samples``;
 - ``README.md``: a model card generated from ``run.json`` (base model, triggers, steps, rank,
   profile, dataset name, the installed concept-captioner version). It overwrites
-  ``DIR/README.md`` and, on the Hub, the repo's README.
+  ``DIR/README.md`` and, on the Hub, the repo's README. When the base model's row in the model
+  table has ``license.show_notice``, the card also carries the licence in its front matter and a
+  closing ``## Licence`` section.
 
 The repo is created when missing (``create_repo(exist_ok=True)``; ``--private`` applies to that
 creation). Prints the repo URL and writes ``DIR/push.json`` (repo, url, commit, files). Token
@@ -29,6 +31,7 @@ import argparse
 import json
 import os
 import re
+import runpy
 import sys
 from datetime import UTC, datetime
 from importlib import metadata
@@ -161,6 +164,16 @@ def _fmt(value: Any) -> str:
     return str(value)
 
 
+def model_row(base_model: Any) -> dict[str, Any] | None:
+    """The model table's row for a run's ``base_model`` (``model_ref`` is unique), or None.
+
+    The table is read by ``model_table.py`` beside this script; like the other
+    scripts that run under ``python -I``, it is loaded by path.
+    """
+    table = runpy.run_path(str(Path(__file__).with_name("model_table.py")))
+    return table["exact_row"](base_model)
+
+
 def model_card(
     run: dict[str, Any],
     *,
@@ -179,9 +192,18 @@ def model_card(
     manifest = dataset.get("manifest") or {}
     sample_prompts = [str(p) for p in (run.get("sample_prompts") or [])]
 
+    row = model_row(base_model)
+    licence = row["license"] if row is not None and row["license"]["show_notice"] else None
+
     front = ["---"]
     if base_model:
         front.append(f"base_model: {_yaml(base_model)}")
+    if licence is not None:
+        front += [
+            "license: other",
+            f"license_name: {_yaml(licence['id'])}",
+            f"license_link: {_yaml(licence['url'])}",
+        ]
     if triggers:
         front.append(f"instance_prompt: {_yaml(triggers[0])}")
     front += ["tags:", "  - lora", "  - concept-captioner"]
@@ -236,18 +258,22 @@ def model_card(
     ]
     if sample_prompts:
         body += ["", "## Sample prompts", "", *(f"- {prompt}" for prompt in sample_prompts)]
+    use: list[str] = []
     if triggers:
-        body += [
-            "",
-            "## Use",
-            "",
+        use.append(
             f"Put the trigger `{triggers[0]}` in the prompt where the trained subject should appear"
             + (
                 f"; the other trigger{'s' if len(triggers) > 2 else ''} ({', '.join(f'`{t}`' for t in triggers[1:])}) work the same way."
                 if len(triggers) > 1
                 else "."
-            ),
-        ]
+            )
+        )
+    if row is not None and row.get("usage_note"):
+        use.append(row["usage_note"])
+    if use:
+        body += ["", "## Use", *(line for paragraph in use for line in ("", paragraph))]
+    if licence is not None:
+        body += ["", "## Licence", "", licence["notice"]]
     return "\n".join([*front, "", *body]) + "\n"
 
 

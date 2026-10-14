@@ -14,17 +14,12 @@ extension GPUWorkspace {
                   self.currentVolumeID == run.volumeID, self.trainer == run.trainer else {
                 throw StudioError.message("Connect the matching trainer to this run's saved storage before generating.")
             }
-            guard run.supportsGeneration else {
-                throw StudioError.message("Generation supports FLUX.1-dev, LTX-2 and MiniMax H3 checkpoints.")
+            guard run.supportsGeneration(in: self.modelTable) else {
+                throw StudioError.message("Generation supports \(self.modelTable.generationModelList) checkpoints.")
             }
-            let frames = videoFrames ?? run.defaultGenerationFrames
-            guard !run.isH3 || frames == 1
-                || (frames >= 5 && frames <= 257 && (frames - 5) % 17 == 0) else {
-                throw StudioError.message("H3 video length must be 17n + 5 frames, from 5 through 243, at 24 fps.")
-            }
-            guard run.trainer != "ltx" || (frames >= 9 && frames <= 257 && (frames - 1) % 8 == 0)
-            else {
-                throw StudioError.message("LTX video length must be 8n + 1 frames, from 9 through 257.")
+            let frames = videoFrames ?? run.defaultGenerationFrames(in: self.modelTable)
+            if let problem = Self.generationFramesError(run: run, frames: frames, table: self.modelTable) {
+                throw StudioError.message(problem)
             }
             guard !prompts.isEmpty, !seeds.isEmpty, prompts.count <= 6, seeds.count <= 4,
                   prompts.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -40,7 +35,9 @@ extension GPUWorkspace {
                 throw StudioError.message("Finish the active training or generation action first.")
             }
             let plan = try await agent.plan()
-            if run.isH3 { try await self.validateH3Computer(agent, gpus: plan.train?.gpus ?? []) }
+            if let row = run.modelRow(in: self.modelTable), row.gpu.verifyOnPod {
+                try await self.verifyGPUMemory(agent, gpus: plan.train?.gpus ?? [], row: row)
+            }
             try await self.prepareCaptionServerForTraining(agent, plan: plan)
             let id = "generation-" + UUID().uuidString.prefix(12).lowercased()
             let resolution = run.params["resolution"]?.intValue
@@ -50,7 +47,8 @@ extension GPUWorkspace {
                 "checkpoint": .string(checkpoint.path), "prompts": .array(prompts.map(JSONValue.string)),
                 "seeds": .array(seeds.map(JSONValue.int)), "width": .int(resolution), "height": .int(resolution),
                 "inference_steps": .int(inferenceSteps), "guidance_scale": .double(4),
-                "num_frames": .int(run.generatesVideo ? frames : 1), "frame_rate": .double(24),
+                "num_frames": .int(run.generatesVideo(in: self.modelTable) ? frames : 1),
+                "frame_rate": .double(Double(run.generationFrameRate(in: self.modelTable))),
             ]
             self.generation = GeneratedComparison(
                 runID: id, sourceRunID: run.runID, checkpoint: checkpoint.path, trainer: run.trainer,

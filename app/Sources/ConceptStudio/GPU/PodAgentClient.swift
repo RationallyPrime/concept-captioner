@@ -120,9 +120,17 @@ protocol PodAgent: Sendable {
     func storageUsage() async throws -> AgentStorageUsage
 }
 
+/// Thrown by an agent that cannot report GPU memory, such as one running an older training image.
+/// `GPUWorkspace.verifyGPUMemory` words it for the model being checked.
+struct AgentCannotReportGPUMemory: Error, LocalizedError {
+    var errorDescription: String? {
+        "This agent cannot report GPU memory. Update its training image."
+    }
+}
+
 extension PodAgent {
     func gpus() async throws -> [AgentGPU] {
-        throw StudioError.message("This agent cannot report GPU memory. Update its training image before using H3.")
+        throw AgentCannotReportGPUMemory()
     }
 
     func upload(name: String, fileName: String, from file: URL, size: Int64) async throws {

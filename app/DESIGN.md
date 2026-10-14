@@ -12,7 +12,7 @@ A calm workspace for preparing images and video clips for diffusion training. Th
 captions carry the visual interest. Give a beginner enough context to act; keep routine
 controls quick for a returning user. The interface should feel at home on a Mac.
 
-Hákon supplied [hakonfreyr.com](https://hakonfreyr.com/) as a quality reference: its drawing
+The owner supplied a portfolio site as a quality reference: its drawing
 sheet composition, rules, annotations and illustrations express one coherent idea. Apply that
 discipline here through a photo workspace: a contact sheet, one clearly defined concept and
 an image paired with its editable caption. Every visual detail should help the current decision.

@@ -4,11 +4,12 @@ struct AdvancedTrainingControls: View {
     @Bindable var workspace: GPUWorkspace
 
     var body: some View {
+        let row = workspace.effectiveModelRow
         Form {
-            if workspace.isH3Training {
+            if row.resolution.multiple {
                 LabeledContent("Image resolution buckets") {
                     HStack {
-                        ForEach(GPUWorkspace.resolutionChoices, id: \.self) { resolution in
+                        ForEach(workspace.resolutionChoices, id: \.self) { resolution in
                             Toggle("\(resolution) px", isOn: Binding(
                                 get: { workspace.trainingResolutions.contains(resolution) },
                                 set: { selected in
@@ -20,45 +21,18 @@ struct AdvancedTrainingControls: View {
                         }
                     }
                 }.help("Choose one or more image sizes. Video dimensions come from approved clips.")
-                TextField(
-                    "Save checkpoint every (steps)",
-                    value: $workspace.checkpointEvery,
-                    format: .number.grouping(.never)
-                )
-                TextField(
-                    "Keep last checkpoints",
-                    value: $workspace.checkpointRetention,
-                    format: .number.grouping(.never)
-                )
-                .help("Zero keeps all checkpoints. More checkpoints use more storage.")
-                Picker("Saved checkpoint precision", selection: $workspace.checkpointPrecision) {
-                    Text("Float32 · full precision").tag("float32")
-                    Text("Float16 · smaller files").tag("float16")
-                    Text("BFloat16").tag("bfloat16")
-                    if ["fp16", "fp32", "bf16"].contains(workspace.checkpointPrecision) {
-                        Text("Imported: " + workspace.checkpointPrecision).tag(workspace.checkpointPrecision)
-                    }
+            } else {
+                Picker("Training resolution", selection: $workspace.resolution) {
+                    ForEach(workspace.resolutionChoices, id: \.self) { Text("\($0) px").tag($0) }
                 }
-                if workspace.h3UsesTrainingAdapter {
-                    LabeledContent("Guidance preservation loss", value: "Off required · Circlestone adapter")
-                    Text("The included Circlestone adapter requires ordinary training with guidance preservation "
-                        + "loss off. Import a native recipe without this adapter to edit guidance settings.")
-                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Toggle("Guidance preservation loss", isOn: $workspace.guidanceLoss)
-                        .help("Adds guidance-preservation training work when no training adapter is used.")
-                    TextField("Guidance loss target", text: $workspace.guidanceTargetText)
-                        .help("A number from 0 to 20, such as 3.5. Imported two-value ranges are also preserved.")
-                }
+                .help("Sets photo training and generated-output resolution. Video dimensions come from approved clips.")
+            }
+            if row.recipe.checkpoints.editable { checkpointControls }
+            if workspace.nativeRecipeHook != nil { guidanceControls }
+            if row.recipe.checkpoints.editable {
                 Text("Checkpoint precision changes saved weights; it does not change the model's training precision. "
                     + "Choose at least one image bucket and positive step and checkpoint values.")
                     .font(.callout).foregroundStyle(StudioStyle.supportingText)
-            } else {
-                Picker("Training resolution", selection: $workspace.resolution) {
-                    ForEach(GPUWorkspace.resolutionChoices, id: \.self) { Text("\($0) px").tag($0) }
-                }
-                .help("Sets photo training and generated-output resolution. Video dimensions come from approved clips.")
             }
             TextField("LoRA rank", value: $workspace.rank, format: .number.grouping(.never))
                 .help("How much detail the small trained add-on can hold. Higher values use more memory.")
@@ -70,7 +44,7 @@ struct AdvancedTrainingControls: View {
             TextField("Triggers", text: $workspace.triggerWords)
             TextField("Caption profile", text: $workspace.profile)
             TextField("Training seed", value: $workspace.seed, format: .number)
-            if workspace.datasetContainsVideo, workspace.trainer == "ltx" || workspace.isH3Training {
+            if workspace.datasetContainsVideo, row.video != nil {
                 Text(
                     "Video training uses every frame at the dimensions and rate approved in Images. To change a "
                         + "clip's dimensions or length, approve its segment again, then caption and publish it. "
@@ -95,5 +69,43 @@ struct AdvancedTrainingControls: View {
                 .trigger,
             ])
         }.formStyle(.columns)
+    }
+
+    @ViewBuilder private var checkpointControls: some View {
+        TextField(
+            "Save checkpoint every (steps)",
+            value: $workspace.checkpointEvery,
+            format: .number.grouping(.never)
+        )
+        TextField(
+            "Keep last checkpoints",
+            value: $workspace.checkpointRetention,
+            format: .number.grouping(.never)
+        )
+        .help("Zero keeps all checkpoints. More checkpoints use more storage.")
+        Picker("Saved checkpoint precision", selection: $workspace.checkpointPrecision) {
+            Text("Float32 · full precision").tag("float32")
+            Text("Float16 · smaller files").tag("float16")
+            Text("BFloat16").tag("bfloat16")
+            if ["fp16", "fp32", "bf16"].contains(workspace.checkpointPrecision) {
+                Text("Imported: " + workspace.checkpointPrecision).tag(workspace.checkpointPrecision)
+            }
+        }
+    }
+
+    /// The `native_recipe` hook's guidance rules.
+    @ViewBuilder private var guidanceControls: some View {
+        if workspace.h3UsesTrainingAdapter {
+            LabeledContent("Guidance preservation loss", value: "Off required · Circlestone adapter")
+            Text("The included Circlestone adapter requires ordinary training with guidance preservation "
+                + "loss off. Import a native recipe without this adapter to edit guidance settings.")
+                .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            Toggle("Guidance preservation loss", isOn: $workspace.guidanceLoss)
+                .help("Adds guidance-preservation training work when no training adapter is used.")
+            TextField("Guidance loss target", text: $workspace.guidanceTargetText)
+                .help("A number from 0 to 20, such as 3.5. Imported two-value ranges are also preserved.")
+        }
     }
 }

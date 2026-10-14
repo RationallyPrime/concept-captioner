@@ -35,35 +35,89 @@ struct MediaSelection: Codable, Equatable {
 }
 
 /// The selected diffusion model's frame geometry; approval never silently snaps or retimes a target.
-enum VideoTrainingFormat: String, CaseIterable, Identifiable {
-    case ltx = "ltx-video", h3 = "h3-video"
+/// One format per model-table row that trains on video, identified by the row's video caption profile.
+struct VideoTrainingFormat: Hashable, Identifiable, Sendable {
+    let rawValue: String
+    let title: String
+    /// The row's short name, for sentences about this format.
+    let shortName: String
+    let minimumFrames: Int
+    let frameStep: Int
+    let firstFrames: Int
+    let initialFrames: Int
+    let fixedFPS: Int?
+    let selectsWholeClip: Bool
+    let durationChoices: [Int]?
 
     var id: String {
         rawValue
     }
 
-    var title: String {
-        self == .h3 ? "MiniMax H3" : "LTX"
+    /// The formats of the bundled table's video rows, in table order.
+    static var allCases: [VideoTrainingFormat] {
+        ModelTable.shared.models.compactMap(VideoTrainingFormat.init(row:))
     }
 
-    var minimumFrames: Int {
-        self == .h3 ? 5 : 9
+    static let ltx = named("ltx-2")
+    static let h3 = named("minimax-h3")
+
+    private static func named(_ id: String) -> VideoTrainingFormat {
+        guard let row = ModelTable.shared.row(id: id), let format = VideoTrainingFormat(row: row) else {
+            fatalError("The bundled model table has no video row \(id)")
+        }
+        return format
     }
 
-    var frameStep: Int {
-        self == .h3 ? 17 : 8
+    init?(row: ModelRow) {
+        guard let video = row.video, let profile = row.captions.videoProfile else { return nil }
+        rawValue = profile
+        title = video.title
+        shortName = row.shortName
+        minimumFrames = video.minFrames
+        frameStep = video.step
+        firstFrames = video.first
+        initialFrames = video.initialFrames
+        fixedFPS = video.fixedFPS
+        selectsWholeClip = video.selectWholeClip
+        durationChoices = video.durationChoices
     }
 
-    var initialFrames: Int {
-        self == .h3 ? 39 : 33
+    /// The format a project's caption profile calls for: the video row whose profile prefix starts it,
+    /// else the first video row.
+    init(profile: String) {
+        let formats = ModelTable.shared.videoRows
+        let row = formats
+            .first { $0.captions.profilePrefix.map { prefix in profile.hasPrefix(prefix) } == true } ?? formats.first
+        guard let row, let format = VideoTrainingFormat(row: row) else {
+            fatalError("The bundled model table has no video model")
+        }
+        self = format
     }
 
     var gridDescription: String {
-        self == .h3 ? "17n+5" : "8n+1"
+        "\(frameStep)n+\(firstFrames)"
     }
 
-    init(profile: String) {
-        self = profile.hasPrefix("h3-") ? .h3 : .ltx
+    /// What the editor says about this model's segment lengths and timing, under the model picker.
+    var editorIntro: String {
+        fixedFPS.map {
+            "\(shortName) requires \($0) frames per second and specific segment lengths. "
+                + "Approval keeps those exact frames."
+        } ?? "\(shortName) supports specific segment lengths. "
+            + "Approval keeps the selected frames at their original timing."
+    }
+
+    /// The warning for a segment whose frame timing this model cannot use.
+    var timingWarning: String {
+        fixedFPS.map {
+            "This segment does not have constant timing at \($0) frames per second. "
+                + "Choose a compatible portion or import a \($0) fps copy; approval never retimes it."
+        } ?? "This segment has variable frame timing that \(shortName) cannot preserve. "
+            + "Choose a constant-rate portion or import a constant-frame-rate copy."
+    }
+
+    var timingRequirement: String {
+        fixedFPS.map { "constant timing at \($0) frames per second" } ?? "constant frame timing"
     }
 
     func maximumFrames(available: Int) -> Int {
@@ -78,7 +132,7 @@ enum VideoTrainingFormat: String, CaseIterable, Identifiable {
     }
 
     func initialSelectionFrames(available: Int) -> Int {
-        if self == .h3, accepts(frameCount: available) { return available }
+        if selectsWholeClip, accepts(frameCount: available) { return available }
         return min(initialFrames, maximumFrames(available: available))
     }
 }
@@ -100,15 +154,15 @@ struct VideoTimeline {
         return CMTimeRange(start: start, end: finish)
     }
 
-    /// Both trainers consume uniform positions; H3's released temporal geometry also requires 24 fps.
+    /// Both trainers consume uniform positions; a model with a fixed frame rate also requires that cadence.
     func supportsTiming(startFrame: Int, frameCount: Int, format: VideoTrainingFormat = .ltx) -> Bool {
         guard let range = range(startFrame: startFrame, frameCount: frameCount, format: format) else { return false }
         let selected = Array(times[startFrame ..< startFrame + frameCount]) + [range.end]
-        let interval = format == .h3 ? 1 / 24.0 : range.duration.seconds / Double(frameCount)
+        let interval = format.fixedFPS.map { 1 / Double($0) } ?? range.duration.seconds / Double(frameCount)
         let containerTick = 1 / Double(selected.map(\.timescale).min() ?? 1)
-        // A coarse container tick cannot establish H3's fixed 24 fps cadence. In particular,
-        // allowing a whole 1/30-second tick would admit 30 fps, and 1/24000 would admit 23.976.
-        let tolerance = format == .h3 ? min(containerTick, 0.000001) : containerTick
+        // A coarse container tick cannot establish a fixed cadence. In particular, allowing a whole
+        // 1/30-second tick would admit 30 fps for a 24 fps model, and 1/24000 would admit 23.976.
+        let tolerance = format.fixedFPS == nil ? containerTick : min(containerTick, 0.000001)
         return zip(selected, selected.dropFirst()).allSatisfy {
             abs(($0.1 - $0.0).seconds - interval) <= tolerance
         }
@@ -344,8 +398,7 @@ enum MediaEditor {
             )
         }
         guard timeline.supportsTiming(startFrame: startFrame, frameCount: frameCount, format: format) else {
-            let requirement = format == .h3 ? "constant timing at 24 frames per second" : "constant frame timing"
-            throw StudioError.message("\(format.title) requires \(requirement). "
+            throw StudioError.message("\(format.title) requires \(format.timingRequirement). "
                 + "Choose a compatible portion or import a compatible copy; no clip was retimed or replaced.")
         }
         guard let export = AVAssetExportSession(

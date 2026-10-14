@@ -36,37 +36,40 @@ final class GPUWorkspace {
     private var operationRevision = 0
     var isStopping = false
     var elapsedCost = 0.0
-    var trainer = "aitoolkit" {
+    /// The supported models. Every default below starts from its default model's row.
+    @ObservationIgnored let modelTable: ModelTable
+    var trainer: String {
         didSet {
             if oldValue != trainer {
-                baseModel = trainer == "ltx" ? "Lightricks/LTX-2" : "black-forest-labs/FLUX.1-dev"
+                baseModel = modelTable.trainerDefault(trainer).modelRef
             }
         }
     }
 
-    var baseModel = "black-forest-labs/FLUX.1-dev"
-    var steps = 200
-    var rank = 16
-    var alpha = 16
-    var batchSize = 1
-    var accumulation = 1
+    var baseModel: String
+    /// The training length in the selected model's unit: steps, or passes over each item for an epochs row.
+    var steps: Int
+    var rank: Int
+    var alpha: Int
+    var batchSize: Int
+    var accumulation: Int
     var nativeRecipe: NativeTrainingRecipe?
     var nativeRecipeOriginal: URL?
     var initialCheckpoint: URL?
-    var learningRate = 0.0001
-    var checkpointEvery = 250
-    var checkpointRetention = 4
-    var checkpointPrecision = "float16"
+    var learningRate: Double
+    var checkpointEvery: Int
+    var checkpointRetention: Int
+    var checkpointPrecision: String
     var guidanceLoss = false
-    var guidanceTargetText = "3.5"
+    var guidanceTargetText = GPUWorkspace.defaultGuidanceTarget
     var guidanceTarget: JSONValue {
         (try? JSONValue(parsing: Data(guidanceTargetText.utf8))) ?? .null
     }
 
     /// Training resolution in pixels; one of `resolutionChoices`. Shown under Advanced.
-    var trainingResolutions = [512]
+    var trainingResolutions: [Int]
     var resolution: Int {
-        get { trainingResolutions.max() ?? 512 }
+        get { trainingResolutions.max() ?? modelTable.defaultRow.resolution.defaults.max() ?? 0 }
         set { trainingResolutions = [newValue] }
     }
 
@@ -78,6 +81,8 @@ final class GPUWorkspace {
     var seed = 42
     var datasetRevision = ""
     var datasetContainsVideo = false
+    /// How many images and clips the next run trains on; an epochs row turns passes into steps with it.
+    var datasetItemCount = 0
     var runHistory: [TrainingRun] = []
     var selectedHistoryRunID = ""
     var repeatSourceRunID = ""
@@ -85,7 +90,7 @@ final class GPUWorkspace {
     var generation: GeneratedComparison?
     var outputRepo = ""
     var triggerWords = "NORA7"
-    var profile = "flux-image"
+    var profile: String
     var keepCaptionServer = false
     var captionModel = "Qwen/Qwen3-VL-8B-Instruct"
     var points: [TrainingPoint] = []
@@ -146,9 +151,25 @@ final class GPUWorkspace {
         deleteAgentToken: @escaping (String) throws -> Void = { try KeychainStore().save("", account: $0) },
         downloader: any FileDownloading = URLSessionDownloader(),
         uploader: any FileUploading = URLSessionUploader(),
-        keepAwake: SleepAssertion? = nil
+        keepAwake: SleepAssertion? = nil,
+        modelTable: ModelTable = .shared
     ) {
         self.demoMode = demoMode
+        self.modelTable = modelTable
+        let start = modelTable.defaultRow
+        trainer = start.trainer
+        baseModel = start.modelRef
+        steps = start.recipe.length
+        rank = start.recipe.rank
+        alpha = start.recipe.alpha
+        batchSize = start.recipe.batchSize
+        accumulation = start.recipe.gradientAccumulation
+        learningRate = start.recipe.learningRate
+        checkpointEvery = start.recipe.checkpoints.every
+        checkpointRetention = start.recipe.checkpoints.keep
+        checkpointPrecision = modelTable.checkpointPrecision(for: start)
+        trainingResolutions = start.resolution.defaults
+        profile = start.captions.imageProfile
         self.transport = transport
         self.preferences = preferences
         self.saveAgentToken = saveAgentToken
@@ -211,7 +232,10 @@ final class GPUWorkspace {
             guard let provider = self.provider else {
                 throw StudioError.message("Add your RunPod key in Settings, then refresh available computers.")
             }
-            async let offers = provider.offers(count: self.gpuCount, minCudaVersion: Self.minimumCUDA(self.trainer))
+            async let offers = provider.offers(
+                count: self.gpuCount,
+                minCudaVersion: self.modelTable.minimumCUDA(self.trainer)
+            )
             async let volumes = provider.volumes()
             self.offers = try await offers
             self.volumes = try await volumes
@@ -376,6 +400,31 @@ final class GPUWorkspace {
         }
     }
 
+    func perform(_ action: @escaping @MainActor () async throws -> Void) async {
+        guard !isBusy, !isStopping else { return }
+        operationRevision += 1
+        isBusy = true
+        let work = Task {
+            defer { self.isBusy = false }
+            do {
+                try await action()
+            } catch is CancellationError {
+                self.message = "Action cancelled. Check the computer status before closing."
+            } catch {
+                self.message = error.localizedDescription
+                self.failure = self.message
+            }
+        }
+        operationTask = work
+        await withTaskCancellationHandler {
+            await work.value
+        } onCancel: {
+            work.cancel()
+        }
+    }
+}
+
+extension GPUWorkspace {
     func watch() {
         monitorTask?.cancel()
         monitorTask = Task { [weak self] in
@@ -407,31 +456,6 @@ final class GPUWorkspace {
         }
     }
 
-    func perform(_ action: @escaping @MainActor () async throws -> Void) async {
-        guard !isBusy, !isStopping else { return }
-        operationRevision += 1
-        isBusy = true
-        let work = Task {
-            defer { self.isBusy = false }
-            do {
-                try await action()
-            } catch is CancellationError {
-                self.message = "Action cancelled. Check the computer status before closing."
-            } catch {
-                self.message = error.localizedDescription
-                self.failure = self.message
-            }
-        }
-        operationTask = work
-        await withTaskCancellationHandler {
-            await work.value
-        } onCancel: {
-            work.cancel()
-        }
-    }
-}
-
-extension GPUWorkspace {
     func noteActivity() {
         lastActivity = Date()
     }

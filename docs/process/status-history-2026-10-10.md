@@ -77,7 +77,7 @@ official integration references.
 
 The development preview at `app/dist/ConceptStudio.app` includes the 2026-10-10 native UI
 refinement using Impeccable. Its design direction is recorded in [DESIGN.md](../../app/DESIGN.md),
-with APP-BRIEF remaining the product authority. The owner supplied hakonfreyr.com as a quality
+with APP-BRIEF remaining the product authority. The owner supplied a portfolio site as a quality
 reference. The refinement uses a photo workspace, clearer hierarchy and progressive controls
 while preserving the nine-screen journey and the shared captioning/training contracts.
 

@@ -6,7 +6,13 @@ struct TrainingInitializationView: View {
     @Bindable var workspace: GPUWorkspace
 
     var body: some View {
-        DisclosureGroup("Start a new H3 run from existing LoRA weights") {
+        ForEach(workspace.modelTable.nativeRecipeRows) { row in
+            recipeImport(row)
+        }
+    }
+
+    private func recipeImport(_ row: ModelRow) -> some View {
+        DisclosureGroup("Start a new \(row.shortName) run from existing LoRA weights") {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Import the native AI Toolkit recipe that trained the LoRA, then its .safetensors file. "
                     + "The new run uses your selected dataset and starts at step zero. To continue a saved "
@@ -14,8 +20,8 @@ struct TrainingInitializationView: View {
                     .font(.callout).foregroundStyle(StudioStyle.supportingText)
                     .fixedSize(horizontal: false, vertical: true)
                 StudioTermsHelp(terms: [.trainingRecipe, .warmStart, .checkpoint, .precision, .baseModel])
-                Button("Choose AI Toolkit recipe…") { chooseRecipe() }
-                if let recipe = workspace.nativeRecipeOriginal {
+                Button("Choose AI Toolkit recipe…") { chooseRecipe(for: row) }
+                if let recipe = workspace.nativeRecipeOriginal, workspace.nativeRecipe?.modelID == row.id {
                     Text("Recipe copied: \(recipe.lastPathComponent)").font(.callout)
                     Text(
                         "Imported save cadence, retention, precision, guidance, buckets, optimizer "
@@ -35,7 +41,7 @@ struct TrainingInitializationView: View {
         }.disabled(workspace.isBusy || workspace.isTraining)
     }
 
-    private func chooseRecipe() {
+    private func chooseRecipe(for row: ModelRow) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -48,7 +54,7 @@ struct TrainingInitializationView: View {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
-            try workspace.importTrainingRecipe(from: url)
+            try workspace.importTrainingRecipe(from: url, row: row)
         } catch { workspace.message = error.localizedDescription }
     }
 

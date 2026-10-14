@@ -653,15 +653,41 @@ def _h3_rules(paths: Paths) -> dict[str, Any]:
     return runpy.run_path(str(script))
 
 
+def _model_table(paths: Paths) -> dict[str, Any]:
+    """``scripts/model_table.py``'s namespace: the lookups over the model table.
+
+    Loaded the way ``_h3_rules`` loads its file (the image copy, else the checkout), because the
+    wrapper scripts load the same file with runpy and the agent must read one table, not two.
+    """
+    script = paths.scripts / "model_table.py"
+    if not script.is_file():
+        script = Path(__file__).resolve().parents[3] / "scripts/model_table.py"
+    return runpy.run_path(str(script))
+
+
+def _run_row(table: dict[str, Any], base_model: Any) -> dict[str, Any] | None:
+    """The row for a run.json's ``base_model``; ``model_ref`` is unique, so no trainer is needed."""
+    return table["exact_row"](base_model)
+
+
+def _row_hook(table: dict[str, Any], row: dict[str, Any] | None, concern: str) -> str | None:
+    return table["hook"](row, concern) if row is not None else None
+
+
 def _validate_training_start(name: str, params: RunConfig, paths: Paths) -> None:
     run_dir = paths.run_dir(params.run_id)
     previous = run_dir / RUN_JSON
     if params.initialization is not None:
-        rules = _h3_rules(paths)
-        if name != "trainer-aitoolkit" or params.base_model != rules["MODEL"]:
+        # External weights warm-start only a model whose row names a native_recipe hook, on the
+        # trainer that row belongs to; the hook supplies the rules that read them.
+        table = _model_table(paths)
+        row = table["exact_row"](params.base_model, name.removeprefix("trainer-"))
+        recipe_hook = _row_hook(table, row, "native_recipe")
+        if recipe_hook is None:
             _invalid(
                 params, "External initialization currently supports MiniMax-H3 AI Toolkit runs"
             )
+        rules = _NATIVE_RECIPE_RULES[recipe_hook](paths)
         if not params.resume:
             if run_dir.exists():
                 _invalid(params, "External weights initialize a NEW run_id, never an existing run")
@@ -748,28 +774,74 @@ def _generation_source(params: GenerationParams, paths: Paths) -> tuple[dict[str
     return cfg, checkpoint
 
 
+def _require_native_config(
+    params: GenerationParams, paths: Paths, subject: str = "H3 generation"
+) -> None:
+    native = paths.run_dir(params.source_run_id) / "native-config.json"
+    if native.is_symlink() or not native.is_file():
+        _invalid(params, f"{subject} needs the saved effective native model/network recipe")
+
+
+def _require_saved_recipe(params: GenerationParams, paths: Paths) -> None:
+    _require_native_config(params, paths, "Generation")
+
+
+def _capture_native_config(source_run: Path, run_dir: Path) -> None:
+    shutil.copyfile(source_run / "native-config.json", run_dir / "source-native-config.json")
+
+
+@dataclass(frozen=True)
+class _GeneratorHook:
+    """What the agent does for a row's ``generator`` hook besides the generic frame rules."""
+
+    precondition: Callable[[GenerationParams, Paths], None] | None = None  # at validation
+    capture: Callable[[Path, Path], None] | None = None  # at prepare: (source run, generation run)
+
+
+# Registered names; ``model_table.HOOKS["generator"]`` lists the same ones.
+_GENERATOR_HOOKS: dict[str, _GeneratorHook] = {
+    "aitoolkit_image": _GeneratorHook(),
+    "aitoolkit_arch_image": _GeneratorHook(
+        precondition=_require_saved_recipe, capture=_capture_native_config
+    ),
+    "ltx_one_stage": _GeneratorHook(),
+    "minimax_h3": _GeneratorHook(
+        precondition=_require_native_config, capture=_capture_native_config
+    ),
+}
+
+# native_recipe hook name -> loader of the rules that read its recipe and initial weights.
+_NATIVE_RECIPE_RULES: dict[str, Callable[[Paths], dict[str, Any]]] = {"minimax_h3": _h3_rules}
+
+
 def _validate_generation(name: str, params: GenerationParams, paths: Paths) -> None:
     if paths.run_dir(params.run_id).exists():
         _invalid(params, "Choose a new generation run_id; existing outputs are kept")
     cfg, _ = _generation_source(params, paths)
-    supported = "black-forest-labs/FLUX.1-dev" if name == "generate-aitoolkit" else LTX_HUB_MODEL
-    h3 = name == "generate-aitoolkit" and cfg.get("base_model") == _h3_rules(paths)["MODEL"]
-    if (cfg.get("base_model") != supported and not h3) or not params.checkpoint.endswith(
-        ".safetensors"
-    ):
+    table = _model_table(paths)
+    trainer = name.removeprefix("generate-")
+    row = table["exact_row"](cfg.get("base_model"), trainer)
+    generator = _row_hook(table, row, "generator")
+    if row is None or generator is None or not params.checkpoint.endswith(".safetensors"):
+        supported = table["trainer_default_row"](trainer)["model_ref"]
         _invalid(params, f"This generation path supports {supported} checkpoints only")
-    if h3:
-        if params.num_frames != 1 and (params.num_frames < 5 or params.num_frames % 17 != 5):
-            _invalid(params, "H3 generation needs 1 still frame or 17n+5 video frames")
-        if params.frame_rate != 24:
-            _invalid(params, "H3 generation uses exactly 24 fps")
-        native = paths.run_dir(params.source_run_id) / "native-config.json"
-        if native.is_symlink() or not native.is_file():
-            _invalid(params, "H3 generation needs the saved effective native model/network recipe")
-    elif name == "generate-aitoolkit" and params.num_frames != 1:
-        _invalid(params, "FLUX generation produces images; num_frames must be 1")
-    elif name == "generate-ltx" and params.num_frames % 8 != 1:
-        _invalid(params, "LTX generation needs 8n+1 frames")
+    short, video = row["short_name"], row["video"]
+    frames = params.num_frames
+    if video is None:
+        if frames != 1:
+            _invalid(params, f"{short} generation produces images; num_frames must be 1")
+    else:
+        if not table["frame_count_ok"](row, frames):
+            law = video["frame_law"]
+            shape = f"{law['step']}n+{law['first']}"
+            if row["preview"]["still"]:
+                _invalid(params, f"{short} generation needs 1 still frame or {shape} video frames")
+            _invalid(params, f"{short} generation needs {shape} frames")
+        if video["fixed_fps"] is not None and params.frame_rate != video["fixed_fps"]:
+            _invalid(params, f"{short} generation uses exactly {video['fixed_fps']} fps")
+    precondition = _GENERATOR_HOOKS[generator].precondition
+    if precondition is not None:
+        precondition(params, paths)
 
 
 # --- the spec and its builders ---------------------------------------------------------------
@@ -953,41 +1025,58 @@ def _cleanup_argv(_: ServiceParams, _gpus: list[int], paths: Paths) -> list[str]
     ]
 
 
+def _minimax_h3_trainer_config(
+    cfg: RunConfig, paths: Paths, run_dir: Path, payload: dict[str, Any]
+) -> None:
+    """The agent's half of the ``minimax_h3`` trainer_config hook: H3's quality recipe, the
+    private initializer capture and any imported recipe go into run.json's ``extra``, so the
+    saved run is the effective one. The launcher's half builds the native config from it."""
+    rules = _h3_rules(paths)
+    imported: dict[str, Any] = {}
+    if cfg.initialization is not None:
+        if cfg.resume:
+            imported = rules["read_initialization"](
+                run_dir, cfg.initialization.model_dump(), cfg.rank
+            )
+        else:
+            folder = claim_initialization(paths, cfg.initialization.name)
+            try:
+                imported = rules["read_initialization"](
+                    folder, cfg.initialization.model_dump(), cfg.rank
+                )
+                run_dir.mkdir(parents=True, exist_ok=False)
+                for filename in ("initial-lora.safetensors", "initial-recipe.json"):
+                    shutil.copyfile(folder / filename, run_dir / filename)
+                rules["read_initialization"](run_dir, cfg.initialization.model_dump(), cfg.rank)
+            finally:
+                release_stage(paths, cfg.initialization.name)
+    helper = paths.scripts / "launch_aitoolkit.py"
+    if not helper.is_file():
+        helper = Path(__file__).resolve().parents[3] / "scripts/launch_aitoolkit.py"
+    merge = runpy.run_path(str(helper))["deep_merge"]
+    videos = any(
+        p.suffix.lower() in {".mp4", ".mov", ".m4v"} for p in Path(cfg.dataset.path).rglob("*")
+    )
+    quality = merge(rules["quality_settings"](video=videos), imported)
+    payload["extra"] = merge(quality, cfg.extra)
+    payload["extra"]["network"].update(linear=cfg.rank, linear_alpha=cfg.alpha)
+
+
+# Registered names; ``model_table.HOOKS["trainer_config"]`` lists the same ones.
+_TRAINER_CONFIG_HOOKS: dict[str, Callable[[RunConfig, Paths, Path, dict[str, Any]], None]] = {
+    "minimax_h3": _minimax_h3_trainer_config,
+}
+
+
 def _trainer_prepare(params: ServiceParams, paths: Paths) -> None:
     """Create ``<runs>/<id>/`` (with ``tensorboard/``) and write ``run.json``, secrets stripped."""
     cfg = _as(params, RunConfig)
     run_dir = paths.run_dir(cfg.run_id)
     payload = cfg.model_dump(mode="json", exclude=set(SECRET_FIELDS))
-    if cfg.base_model == _h3_rules(paths)["MODEL"]:
-        rules = _h3_rules(paths)
-        imported: dict[str, Any] = {}
-        if cfg.initialization is not None:
-            if cfg.resume:
-                imported = rules["read_initialization"](
-                    run_dir, cfg.initialization.model_dump(), cfg.rank
-                )
-            else:
-                folder = claim_initialization(paths, cfg.initialization.name)
-                try:
-                    imported = rules["read_initialization"](
-                        folder, cfg.initialization.model_dump(), cfg.rank
-                    )
-                    run_dir.mkdir(parents=True, exist_ok=False)
-                    for filename in ("initial-lora.safetensors", "initial-recipe.json"):
-                        shutil.copyfile(folder / filename, run_dir / filename)
-                    rules["read_initialization"](run_dir, cfg.initialization.model_dump(), cfg.rank)
-                finally:
-                    release_stage(paths, cfg.initialization.name)
-        helper = paths.scripts / "launch_aitoolkit.py"
-        if not helper.is_file():
-            helper = Path(__file__).resolve().parents[3] / "scripts/launch_aitoolkit.py"
-        merge = runpy.run_path(str(helper))["deep_merge"]
-        videos = any(
-            p.suffix.lower() in {".mp4", ".mov", ".m4v"} for p in Path(cfg.dataset.path).rglob("*")
-        )
-        quality = merge(rules["quality_settings"](video=videos), imported)
-        payload["extra"] = merge(quality, cfg.extra)
-        payload["extra"]["network"].update(linear=cfg.rank, linear_alpha=cfg.alpha)
+    table = _model_table(paths)
+    config_hook = _row_hook(table, _run_row(table, cfg.base_model), "trainer_config")
+    if config_hook is not None:
+        _TRAINER_CONFIG_HOOKS[config_hook](cfg, paths, run_dir, payload)
     _prestart_cleanup(cfg, paths)
     (run_dir / RUN_STATE_FILE).unlink(missing_ok=True)
     (run_dir / "tensorboard").mkdir(parents=True, exist_ok=True)
@@ -1011,9 +1100,11 @@ def _generation_prepare(params: ServiceParams, paths: Paths) -> None:
     # A simultaneous resume may replace an unnumbered final save on another GPU. Capture
     # both selected inputs before launching either inference variant, not after base sampling.
     (run_dir / "source-run.json").write_text(json.dumps(source, indent=2) + "\n", encoding="utf-8")
-    native = paths.run_dir(cfg.source_run_id) / "native-config.json"
-    if source.get("base_model") == _h3_rules(paths)["MODEL"]:
-        shutil.copyfile(native, run_dir / "source-native-config.json")
+    table = _model_table(paths)
+    generator = _row_hook(table, _run_row(table, source.get("base_model")), "generator")
+    capture = _GENERATOR_HOOKS[generator].capture if generator is not None else None
+    if capture is not None:
+        capture(paths.run_dir(cfg.source_run_id), run_dir)
     digest = hashlib.sha256()
     with (
         checkpoint.open("rb") as src,
