@@ -1,18 +1,19 @@
 # images
 
-Current public release: `ghcr.io/rationallyprime/concept-captioner-pod-{base,aitoolkit,ltx}:v0.3.1-20261014`,
-a **clean build from commit `0124582`** (regularisation sets and REPA on top of the model table; the aitoolkit
+Current public release: `ghcr.io/rationallyprime/concept-captioner-pod-{base,aitoolkit,ltx}:v0.3.2-20261014`,
+a **clean build from commit `374e695`** (regularisation sets and REPA on top of the model table, with the review fixes; the aitoolkit
 build applied the three REPA patches with `git am`): the three Dockerfiles as committed, built on cx53 with
-`docker buildx build` and no overlay. The previous releases stay published: `v0.3.0-20261014` (from `f784947`,
+`docker buildx build` and no overlay. The previous releases stay published: `v0.3.1-20261014` (from `0124582`; base `0483ff50…`, aitoolkit `3bc32673…`,
+ltx `e568b43b…`), `v0.3.0-20261014` (from `f784947`,
 PR #10; base `eab5ddb9…`, aitoolkit `afe466d1…`, ltx `41a74204…`) and `v0.2.3-clean-20261011` (from `b7908618`;
 base `d41b8287…`, aitoolkit `fe09109d…`, ltx `40a0361f…`). The images carry no OCI revision label; this table is the record of
 which commit they came from.
 
 | image suffix | public manifest digest |
 | --- | --- |
-| `base` | `sha256:0483ff5070355a9739510766819429118283471ded17107bac939645792e536d` |
-| `aitoolkit` | `sha256:3bc32673e1c0e9da00d83c71fe346b8785d02e8687015eff315cc4b53b536629` |
-| `ltx` | `sha256:e568b43b5bb9c7735b83839f5826c1ef6e7ae7accb53a53e585fed41fe0e1d2c` |
+| `base` | `sha256:3a809caeab99a707e99310227f81e84321cabb9c928d492449cbf67fe51c2542` |
+| `aitoolkit` | `sha256:7326671864e8a0210b5158a503d35dacc233e98e44560fe8ca722a67271e4ed6` |
+| `ltx` | `sha256:5bf0ef9ec2114f7853672a888c7ff5cdc29bfabb90c8fdc56116f3bb852c93b5` |
 
 Checked after the push: each tag resolves anonymously on GHCR to the digest above. The CPU
 control smoke described next has not been rerun for this tag; it ran against the pushed `v0.2.3` base image and passed (receipt
