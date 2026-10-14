@@ -246,34 +246,6 @@ struct GPUJourneyView: View {
         }
     }
 
-    /// The picker and, for a model whose licence notice is on, the notice, a link to the licence and the size of the
-    /// first download. All are direct children of the surrounding form, so a model without a notice lays out as a
-    /// bare picker.
-    @ViewBuilder private var trainerPicker: some View {
-        Picker("Training model", selection: Binding(
-            get: { workspace.baseModel },
-            set: { workspace.chooseTrainingModel($0) }
-        )) {
-            ForEach(workspace.trainingModelOptions, id: \.tag) { option in
-                Text(option.label).tag(option.tag)
-            }
-        }
-        .disabled(workspace.isBusy || workspace.isTraining)
-        if let disclosure = workspace.trainingModelDisclosure {
-            Text(disclosure.notice).font(.callout).foregroundStyle(StudioStyle.supportingText)
-                .fixedSize(horizontal: false, vertical: true)
-            if let link = URL(string: disclosure.licenseURL) {
-                Link(disclosure.licenseName, destination: link).font(.callout)
-            }
-            Text(disclosure.download).font(.callout).foregroundStyle(StudioStyle.supportingText)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        if let note = workspace.exactModelRow?.usageNote {
-            Text(note).font(.callout).foregroundStyle(StudioStyle.supportingText)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
     // MARK: Training
 
     private var training: some View {
@@ -308,9 +280,11 @@ struct GPUJourneyView: View {
             ) {
                 Form {
                     trainerPicker
-                    TextField("Starting model", text: $workspace.baseModel)
-                        .help("Base diffusion model to train. Choose a compatible model for these images or clips.")
-                        .disabled(workspace.isBusy || workspace.isTraining)
+                    if session.advancedUser {
+                        TextField("Starting model", text: $workspace.baseModel)
+                            .help("Base diffusion model to train. Choose a compatible model for these images or clips.")
+                            .disabled(workspace.isBusy || workspace.isTraining)
+                    }
                     trainingDestinationFields
                 }.formStyle(.columns)
                 Text("This project's own destination. With a Hugging Face token in Settings, the trained model is "
@@ -332,9 +306,22 @@ struct GPUJourneyView: View {
                 }.formStyle(.columns)
                 TrainingBudgetView(session: session, workspace: workspace)
                 prerequisitesNotice(beforeBilling: false)
-                DisclosureGroup("Advanced training controls") {
-                    AdvancedTrainingControls(workspace: workspace).padding(.top, 12)
-                        .disabled(workspace.isBusy || workspace.isTraining)
+                if !session.advancedUser {
+                    let overrides = workspace.advancedTrainingOverrides + workspace.advancedInputOverrides(
+                        expectedTriggers: (session.project?.job.concepts ?? []).map(\.trigger).joined(separator: ","),
+                        expectedProfile: session.project?.job.profile ?? workspace.effectiveModelRow.captions
+                            .imageProfile
+                    )
+                    if !overrides.isEmpty {
+                        StudioNotice("Advanced settings still in force: " + overrides.joined(separator: "; ")
+                            + ". Turn on Advanced user to edit them.")
+                    }
+                }
+                if session.advancedUser {
+                    DisclosureGroup("Advanced training controls") {
+                        AdvancedTrainingControls(workspace: workspace).padding(.top, 12)
+                            .disabled(workspace.isBusy || workspace.isTraining)
+                    }
                 }
                 Button("Start training", systemImage: "play.fill") {
                     Task {

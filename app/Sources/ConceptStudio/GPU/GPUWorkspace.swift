@@ -90,7 +90,8 @@ final class GPUWorkspace {
     /// Sample images during training. Off by default: sample generation is unverified (POD-SPEC 4.2).
     var samplesEnabled = false
     var runID = ""
-    var seed = 42
+    static let defaultSeed = 42
+    var seed = GPUWorkspace.defaultSeed
     var datasetRevision = ""
     var datasetContainsVideo = false
     /// How many images and clips the next run trains on; an epochs row turns passes into steps with it.

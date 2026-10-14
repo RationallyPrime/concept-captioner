@@ -153,31 +153,48 @@ struct CaptioningView: View {
                                 .font(.callout).foregroundStyle(StudioStyle.supportingText)
                         }.padding(.top, 12)
                     }.disabled(session.busy)
-                    DisclosureGroup("Advanced model and batch controls") {
-                        Form {
-                            Picker("Thinking effort", selection: $session.modelThinking) {
-                                ForEach(ThinkingLevel.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                            }
-                            if session.useCritic {
-                                Picker("Reviewer thinking effort", selection: $session.criticThinking) {
+                    if !session.advancedUser {
+                        let overrides = session.advancedCaptionOverrides
+                            + (overwrite ? ["Re-caption existing model captions"] : [])
+                        if !overrides.isEmpty {
+                            StudioNotice("Advanced settings still in force: " + overrides.joined(separator: "; ")
+                                + ". Turn on Advanced user to edit them.")
+                        }
+                    }
+                    if session.advancedUser {
+                        DisclosureGroup("Advanced model and batch controls") {
+                            Form {
+                                Picker("Thinking effort", selection: $session.modelThinking) {
                                     ForEach(ThinkingLevel.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                                 }
-                            }
-                            Picker("Structured response mode", selection: $session.outputMode) {
-                                ForEach(OutputMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                            }
-                            Stepper("\(session.concurrency) samples at once", value: $session.concurrency, in: 1 ... 16)
-                            if session.endpointKind == "vllm" {
-                                TextField(
-                                    "Server URL for this project (blank uses Settings)",
-                                    text: $session.requestBaseURL
+                                if session.useCritic {
+                                    Picker("Reviewer thinking effort", selection: $session.criticThinking) {
+                                        ForEach(ThinkingLevel.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                                    }
+                                }
+                                Picker("Structured response mode", selection: $session.outputMode) {
+                                    ForEach(OutputMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                                }
+                                Stepper(
+                                    "\(session.concurrency) samples at once",
+                                    value: $session.concurrency,
+                                    in: 1 ... 16
                                 )
-                            }
-                            Toggle("Re-caption existing model captions", isOn: $overwrite)
-                            Text("Final captions are always protected. Turn this on to replace earlier model captions.")
+                                if session.endpointKind == "vllm" {
+                                    TextField(
+                                        "Server URL for this project (blank uses Settings)",
+                                        text: $session.requestBaseURL
+                                    )
+                                }
+                                Toggle("Re-caption existing model captions", isOn: $overwrite)
+                                Text(
+                                    "Final captions are always protected. "
+                                        + "Turn this on to replace earlier model captions."
+                                )
                                 .font(.caption).foregroundStyle(StudioStyle.supportingText)
-                        }.formStyle(.columns).padding(.top, 12)
-                    }.disabled(session.busy)
+                            }.formStyle(.columns).padding(.top, 12)
+                        }.disabled(session.busy)
+                    }
                 }
                 Divider()
                 DisclosureGroup("Optional: caption on a rented computer") {
