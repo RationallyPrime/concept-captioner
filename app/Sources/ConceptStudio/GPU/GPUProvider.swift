@@ -170,6 +170,8 @@ protocol GPUProvider: Sendable {
     func volumes() async throws -> [GPUVolume]
     func create(_ request: PodCreation) async throws -> RentedPod
     func status(id: String) async throws -> RentedPod
+    /// Whether the account behind the current key has this pod, in any state. False only on "not found".
+    func exists(id: String) async throws -> Bool
     /// Every pod on the account this app created (named `ConceptStudio…`), any status. Throws when
     /// the account cannot be listed or one of this app's pods cannot be read.
     func list() async throws -> [RentedPod]
@@ -259,6 +261,10 @@ struct RunPodProvider: GPUProvider {
 
     func status(id: String) async throws -> RentedPod {
         try await JSONDecoder().decode(RentedPod.self, from: call("pods/\(id)"))
+    }
+
+    func exists(id: String) async throws -> Bool {
+        try await response("pods/\(id)", accepting: [404]).status != 404
     }
 
     func list() async throws -> [RentedPod] {
@@ -352,6 +358,13 @@ struct RunPodProvider: GPUProvider {
         _ path: String, method: String = "GET", body: JSONObject? = nil, query: [URLQueryItem] = [],
         accepting accepted: Set<Int> = []
     ) async throws -> Data {
+        try await response(path, method: method, body: body, query: query, accepting: accepted).body
+    }
+
+    private func response(
+        _ path: String, method: String = "GET", body: JSONObject? = nil, query: [URLQueryItem] = [],
+        accepting accepted: Set<Int> = []
+    ) async throws -> (status: Int, body: Data) {
         var components = URLComponents(url: origin.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { components.queryItems = query }
         var request = URLRequest(url: components.url!)
@@ -382,7 +395,7 @@ struct RunPodProvider: GPUProvider {
                     + "Check your account and try again.")
             }
         }
-        return response.body
+        return (response.status, response.body)
     }
 }
 
@@ -418,6 +431,10 @@ actor DemoGPUProvider: GPUProvider {
 
     func status(id: String) -> RentedPod {
         pod
+    }
+
+    func exists(id: String) -> Bool {
+        pod.status != "TERMINATED"
     }
 
     func list() -> [RentedPod] {
