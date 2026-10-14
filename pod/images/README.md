@@ -1,20 +1,20 @@
 # images
 
-Current public release: `ghcr.io/rationallyprime/concept-captioner-pod-{base,aitoolkit,ltx}:v0.2.3-clean-20261011`,
-a **clean build from commit `b79086183bba40e8120f0cba1ee59173f10108a5`** (`main`, including the
-H3 recipe, initializer and generator additions): the three Dockerfiles as committed, built on
-cx53 with `docker buildx build` and no overlay. The previous release, `v0.2.2-clean-20261011`
-(from `2789c1d3`; base `5a10967a…`, aitoolkit `c8fc06b7…`, ltx `e1c4a492…`), stays published. The images carry no OCI revision label; this table is the record of
+Current public release: `ghcr.io/rationallyprime/concept-captioner-pod-{base,aitoolkit,ltx}:v0.3.0-20261014`,
+a **clean build from commit `f784947`** (`model-table`, merged as PR #10: the model table and the Z-Image and
+Qwen-Image-2.1 rows): the three Dockerfiles as committed, built on cx53 with `docker buildx build` and no
+overlay. The previous release, `v0.2.3-clean-20261011` (from `b7908618`; base `d41b8287…`, aitoolkit `fe09109d…`,
+ltx `40a0361f…`), stays published. The images carry no OCI revision label; this table is the record of
 which commit they came from.
 
 | image suffix | public manifest digest |
 | --- | --- |
-| `base` | `sha256:d41b8287d985f954fd66b57d77e4aa0f55c8b2c67aa9ea02b0c71f4df0e8a5bd` |
-| `aitoolkit` | `sha256:fe09109dc305278d8a89897969b5605df96ce3aca7bffd1ae763933477341509` |
-| `ltx` | `sha256:40a0361fea34fb48a8d595c3c2ddae5d395fc4b27244eb76039f9fd3e7ef3cf8` |
+| `base` | `sha256:eab5ddb98ad490a95fe8826a7d48e819cb3a57fdd50ff6c258eafcfec4b60302` |
+| `aitoolkit` | `sha256:afe466d1b75e8a4398eb8dc099fcb96d591729d757db4d436a2ab483aa272966` |
+| `ltx` | `sha256:41a7420463c8bfa7a97d199f3c91ee2d46895cb71a33bd7e57744f6067b2c7d5` |
 
 Checked after the push: each tag resolves anonymously on GHCR to the digest above. The CPU
-control smoke described next ran against the pushed `v0.2.3` base image and passed (receipt
+control smoke described next has not been rerun for this tag; it ran against the pushed `v0.2.3` base image and passed (receipt
 `cx53:~/work/cc-clean3-logs/smoke.out`). The paragraph below records the same checks for
 `v0.2.2`, including its anonymous pulls by digest. The base build ran
 `check_vllm_flags.py` (23 flags found, build passed). The CPU control smoke ran against the
