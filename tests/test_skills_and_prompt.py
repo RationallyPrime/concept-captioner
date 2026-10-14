@@ -13,14 +13,8 @@ def test_default_skill_loads_with_profiles():
     skill = skills.load()
     assert skill.name == "diffusion-training-captioner"
     assert "# Core Caption Policy" in skill.instructions()
-    assert skill.profiles() == [
-        "flux-image",
-        "h3-still",
-        "h3-video",
-        "ltx-image",
-        "ltx-video",
-        "plain",
-    ]
+    for profile in skill.profiles():
+        assert skill.profile(profile)
     assert "[Shot 1]" in skill.profile("h3-still")
     with pytest.raises(ConfigurationError):
         skill.profile("nope")

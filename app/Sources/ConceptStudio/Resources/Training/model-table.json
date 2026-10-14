@@ -36,12 +36,20 @@
         }
       },
       "family_match": {
-        "substrings": ["flux"],
+        "substrings": [
+          "flux"
+        ],
         "tokens": []
       },
       "resolution": {
-        "choices": [512, 768, 1024],
-        "default": [512],
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512
+        ],
         "multiple": false
       },
       "recipe": {
@@ -95,7 +103,8 @@
       "hooks": {
         "generator": "aitoolkit_image"
       },
-      "notes": "Default model. Image-only. AI Toolkit FLUX settings: 8-bit quantised transformer, bf16 training, gradient checkpointing, AdamW8bit, flowmatch."
+      "notes": "Default model. Image-only. AI Toolkit FLUX settings: 8-bit quantised transformer, bf16 training, gradient checkpointing, AdamW8bit, flowmatch.",
+      "recipe_status": "verified"
     },
     {
       "id": "ltx-2",
@@ -119,8 +128,14 @@
       },
       "family_match": null,
       "resolution": {
-        "choices": [512, 768, 1024],
-        "default": [512],
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512
+        ],
         "multiple": false
       },
       "recipe": {
@@ -152,7 +167,11 @@
             "offload_optimizer_during_validation": true
           },
           "preprocess": {
-            "args": ["--load-text-encoder-in-8bit", "--vae-tiling", "--skip-audio"]
+            "args": [
+              "--load-text-encoder-in-8bit",
+              "--vae-tiling",
+              "--skip-audio"
+            ]
           }
         }
       },
@@ -171,7 +190,15 @@
         "fixed_fps": null,
         "min_frames": 9,
         "initial_frames": 33,
-        "duration_choices": [9, 17, 33, 49, 97, 129, 257],
+        "duration_choices": [
+          9,
+          17,
+          33,
+          49,
+          97,
+          129,
+          257
+        ],
         "select_whole_clip": false
       },
       "preview": {
@@ -180,7 +207,12 @@
         "video": {
           "min_frames": 9,
           "max_frames": 257,
-          "choices": [17, 49, 97, 129],
+          "choices": [
+            17,
+            49,
+            97,
+            129
+          ],
           "default_frames": 49
         }
       },
@@ -207,7 +239,8 @@
         "generator": "ltx_one_stage",
         "run_extra": "ltx_video_buckets"
       },
-      "notes": "Separate LTX-2 trainer image (launch_ltx.py). Images and 8n+1-frame clips. The pinned Hub source and preprocess allowlist live in pod/agent/src/podagent/ltx_rules.py; this row mirrors them."
+      "notes": "Separate LTX-2 trainer image (launch_ltx.py). Images and 8n+1-frame clips. The pinned Hub source and preprocess allowlist live in pod/agent/src/podagent/ltx_rules.py; this row mirrors them.",
+      "recipe_status": "verified"
     },
     {
       "id": "minimax-h3",
@@ -230,12 +263,24 @@
         "model_extra": {}
       },
       "family_match": {
-        "substrings": ["minimax", "hailuo"],
-        "tokens": ["h3"]
+        "substrings": [
+          "minimax",
+          "hailuo"
+        ],
+        "tokens": [
+          "h3"
+        ]
       },
       "resolution": {
-        "choices": [512, 768, 1024],
-        "default": [768, 1024],
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          768,
+          1024
+        ],
         "multiple": true
       },
       "recipe": {
@@ -280,7 +325,15 @@
         "video": {
           "min_frames": 5,
           "max_frames": 257,
-          "choices": [1, 5, 22, 39, 73, 124, 243],
+          "choices": [
+            1,
+            5,
+            22,
+            39,
+            73,
+            124,
+            243
+          ],
           "default_frames": 39
         }
       },
@@ -308,7 +361,8 @@
         "native_recipe": "minimax_h3",
         "generator": "minimax_h3"
       },
-      "notes": "AI Toolkit minimax_h3 registration, BF16 DiT and Qwen encoder, frozen Circlestone image-training adapter (guidance preservation loss must stay off while it is used). Images and 17n+5-frame clips at exactly 24 fps. Native recipe import and warm start. The quality recipe lives in pod/scripts/h3_recipe.py; this row mirrors it."
+      "notes": "AI Toolkit minimax_h3 registration, BF16 DiT and Qwen encoder, frozen Circlestone image-training adapter (guidance preservation loss must stay off while it is used). Images and 17n+5-frame clips at exactly 24 fps. Native recipe import and warm start. The quality recipe lives in pod/scripts/h3_recipe.py; this row mirrors it.",
+      "recipe_status": "verified"
     },
     {
       "id": "z-image",
@@ -332,8 +386,14 @@
       },
       "family_match": null,
       "resolution": {
-        "choices": [512, 768, 1024],
-        "default": [768],
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          768
+        ],
         "multiple": false
       },
       "recipe": {
@@ -388,7 +448,8 @@
       "hooks": {
         "generator": "aitoolkit_arch_image"
       },
-      "notes": "Undistilled base model, AI Toolkit arch zimage (not zimage_l2p), read from the standard diffusers layout (transformer/, text_encoder/ Qwen3, tokenizer/, vae/) that AI Toolkit's ZImageModel expects. bf16, no quantisation, no gradient checkpointing, 768 px, AdamW at 1e-4, rank and alpha 32, batch 1, 150 epochs. Checkpoint cadence is in steps: every 500 steps, newest 20 kept. A LoRA trained on this base model works on Z-Image-Turbo at about twice the strength; that is shown as a note in the picker and on the model card and is never applied automatically."
+      "notes": "Undistilled base model, AI Toolkit arch zimage (not zimage_l2p), read from the standard diffusers layout (transformer/, text_encoder/ Qwen3, tokenizer/, vae/) that AI Toolkit's ZImageModel expects. bf16, no quantisation, no gradient checkpointing, 768 px, AdamW at 1e-4, rank and alpha 32, batch 1, 150 epochs. Checkpoint cadence is in steps: every 500 steps, newest 20 kept. A LoRA trained on this base model works on Z-Image-Turbo at about twice the strength; that is shown as a note in the picker and on the model card and is never applied automatically.",
+      "recipe_status": "verified"
     },
     {
       "id": "qwen-image-2.1",
@@ -398,7 +459,9 @@
       "model_ref": "Qwen/Qwen-Image-2.1",
       "source": {
         "revision": null,
-        "weight_repos": ["Comfy-Org/Qwen-Image-2.1"],
+        "weight_repos": [
+          "Comfy-Org/Qwen-Image-2.1"
+        ],
         "gated": false,
         "first_download_gb": 32.5,
         "download_note": "The bf16 transformer (14.2 GB), the bf16 Qwen3-VL-8B text encoder (17.5 GB) and the VAE (0.7 GB) from the Comfy-Org/Qwen-Image-2.1 repack, plus the processor and configs from Qwen/Qwen-Image-2.1 (under 0.1 GB). AI Toolkit downloads them on first use into its own models folder (MODELS_PATH, by default /opt/ai-toolkit/models), which is on the pod's container disk rather than the /workspace volume, so the download repeats on a new pod. The revisions are not pinned."
@@ -413,8 +476,13 @@
       },
       "family_match": null,
       "resolution": {
-        "choices": [512, 768],
-        "default": [768],
+        "choices": [
+          512,
+          768
+        ],
+        "default": [
+          768
+        ],
         "multiple": false
       },
       "recipe": {
@@ -502,6 +570,2561 @@
         "projector_dim": 2048,
         "encoder_resolution": 518,
         "note": "SimpleTuner's Qwen-Image-2.1 preset (ViT-g/14, block 8, lambda 0.5) with the paper's MLP projector."
+      },
+      "recipe_status": "verified"
+    },
+    {
+      "id": "anima",
+      "display_name": "Anima",
+      "short_name": "Anima",
+      "trainer": "aitoolkit",
+      "model_ref": "circlestone-labs/Anima-Base-v1.0-Diffusers",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 5.6,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "anima",
+        "dtype": "bf16",
+        "quantize": false,
+        "quantize_text_encoder": false,
+        "gradient_checkpointing": true,
+        "model_extra": {
+          "qtype": "",
+          "qtype_te": ""
+        }
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 24,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 24 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "circlestone-labs-non-commercial-license",
+        "name": "CircleStone Labs Non-Commercial License",
+        "url": "https://huggingface.co/circlestone-labs/Anima",
+        "notice": "CircleStone Labs Non-Commercial License. Read the model card and licence before training or sharing adapters. Model weights and derivatives have non-commercial restrictions; outputs have separate terms.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Anima accepts descriptive prose, tags, or both; the bundled plain profile uses prose (at least two sentences recommended by its card). Open AI Toolkit issue #1019 reports tensor-size failures at 1280 px; the UI default buckets here stop at 1024 px. Applicability at the pin is not GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "Open AI Toolkit issue #1019 reports tensor-size failures at 1280 px; the UI default buckets here stop at 1024 px. Applicability at the pin is not GPU-tested.",
+      "usage_note": "Anima accepts descriptive prose, tags, or both; the bundled plain profile uses prose (at least two sentences recommended by its card). Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "conv": 16,
+            "conv_alpha": 16,
+            "network_kwargs": {
+              "ignore_if_contains": []
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "weighted",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {
+            "low_vram": false,
+            "model_kwargs": {}
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "flex1",
+      "display_name": "Flex.1",
+      "short_name": "Flex.1",
+      "trainer": "aitoolkit",
+      "model_ref": "ostris/Flex.1-alpha",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 47.9,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "flex1",
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {}
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 48,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 48 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "apache-2.0",
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/ostris/Flex.1-alpha",
+        "notice": "Apache 2.0. Read the model card and licence before training or sharing adapters.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses natural-language prose with its modern text encoder. Open AI Toolkit issue #1048 reports FLUX-family split_model_over_gpus training failures; this recipe does not enable that option. Training is not GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "Open AI Toolkit issue #1048 reports FLUX-family split_model_over_gpus training failures; this recipe does not enable that option. Training is not GPU-tested.",
+      "usage_note": "Uses natural-language prose with its modern text encoder. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "conv": 16,
+            "conv_alpha": 16,
+            "network_kwargs": {
+              "ignore_if_contains": []
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "sigmoid",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {
+            "qtype": "qfloat8",
+            "qtype_te": "qfloat8",
+            "low_vram": false,
+            "model_kwargs": {}
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "chroma",
+      "display_name": "Chroma",
+      "short_name": "Chroma",
+      "trainer": "aitoolkit",
+      "model_ref": "lodestones/Chroma1-Base",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 45.3,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "chroma",
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {}
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 48,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 48 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "apache-2.0",
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/lodestones/Chroma1-Base",
+        "notice": "Apache 2.0. Read the model card and licence before training or sharing adapters.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses natural-language prose with its modern text encoder. Open AI Toolkit issue #1066 reports severe training slowdown after an update. Applicability at the pin is not GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "Open AI Toolkit issue #1066 reports severe training slowdown after an update. Applicability at the pin is not GPU-tested.",
+      "usage_note": "Uses natural-language prose with its modern text encoder. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "conv": 16,
+            "conv_alpha": 16,
+            "network_kwargs": {
+              "ignore_if_contains": []
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "sigmoid",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {
+            "qtype": "qfloat8",
+            "qtype_te": "qfloat8",
+            "low_vram": false,
+            "model_kwargs": {}
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "lumina2",
+      "display_name": "Lumina2",
+      "short_name": "Lumina2",
+      "trainer": "aitoolkit",
+      "model_ref": "Alpha-VLLM/Lumina-Image-2.0",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 31.7,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "lumina2",
+        "dtype": "bf16",
+        "quantize": false,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {}
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 32,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 32 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "apache-2.0",
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/Alpha-VLLM/Lumina-Image-2.0",
+        "notice": "Apache 2.0. Read the model card and licence before training or sharing adapters.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses natural-language prose with its modern text encoder. No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "usage_note": "Uses natural-language prose with its modern text encoder. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "conv": 16,
+            "conv_alpha": 16,
+            "network_kwargs": {
+              "ignore_if_contains": []
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "sigmoid",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {
+            "qtype": "qfloat8",
+            "qtype_te": "qfloat8",
+            "low_vram": false,
+            "model_kwargs": {}
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "ming-image",
+      "display_name": "Ming-Image 0.1 Design (w/ Training Adapter)",
+      "short_name": "Ming-Image 0.1 Design (w/ Training Adapter)",
+      "trainer": "aitoolkit",
+      "model_ref": "Comfy-Org/Ming-Image",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 162.4,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "ming_image",
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {
+          "qtype": "convrot8",
+          "qtype_te": "convrot8",
+          "low_vram": true,
+          "assistant_lora_path": "ostris/ming_image_training_adapter/ming_image_01_design_training_adapter_v1.safetensors",
+          "model_kwargs": {
+            "rgba": false
+          }
+        }
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 80,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 80 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "mit",
+        "name": "MIT",
+        "url": "https://huggingface.co/Comfy-Org/Ming-Image",
+        "notice": "MIT. Read the model card and licence before training or sharing adapters.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses natural-language prose with its modern text encoder. No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "usage_note": "Uses natural-language prose with its modern text encoder. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "conv": 16,
+            "conv_alpha": 16,
+            "network_kwargs": {
+              "ignore_if_contains": []
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "shift",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {}
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "sdxl",
+      "display_name": "SDXL",
+      "short_name": "SDXL",
+      "trainer": "aitoolkit",
+      "model_ref": "stabilityai/stable-diffusion-xl-base-1.0",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 76.9,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "sdxl",
+        "dtype": "bf16",
+        "quantize": false,
+        "quantize_text_encoder": false,
+        "gradient_checkpointing": true,
+        "model_extra": {}
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 24,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 24 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "short-caption",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "short-caption": "Short captions · CLIP"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "openrail++",
+        "name": "CreativeML Open RAIL++-M",
+        "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0",
+        "notice": "CreativeML Open RAIL++-M. Read the model card and licence before training or sharing adapters.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses a short caption for CLIP; keep it concise because the text encoder truncates long prose. No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "usage_note": "Uses a short caption for CLIP; keep it concise because the text encoder truncates long prose. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "conv": 16,
+            "conv_alpha": 16,
+            "network_kwargs": {
+              "ignore_if_contains": []
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "ddpm",
+            "timestep_type": "sigmoid",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {
+            "qtype": "qfloat8",
+            "qtype_te": "qfloat8",
+            "low_vram": false,
+            "model_kwargs": {}
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "omnigen2",
+      "display_name": "OmniGen2",
+      "short_name": "OmniGen2",
+      "trainer": "aitoolkit",
+      "model_ref": "OmniGen2/OmniGen2",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 31.3,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "omnigen2",
+        "dtype": "bf16",
+        "quantize": false,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {}
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 48,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 48 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "apache-2.0",
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/OmniGen2/OmniGen2",
+        "notice": "Apache 2.0. Read the model card and licence before training or sharing adapters.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses natural-language prose with its modern text encoder. Open AI Toolkit issue #1029 concerns malformed example YAML; this row uses the UI defaults instead of that example. Training is not GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "Open AI Toolkit issue #1029 concerns malformed example YAML; this row uses the UI defaults instead of that example. Training is not GPU-tested.",
+      "usage_note": "Uses natural-language prose with its modern text encoder. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "conv": 16,
+            "conv_alpha": 16,
+            "network_kwargs": {
+              "ignore_if_contains": []
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "sigmoid",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {
+            "qtype": "qfloat8",
+            "qtype_te": "qfloat8",
+            "low_vram": false,
+            "model_kwargs": {}
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "flux2",
+      "display_name": "FLUX.2",
+      "short_name": "FLUX.2",
+      "trainer": "aitoolkit",
+      "model_ref": "black-forest-labs/FLUX.2-dev",
+      "source": {
+        "revision": null,
+        "gated": true,
+        "first_download_gb": 177.6,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "flux2",
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {
+          "low_vram": true,
+          "qtype": "qfloat8",
+          "model_kwargs": {
+            "match_target_res": false
+          }
+        }
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 96,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 96 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "flux-non-commercial-license",
+        "name": "FLUX Non-Commercial License",
+        "url": "https://huggingface.co/black-forest-labs/FLUX.2-dev",
+        "notice": "FLUX Non-Commercial License. Read the model card and licence before training or sharing adapters. Model weights and derivatives have non-commercial restrictions; outputs have separate terms. Accept access conditions on Hugging Face before downloading with your token.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses natural-language prose with its modern text encoder. No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "usage_note": "Uses natural-language prose with its modern text encoder. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "conv": 16,
+            "conv_alpha": 16,
+            "network_kwargs": {
+              "ignore_if_contains": []
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "weighted",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {
+            "qtype_te": "qfloat8"
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "zimage-turbo",
+      "display_name": "Z-Image Turbo (w/ Training Adapter)",
+      "short_name": "Z-Image Turbo (w/ Training Adapter)",
+      "trainer": "aitoolkit",
+      "model_ref": "Tongyi-MAI/Z-Image-Turbo",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 32.9,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "zimage:turbo",
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {
+          "low_vram": true,
+          "qtype": "qfloat8",
+          "assistant_lora_path": "ostris/zimage_turbo_training_adapter/zimage_turbo_training_adapter_v2.safetensors"
+        }
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 48,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 48 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "apache-2.0",
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo",
+        "notice": "Apache 2.0. Read the model card and licence before training or sharing adapters.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses natural-language prose with its modern text encoder. Open AI Toolkit issues #1038 and #1027 concern Z-Image training and headless adapter configuration. This row uses the pinned UI assistant_lora_path; training at the pin is not GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "Open AI Toolkit issues #1038 and #1027 concern Z-Image training and headless adapter configuration. This row uses the pinned UI assistant_lora_path; training at the pin is not GPU-tested.",
+      "usage_note": "Uses natural-language prose with its modern text encoder. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "conv": 16,
+            "conv_alpha": 16,
+            "network_kwargs": {
+              "ignore_if_contains": []
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "weighted",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {
+            "qtype_te": "qfloat8",
+            "model_kwargs": {}
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "zimage-deturbo",
+      "display_name": "Z-Image De-Turbo (De-Distilled)",
+      "short_name": "Z-Image De-Turbo (De-Distilled)",
+      "trainer": "aitoolkit",
+      "model_ref": "ostris/Z-Image-De-Turbo",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 24.6,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "zimage:deturbo",
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {
+          "extras_name_or_path": "Tongyi-MAI/Z-Image-Turbo",
+          "low_vram": true,
+          "qtype": "qfloat8"
+        }
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 48,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 48 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "apache-2.0",
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/ostris/Z-Image-De-Turbo",
+        "notice": "Apache 2.0. Read the model card and licence before training or sharing adapters.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses natural-language prose with its modern text encoder. Open AI Toolkit issue #1038 reports Z-Image training failure without a precise variant or commit. Applicability to De-Turbo at the pin is not GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "Open AI Toolkit issue #1038 reports Z-Image training failure without a precise variant or commit. Applicability to De-Turbo at the pin is not GPU-tested.",
+      "usage_note": "Uses natural-language prose with its modern text encoder. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "conv": 16,
+            "conv_alpha": 16,
+            "network_kwargs": {
+              "ignore_if_contains": []
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "weighted",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {
+            "qtype_te": "qfloat8",
+            "model_kwargs": {}
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "flux2-klein-4b",
+      "display_name": "FLUX.2-klein-base-4B",
+      "short_name": "FLUX.2-klein-base-4B",
+      "trainer": "aitoolkit",
+      "model_ref": "black-forest-labs/FLUX.2-klein-base-4B",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 23.7,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "flux2_klein_4b",
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {
+          "low_vram": true,
+          "qtype": "qfloat8",
+          "model_kwargs": {
+            "match_target_res": false
+          }
+        }
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 32,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 32 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "apache-2.0",
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4B",
+        "notice": "Apache 2.0. Read the model card and licence before training or sharing adapters.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses natural-language prose with its modern text encoder. No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "usage_note": "Uses natural-language prose with its modern text encoder. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "conv": 16,
+            "conv_alpha": 16,
+            "network_kwargs": {
+              "ignore_if_contains": []
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "weighted",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {
+            "qtype_te": "qfloat8"
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "ernie-image",
+      "display_name": "ERNIE-Image",
+      "short_name": "ERNIE-Image",
+      "trainer": "aitoolkit",
+      "model_ref": "baidu/ERNIE-Image",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 31.6,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "ernie_image",
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {
+          "low_vram": true,
+          "qtype": "qfloat8"
+        }
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 48,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 48 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "apache-2.0",
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/baidu/ERNIE-Image",
+        "notice": "Apache 2.0. Read the model card and licence before training or sharing adapters.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses natural-language prose with its modern text encoder. No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "usage_note": "Uses natural-language prose with its modern text encoder. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "conv": 16,
+            "conv_alpha": 16,
+            "network_kwargs": {
+              "ignore_if_contains": []
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "weighted",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {
+            "qtype_te": "qfloat8",
+            "model_kwargs": {}
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "flux2-klein-9b",
+      "display_name": "FLUX.2-klein-base-9B",
+      "short_name": "FLUX.2-klein-base-9B",
+      "trainer": "aitoolkit",
+      "model_ref": "black-forest-labs/FLUX.2-klein-base-9B",
+      "source": {
+        "revision": null,
+        "gated": true,
+        "first_download_gb": 52.9,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "flux2_klein_9b",
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {
+          "low_vram": true,
+          "qtype": "qfloat8",
+          "model_kwargs": {
+            "match_target_res": false
+          }
+        }
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 48,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 48 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "flux-non-commercial-license",
+        "name": "FLUX Non-Commercial License",
+        "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B",
+        "notice": "FLUX Non-Commercial License. Read the model card and licence before training or sharing adapters. Model weights and derivatives have non-commercial restrictions; outputs have separate terms. Accept access conditions on Hugging Face before downloading with your token.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses natural-language prose with its modern text encoder. Open AI Toolkit issues #989 and #1003 report qfloat8 offload/GPU loss on WSL2 and high host memory use. The pin is not GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "Open AI Toolkit issues #989 and #1003 report qfloat8 offload/GPU loss on WSL2 and high host memory use. The pin is not GPU-tested.",
+      "usage_note": "Uses natural-language prose with its modern text encoder. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "conv": 16,
+            "conv_alpha": 16,
+            "network_kwargs": {
+              "ignore_if_contains": []
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "weighted",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {
+            "qtype_te": "qfloat8"
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "nucleus-image",
+      "display_name": "Nucleus-Image",
+      "short_name": "Nucleus-Image",
+      "trainer": "aitoolkit",
+      "model_ref": "NucleusAI/Nucleus-Image",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 51.7,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "nucleus_image",
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {}
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 128,
+        "alpha": 128,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 80,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 80 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "apache-2.0",
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/NucleusAI/Nucleus-Image",
+        "notice": "Apache 2.0. Read the model card and licence before training or sharing adapters.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses natural-language prose with its modern text encoder. No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "usage_note": "Uses natural-language prose with its modern text encoder. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "conv": 16,
+            "conv_alpha": 16,
+            "network_kwargs": {
+              "ignore_if_contains": [
+                "img_mlp.experts",
+                "img_mlp.gate"
+              ]
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "linear",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {
+            "qtype": "qfloat8",
+            "qtype_te": "qfloat8",
+            "low_vram": false,
+            "model_kwargs": {}
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "hidream-o1",
+      "display_name": "HiDream-O1",
+      "short_name": "HiDream-O1",
+      "trainer": "aitoolkit",
+      "model_ref": "HiDream-ai/HiDream-O1-Image",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 35.2,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "hidream_o1",
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": false,
+        "gradient_checkpointing": true,
+        "model_extra": {
+          "model_kwargs": {
+            "noise_scale_inference": 8,
+            "noise_scale": 8
+          }
+        }
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 80,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 80 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "mit",
+        "name": "MIT",
+        "url": "https://huggingface.co/HiDream-ai/HiDream-O1-Image",
+        "notice": "MIT. Read the model card and licence before training or sharing adapters.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses natural-language prose with its modern text encoder. No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "usage_note": "Uses natural-language prose with its modern text encoder. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "network_kwargs": {
+              "ignore_if_contains": [
+                "lm_head",
+                "patch_embed",
+                "visual"
+              ]
+            },
+            "transformer_only": false
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "weighted",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse",
+            "max_loss": 1
+          },
+          "model": {
+            "qtype": "qfloat8",
+            "qtype_te": "qfloat8",
+            "low_vram": false
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "prx-pixel",
+      "display_name": "PRXPixel (pixel space)",
+      "short_name": "PRXPixel (pixel space)",
+      "trainer": "aitoolkit",
+      "model_ref": "Photoroom/prxpixel-t2i",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 17.5,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "prx_pixel",
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {
+          "low_vram": true
+        }
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 48,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 48 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "apache-2.0",
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/Photoroom/prxpixel-t2i",
+        "notice": "Apache 2.0. Read the model card and licence before training or sharing adapters.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses natural-language prose with its modern text encoder. No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "usage_note": "Uses natural-language prose with its modern text encoder. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "network_kwargs": {
+              "ignore_if_contains": []
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "linear",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {
+            "qtype": "qfloat8",
+            "qtype_te": "qfloat8",
+            "model_kwargs": {}
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "iris3b",
+      "display_name": "Iris-3B (pixel space)",
+      "short_name": "Iris-3B (pixel space)",
+      "trainer": "aitoolkit",
+      "model_ref": "speridlabs/iris-3b",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 41.9,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "iris3b",
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {
+          "qtype": "convrot8",
+          "qtype_te": "convrot8",
+          "low_vram": true
+        }
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 48,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 48 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "apache-2.0",
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/speridlabs/iris-3b",
+        "notice": "Apache 2.0. Read the model card and licence before training or sharing adapters.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses natural-language prose with its modern text encoder. No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "usage_note": "Uses natural-language prose with its modern text encoder. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "network_kwargs": {
+              "ignore_if_contains": []
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "shift",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {
+            "model_kwargs": {}
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "krea2",
+      "display_name": "Krea 2 (raw)",
+      "short_name": "Krea 2 (raw)",
+      "trainer": "aitoolkit",
+      "model_ref": "krea/Krea-2-Raw",
+      "source": {
+        "revision": null,
+        "gated": true,
+        "first_download_gb": 62.0,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "krea2",
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {
+          "low_vram": true
+        }
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 80,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 80 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "krea-2-community-license",
+        "name": "Krea 2 Community License",
+        "url": "https://huggingface.co/krea/Krea-2-Raw",
+        "notice": "Krea 2 Community License. Read the model card and licence before training or sharing adapters. This is a custom community licence with conditions on use and redistribution. Accept access conditions on Hugging Face before downloading with your token.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses natural-language prose with its modern text encoder. Open AI Toolkit issues #1041, #990, #968 and #954 report backward dtype failures, memory regressions and quantization/offload crashes. The pin is not GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "Known breakage at the AI Toolkit pin: issue #1041 reports backward dtype failures with gradient checkpointing, which these UI defaults enable; missing key/value casts remain in the pinned source. Issues #990, #968 and #954 also report memory and offload failures. No GPU test has been run.",
+      "usage_note": "Uses natural-language prose with its modern text encoder. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "network_kwargs": {
+              "ignore_if_contains": []
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "linear",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {
+            "qtype": "qfloat8",
+            "qtype_te": "qfloat8",
+            "model_kwargs": {}
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "krea2-turbo",
+      "display_name": "Krea 2 Turbo (w/ Training Adapter)",
+      "short_name": "Krea 2 Turbo (w/ Training Adapter)",
+      "trainer": "aitoolkit",
+      "model_ref": "krea/Krea-2-Turbo",
+      "source": {
+        "revision": null,
+        "gated": true,
+        "first_download_gb": 62.0,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "krea2:turbo",
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {
+          "low_vram": true,
+          "assistant_lora_path": "ostris/krea2_turbo_training_adapter/krea2_turbo_training_adapter_v1.safetensors"
+        }
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 80,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 80 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "krea-2-community-license",
+        "name": "Krea 2 Community License",
+        "url": "https://huggingface.co/krea/Krea-2-Turbo",
+        "notice": "Krea 2 Community License. Read the model card and licence before training or sharing adapters. This is a custom community licence with conditions on use and redistribution. Accept access conditions on Hugging Face before downloading with your token.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses natural-language prose with its modern text encoder. Open AI Toolkit issues #1041, #990, #968 and #954 report Krea-family backward, memory and quantization/offload failures. Turbo is not GPU-tested at the pin.",
+      "recipe_status": "unverified",
+      "training_notice": "Known breakage at the AI Toolkit pin: issue #1041 reports backward dtype failures with gradient checkpointing, which these UI defaults enable; missing key/value casts remain in the pinned source. Issues #990, #968 and #954 also report memory and offload failures. No GPU test has been run.",
+      "usage_note": "Uses natural-language prose with its modern text encoder. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "network_kwargs": {
+              "ignore_if_contains": []
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "linear",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {
+            "qtype": "qfloat8",
+            "qtype_te": "qfloat8",
+            "model_kwargs": {}
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "boogu-image",
+      "display_name": "Boogu Image",
+      "short_name": "Boogu Image",
+      "trainer": "aitoolkit",
+      "model_ref": "Boogu/Boogu-Image-0.1-Base",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 38.6,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "boogu_image",
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {
+          "low_vram": true
+        }
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 48,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 48 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "apache-2.0",
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/Boogu/Boogu-Image-0.1-Base",
+        "notice": "Apache 2.0. Read the model card and licence before training or sharing adapters. The model card describes this as a research project and warns against production deployment without additional safeguards.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/diffusion_models/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses natural-language prose with its modern text encoder. No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "No architecture-specific open training-breaking issue was found in the upstream issue check on 2026-10-14. This recipe has not been GPU-tested.",
+      "usage_note": "Uses natural-language prose with its modern text encoder. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "network_kwargs": {
+              "ignore_if_contains": []
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "linear",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {
+            "qtype": "qfloat8",
+            "qtype_te": "qfloat8",
+            "model_kwargs": {}
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
+      }
+    },
+    {
+      "id": "flex2",
+      "display_name": "Flex.2",
+      "short_name": "Flex.2",
+      "trainer": "aitoolkit",
+      "model_ref": "ostris/Flex.2-preview",
+      "source": {
+        "revision": null,
+        "gated": false,
+        "first_download_gb": 42.6,
+        "download_note": "Hub repository file-size total, including alternative weight formats. This is an upper estimate for repository files, not a measured download; dependencies may add files."
+      },
+      "architecture": {
+        "arch": "flex2",
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {
+          "model_kwargs": {
+            "invert_inpaint_mask_chance": 0.2,
+            "inpaint_dropout": 0.5,
+            "control_dropout": 0.5,
+            "inpaint_random_chance": 0.2,
+            "do_random_inpainting": true,
+            "random_blur_mask": true,
+            "random_dialate_mask": true
+          }
+        }
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512,
+          768,
+          1024
+        ],
+        "multiple": true
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 3000
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "rank": 32,
+        "alpha": 32,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": "bf16",
+          "editable": true
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 48,
+        "verify_on_pod": true,
+        "note": "Conservative allocation for an unverified UI recipe; a memory floor does not establish that training fits or succeeds.",
+        "verify_message": "This unverified recipe requires at least 48 GB of memory per GPU. Choose a larger computer."
+      },
+      "video": null,
+      "preview": {
+        "training_samples": false,
+        "still": false,
+        "video": null
+      },
+      "captions": {
+        "image_profile": "plain",
+        "video_profile": null,
+        "profile_prefix": null,
+        "titles": {
+          "plain": "Plain prose"
+        }
+      },
+      "selection": {
+        "follows_project_profile": false
+      },
+      "license": {
+        "id": "apache-2.0",
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/ostris/Flex.2-preview",
+        "notice": "Apache 2.0. Read the model card and licence before training or sharing adapters.",
+        "show_notice": true
+      },
+      "hooks": {},
+      "notes": "Unverified. AI Toolkit f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47: extensions_built_in/flex2/ui.tsx per-arch defaults over ui/src/app/jobs/new/jobConfig.ts. Uses natural-language prose with its modern text encoder. Open AI Toolkit issue #1048 reports FLUX-family split_model_over_gpus training failures; this recipe does not enable that option. Training is not GPU-tested.",
+      "recipe_status": "unverified",
+      "training_notice": "Open AI Toolkit issue #1048 reports FLUX-family split_model_over_gpus training failures; this recipe does not enable that option. Training is not GPU-tested.",
+      "usage_note": "Uses natural-language prose with its modern text encoder. Comparison generation is unavailable for this unverified recipe.",
+      "trainer_options": {
+        "process": {
+          "network": {
+            "conv": 16,
+            "conv_alpha": 16,
+            "network_kwargs": {
+              "ignore_if_contains": []
+            }
+          },
+          "train": {
+            "bypass_guidance_embedding": true,
+            "noise_scheduler": "flowmatch",
+            "timestep_type": "sigmoid",
+            "optimizer_params": {
+              "weight_decay": 0.0001
+            },
+            "unload_text_encoder": false,
+            "cache_text_embeddings": false,
+            "loss_type": "mse"
+          },
+          "model": {
+            "qtype": "qfloat8",
+            "qtype_te": "qfloat8",
+            "low_vram": false
+          }
+        },
+        "dataset": {
+          "cache_latents_to_disk": false,
+          "caption_dropout_rate": 0.05
+        }
       }
     }
   ]
