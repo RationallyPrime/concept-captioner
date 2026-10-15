@@ -138,6 +138,23 @@ def test_logs_go_under_logs_as_they_are_now(tmp_path: Path):
     assert logs[0][1] == b"step 500 loss 0.1\n"
 
 
+def test_a_log_that_cannot_be_read_or_is_too_large_is_left_out(tmp_path: Path, monkeypatch):
+    run_dir = make_run(tmp_path)
+    monkeypatch.setattr(push, "MAX_LOG_BYTES", 10)
+    (run_dir / "trainer.log").write_text("x" * 11, encoding="utf-8")
+    unreadable = run_dir / "tensorboard" / "events.out.tfevents.1.scraped"
+    read_bytes = Path.read_bytes
+
+    def failing_read(path: Path) -> bytes:
+        if path == unreadable:
+            raise PermissionError("denied")
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", failing_read)
+    names = [path for path, _ in push.log_files(run_dir)]
+    assert names == ["logs/tensorboard/nora7-h3-001_20261015/events.out.tfevents.2"]
+
+
 # --- model card ----------------------------------------------------------------------------------
 
 

@@ -48,6 +48,7 @@ SIDE_FILES = ("run.json", "config.yaml")
 LOG_FILE = "trainer.log"
 EVENTS_DIR = "tensorboard"
 LOGS_IN_REPO = "logs"  # the repo folder that holds LOG_FILE and EVENTS_DIR
+MAX_LOG_BYTES = 64 * 1024 * 1024  # held in memory until the commit; the CPU-only pods have 512 MB
 CARD_NAME = "README.md"
 RECEIPT_NAME = "push.json"
 # The Hub's licence identifiers (https://huggingface.co/docs/hub/en/repositories-licenses), less
@@ -185,12 +186,31 @@ def _regular(path: Path) -> bool:
 
 
 def log_files(run_dir: Path) -> list[tuple[str, bytes]]:
-    """``(path in the repo, contents)`` of ``trainer.log`` and the TensorBoard event files."""
+    """``(path in the repo, contents)`` of ``trainer.log`` and the TensorBoard event files.
+
+    The logs ride along with the weights, so a log that cannot be read or is larger than
+    ``MAX_LOG_BYTES`` is left out with a warning instead of stopping the push.
+    """
     found = [run_dir / LOG_FILE] if _regular(run_dir / LOG_FILE) else []
     events = run_dir / EVENTS_DIR
     if events.is_dir() and not events.is_symlink():
         found += sorted(path for path in events.rglob("*") if _regular(path))
-    return [(f"{LOGS_IN_REPO}/{relative(run_dir, path)}", path.read_bytes()) for path in found]
+    logs = []
+    for path in found:
+        name = f"{LOGS_IN_REPO}/{relative(run_dir, path)}"
+        try:
+            if path.stat().st_size > MAX_LOG_BYTES:
+                print(
+                    f"push-lora: {name} is over {MAX_LOG_BYTES} bytes; pushing without it",
+                    file=sys.stderr,
+                )
+                continue
+            logs.append((name, path.read_bytes()))
+        except OSError as error:
+            print(
+                f"push-lora: could not read {name} ({error}); pushing without it", file=sys.stderr
+            )
+    return logs
 
 
 def upload_plan(
