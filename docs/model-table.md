@@ -52,7 +52,7 @@ apply.
 | `architecture.model_extra` | Further AI Toolkit `model` keys, in order (FLUX: `is_flux: true`). |
 | `family_match` | `substrings` and `tokens` that match a custom base model to this row's AI Toolkit `model` block; `null` for none. Tokens must not touch another letter or digit. |
 | `resolution.choices`, `default` | Selectable training resolutions and the ones applied when the model is selected. |
-| `resolution.multiple` | `true`: Advanced shows one toggle per resolution bucket. `false`: a single picker. |
+| `resolution.multiple` | `true`: Advanced shows one toggle per resolution bucket. `false`: a single picker. Each chosen bucket adds a pass over the images to an epoch (see [Training length](#training-length)); regularisation images are drawn at the largest. |
 | `recipe.length` | `{unit, value}`: the default training length in `steps`, or in `epochs` (passes over each training image and clip). |
 | `recipe.learning_rate`, `rank`, `alpha`, `batch_size`, `gradient_accumulation` | Defaults for the editable Advanced fields. |
 | `recipe.optimizer` | AI Toolkit `train.optimizer`; for LTX it describes `run_extra.optimization`. |
@@ -88,9 +88,12 @@ row's current default for a setting the repeated run left alone.
 ### Training length
 
 A row in `epochs` shows passes over each image and clip, and the app sends
-`steps = ceil(epochs × items / (batch_size × gradient_accumulation))`, where `items` is the
-number of included training images and clips. run.json always carries `steps`; Resume and saved
-runs work on steps.
+`steps = ceil(epochs × items × buckets / (batch_size × gradient_accumulation))`, where `items` is
+the number of included training images and clips and `buckets` the number of chosen resolution
+buckets on AI Toolkit (1 on LTX): AI Toolkit splits a dataset into one copy per bucket, so a pass
+sees each image once at every chosen size. run.json always carries `steps`; Resume and saved runs
+work on steps, and Repeat turns them back into epochs with the repeated run's own item and bucket
+counts.
 
 ## Lookup rules
 
@@ -155,7 +158,7 @@ those captions. The captioner is told only the class nouns, with the skill's
 | `images` | Default number of images in a generated set; editable in the app. |
 | `weight` | Default `train.reg_weight`: how much a regularisation image counts against one of the subject's. |
 | `generation.steps`, `guidance_scale` | Sampling settings for the generated images. |
-| `generation.seconds_per_image` | Time per image, for the estimate the app shows. Display only. |
+| `generation.seconds_per_image` | Time per image at the row's largest default resolution, for the estimate the app shows; the app scales it by the area of the largest chosen bucket. Display only. |
 | `note` | Free text for maintainers. Not displayed. |
 
 The row needs a `generator` hook, because the images are drawn through the same model class as

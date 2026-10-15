@@ -482,12 +482,13 @@
       "resolution": {
         "choices": [
           512,
-          768
+          768,
+          1024
         ],
         "default": [
           768
         ],
-        "multiple": false
+        "multiple": true
       },
       "recipe": {
         "length": {
@@ -523,7 +524,7 @@
       "gpu": {
         "min_vram_gb": 80,
         "verify_on_pod": false,
-        "note": "Qwen-Image-2.1 trains in bf16 with no quantisation, so it needs a large card.",
+        "note": "Qwen-Image-2.1 trains in bf16 with no quantisation, so it needs a large card. At 1024 px it generally needs gradient checkpointing, which Advanced training can turn on, even on a 96 GB card.",
         "verify_message": null
       },
       "video": null,
@@ -553,7 +554,7 @@
       "hooks": {
         "generator": "aitoolkit_arch_image"
       },
-      "notes": "AI Toolkit qwen_image_2 (one architecture for text-to-image and editing; this row trains plain text-to-image LoRAs). bf16, no quantisation, no gradient checkpointing, 768 px, AdamW at 1e-4 with a 50-step constant warmup, rank and alpha 32, timestep_type shift (AI Toolkit's own default for this architecture), cached text embeddings (the trainer then unloads the 17.5 GB text encoder from the GPU after caching), batch 1, 400 epochs. Checkpoint cadence is in steps: every 500 steps, newest 40 kept, so a run of up to 20,000 steps keeps its whole curve. 1024 px is not offered. Training samples are off. Comparison generation names aitoolkit_arch_image, which builds the model class AI Toolkit registers for qwen_image_2 and binds the trained LoRA as a network; the same model class draws the regularisation images (generate_results.render_base). Weights come from the Comfy-Org repack through AI Toolkit's own resolver, which picks the bf16 files when quantisation is off.",
+      "notes": "AI Toolkit qwen_image_2 (one architecture for text-to-image and editing; this row trains plain text-to-image LoRAs). bf16, no quantisation, no gradient checkpointing, 768 px, AdamW at 1e-4 with a 50-step constant warmup, rank and alpha 32, timestep_type shift (AI Toolkit's own default for this architecture), cached text embeddings (the trainer then unloads the 17.5 GB text encoder from the GPU after caching), batch 1, 400 epochs. Checkpoint cadence is in steps: every 500 steps, newest 40 kept, so a run of up to 20,000 steps keeps its whole curve. 512, 768 and 1024 px are offered as resolution buckets, one or more at a time; 1024 px generally needs gradient checkpointing on a 96 GB card (a trainer setting in Advanced). Training samples are off. Comparison generation names aitoolkit_arch_image, which builds the model class AI Toolkit registers for qwen_image_2 and binds the trained LoRA as a network; the same model class draws the regularisation images (generate_results.render_base). Weights come from the Comfy-Org repack through AI Toolkit's own resolver, which picks the bf16 files when quantisation is off.",
       "regularization": {
         "default_on": true,
         "images": 40,

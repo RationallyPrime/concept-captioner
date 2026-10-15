@@ -119,8 +119,8 @@ extension GPUWorkspace {
 
     var trainingLengthSubtitle: String {
         effectiveModelRow.recipe.lengthUnit == .epochs
-            ? "An epoch is one pass over every image and clip. More epochs take longer; "
-            + "compare saved checkpoints to find the best result."
+            ? "An epoch is one pass over every image and clip, at each chosen resolution bucket. More epochs take "
+            + "longer; compare saved checkpoints to find the best result."
             : "A training step updates the model using a batch of your examples. More steps take longer; "
             + "compare saved checkpoints to find the best result."
     }
