@@ -71,6 +71,17 @@ UNSUPPORTED_REGULARIZATION = (
 NO_REGULARIZATION_HERE = "Regularisation images are not available for this model."
 UNSUPPORTED_REPA = "Representation alignment is not available for this model."
 LTX_NO_REGULARIZATION = "regularization/repa are not available on the LTX trainer"
+# RunConfig fields that override the model row's recipe; null keeps the recipe's value (POD-SPEC 4.1).
+TRAINER_SETTINGS = (
+    "caption_dropout",
+    "gradient_checkpointing",
+    "optimizer",
+    "lr_scheduler",
+    "lr_warmup_steps",
+)
+WARMUP_SCHEDULER = "constant_with_warmup"
+LTX_TRAINER_SETTINGS = "AI Toolkit settings; set the LTX trainer's own through extra"
+RECIPE_SETS_THESE = "this model's own recipe sets these; change them through extra"
 
 Port = Annotated[int, Field(ge=1024, le=65535)]
 Secret = Annotated[str | None, Field(min_length=1)]
@@ -449,6 +460,11 @@ class RunConfig(ServiceParams):
     initialization: Initialization | None = None
     regularization: Regularization | None = None
     repa: Repa | None = None
+    caption_dropout: float | None = Field(default=None, ge=0, le=1)
+    gradient_checkpointing: bool | None = None
+    optimizer: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_]{1,32}$")
+    lr_scheduler: Literal["constant", "constant_with_warmup", "cosine"] | None = None
+    lr_warmup_steps: int | None = Field(default=None, ge=0)
 
     @field_validator("triggers")
     @classmethod
@@ -479,6 +495,10 @@ class RunConfig(ServiceParams):
         if any(not prompt.strip() for prompt in value):
             raise ValueError("sample_prompts must be non-empty strings")
         return value
+
+    def trainer_settings(self) -> list[str]:
+        """The ``TRAINER_SETTINGS`` this config sets rather than leaving to the model's recipe."""
+        return [key for key in TRAINER_SETTINGS if getattr(self, key) is not None]
 
     @model_validator(mode="after")
     def _alpha_defaults_to_rank(self) -> RunConfig:
@@ -532,6 +552,9 @@ class LtxRunConfig(RunConfig):
     def _ai_toolkit_only(self) -> LtxRunConfig:
         if self.regularization is not None or self.repa is not None:
             raise ValueError(LTX_NO_REGULARIZATION)
+        settings = self.trainer_settings()
+        if settings:
+            raise ValueError(", ".join(settings) + ": " + LTX_TRAINER_SETTINGS)
         return self
 
 
@@ -887,6 +910,17 @@ def _validate_training_start(name: str, params: RunConfig, paths: Paths) -> None
     previous = run_dir / RUN_JSON
     if params.regularization is not None or params.repa is not None:
         _validate_regularization_and_repa(name, params, paths)
+    settings = params.trainer_settings()
+    if settings:
+        table = _model_table(paths)
+        row = table["exact_row"](params.base_model, name.removeprefix("trainer-"))
+        if _row_hook(table, row, "trainer_config") is not None:
+            _invalid(params, ", ".join(settings) + ": " + RECIPE_SETS_THESE, (settings[0],))
+        # The schedule the run trains with: its own, else the row's, else ai-toolkit's default.
+        scheduler = params.lr_scheduler or (row or {}).get("recipe", {}).get("lr_scheduler")
+        if params.lr_warmup_steps is not None and (scheduler or "constant") != WARMUP_SCHEDULER:
+            reason = f"lr_warmup_steps: needs lr_scheduler {WARMUP_SCHEDULER}"
+            _invalid(params, reason, ("lr_warmup_steps",))
     if params.initialization is not None:
         # External weights warm-start only a model whose row names a native_recipe hook, on the
         # trainer that row belongs to; the hook supplies the rules that read them.
@@ -932,6 +966,7 @@ def _validate_training_start(name: str, params: RunConfig, paths: Paths) -> None
         "initialization",
         "regularization",
         "repa",
+        *TRAINER_SETTINGS,
     )
     changed = [key for key in immutable if getattr(old, key) != getattr(params, key)]
     if changed:
@@ -1294,7 +1329,8 @@ def _trainer_prepare(params: ServiceParams, paths: Paths) -> None:
     cfg = _as(params, RunConfig)
     run_dir = paths.run_dir(cfg.run_id)
     payload = cfg.model_dump(mode="json", exclude=set(SECRET_FIELDS))
-    for key in ("regularization", "repa"):  # absent means off: a plain run's run.json is unchanged
+    # Absent means off, or the recipe's value: a plain run's run.json is unchanged.
+    for key in ("regularization", "repa", *TRAINER_SETTINGS):
         if payload.get(key) is None:
             payload.pop(key, None)
     table = _model_table(paths)

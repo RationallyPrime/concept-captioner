@@ -12,11 +12,7 @@ struct AdvancedTrainingControls: View {
                         ForEach(workspace.resolutionChoices, id: \.self) { resolution in
                             Toggle("\(resolution) px", isOn: Binding(
                                 get: { workspace.trainingResolutions.contains(resolution) },
-                                set: { selected in
-                                    workspace.trainingResolutions.removeAll { $0 == resolution }
-                                    if selected { workspace.trainingResolutions.append(resolution) }
-                                    workspace.trainingResolutions.sort()
-                                }
+                                set: { workspace.selectResolution(resolution, selected: $0) }
                             ))
                         }
                     }
@@ -41,6 +37,7 @@ struct AdvancedTrainingControls: View {
             TextField("Gradient accumulation", value: $workspace.accumulation, format: .number.grouping(.never))
             TextField("Learning rate", value: $workspace.learningRate, format: .number)
                 .help("How much the model changes at each step. Keep the default for your first run.")
+            if workspace.editsTrainerSettings { trainerSettingControls }
             if workspace.usesRegularization { regularizationControls }
             TextField("Triggers", text: $workspace.triggerWords)
             TextField("Caption profile", text: $workspace.profile)
@@ -70,6 +67,32 @@ struct AdvancedTrainingControls: View {
                 .trigger,
             ])
         }.formStyle(.columns)
+    }
+
+    /// The settings the model's row supplies defaults for and the pod writes into the trainer's recipe.
+    @ViewBuilder private var trainerSettingControls: some View {
+        TextField("Caption dropout", value: $workspace.trainerSettings.captionDropout, format: .number)
+            .help("The share of training images seen without their caption, from 0 to 1. A little dropout "
+                + "helps the result respond to short prompts; 0 always trains with the caption.")
+        Toggle("Gradient checkpointing", isOn: $workspace.trainerSettings.gradientCheckpointing)
+            .help("Recomputes intermediate results instead of keeping them: slower, but uses far less GPU memory. "
+                + "Larger batches and 1024 px usually need it on.")
+        Picker("Optimizer", selection: $workspace.trainerSettings.optimizer) {
+            ForEach(TrainerSettings.optimizers, id: \.0) { Text($0.1).tag($0.0) }
+            if !TrainerSettings.optimizers.contains(where: { $0.0 == workspace.trainerSettings.optimizer }) {
+                Text("Saved: " + workspace.trainerSettings.optimizer).tag(workspace.trainerSettings.optimizer)
+            }
+        }
+        .help("How each step's change is computed. The 8-bit variant keeps its state in less GPU memory.")
+        Picker("Learning-rate schedule", selection: $workspace.trainerSettings.lrScheduler) {
+            ForEach(TrainerSettings.schedulers, id: \.0) { Text($0.1).tag($0.0) }
+        }
+        .help("How the learning rate changes over the run: held constant, raised over the first steps and then "
+            + "held, or lowered smoothly to zero by the last step.")
+        if workspace.trainerSettings.usesWarmup {
+            TextField("Warmup steps", value: $workspace.trainerSettings.lrWarmupSteps, format: .number.grouping(.never))
+                .help("Steps at the start over which the learning rate rises to its full value.")
+        }
     }
 
     /// Shown only while the regularisation toggle is on.

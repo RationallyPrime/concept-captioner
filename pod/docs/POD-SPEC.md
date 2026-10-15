@@ -422,6 +422,21 @@ a symlink, and a symlinked file, directory or `output` itself is left out. `size
 path, size, mtime and inode, so the first listing of a large output hashes every file (seconds
 per gigabyte) and later ones only what changed.
 
+### 2.10a `GET /runs/{id}/log-files` and `GET /runs/{id}/log-files/{path}`
+
+The run's training logs, so they leave the pod with the model: `trainer.log` and every regular
+file under `tensorboard/` (the scraper's event file and the trainer's native ones, recursively).
+Both follow 2.10 and 2.11 exactly, with the run directory `/workspace/runs/<id>/` as the root:
+`root` is that directory and `path` is relative to it (`trainer.log`,
+`tensorboard/nora7-h3-001_20261015-1200/events.out.tfevents...`). Nothing else under the run is
+served: a path that is neither `trainer.log` nor under `tensorboard/` is `404 not_found`, and a
+symlink named `trainer.log` or `tensorboard`, or anywhere below it, is left out of the listing
+and never fetched. A run that is still writing its log lists the size and digest of the moment;
+a client that fetched a changed file sees a digest mismatch and treats the logs as not saved.
+The app saves them under `logs/` beside the model (`logs/trainer.log`, `logs/tensorboard/...`),
+the layout `push_lora.py` gives the model repo (7.2), and an image older than this route leaves
+the model saved and says the logs were not.
+
 ### 2.11 `GET /runs/{id}/files/{path}`
 
 One file from that listing, streamed: `200`, `Content-Type: application/octet-stream`,
@@ -797,6 +812,11 @@ the pictures are in `output/`; 2 = bad input (nothing drawn), 1 = the drawing fa
 | `initialization` | no | null | AI Toolkit H3 new-run preload: `{name,lora_sha256,recipe_sha256}` identifies the two fixed staged artifacts; never a client filesystem path |
 | `regularization` | no | null | AI Toolkit only (the LTX trainer refuses it). A regularisation (prior-preservation) set trained beside the subject: `{"source": "generate", "images", "weight", "class_nouns", "generation": {"steps", "guidance_scale", "seed"}, "captions"}` (drawn on the pod by `draw-regularization` from the subject captions with each trigger replaced by its class noun; `captions` maps each drawn picture's key to the caption the app's captioner wrote for it) or `{"source": "folder", "path", "weight"}` (images and sidecar captions already under `datasets/`). Explicit values, copied by the app from the model table. Details below |
 | `repa` | no | null | AI Toolkit only. Representation alignment: `{"encoder", "block_index", "weight", "projector", "projector_dim", "encoder_resolution"}`, all six explicit, written one to one as ai-toolkit's `process.repa` block. Details below |
+| `caption_dropout` | no | null | Trainer setting (below). The share of training images seen without their caption, a number from 0 to 1: every dataset's `caption_dropout_rate`, the regularisation copy included. Null: the row's `recipe.caption_dropout` |
+| `gradient_checkpointing` | no | null | Trainer setting. `train.gradient_checkpointing`: recompute activations rather than keep them, slower but far less GPU memory. Null: the row's `architecture.gradient_checkpointing` |
+| `optimizer` | no | null | Trainer setting. `train.optimizer`, an ai-toolkit optimizer name (`^[A-Za-z0-9_]{1,32}$`; the app offers `adamw8bit` and `adamw`). Null: the row's `recipe.optimizer` |
+| `lr_scheduler` | no | null | Trainer setting. `train.lr_scheduler`: `constant`, `constant_with_warmup` or `cosine` (to zero at the last step), the schedules ai-toolkit builds from a name and the run's steps alone. Null: the row's `recipe.lr_scheduler` |
+| `lr_warmup_steps` | no | null | Trainer setting. `train.lr_scheduler_params.num_warmup_steps`, an integer ≥ 0. Only with the warmup schedule (the run's `lr_scheduler`, else the row's): otherwise refused with `lr_warmup_steps: needs lr_scheduler constant_with_warmup`. Null: the row's `recipe.lr_warmup_steps` |
 | `save_every` / `sample_every` | no | 250 / 250 | 0 disables samples |
 | `sample_prompts` | no | `[]` | each should contain a trigger; the wrapper does not enforce it |
 | `hub` | no | null | `repo_id`, `private` (true), `push_on_finish` (false → push is a separate `push-lora` start) |
@@ -825,6 +845,18 @@ a second step, what the model and the layout need:
 
 `launch_aitoolkit.py` applies the same rules to its own copy of run.json (the launcher does not
 import `podagent`), so a run started by hand through `podctl` or the script gets the same answers.
+
+**Trainer settings** (`caption_dropout`, `gradient_checkpointing`, `optimizer`, `lr_scheduler`,
+`lr_warmup_steps`). Each overrides one value of the model row's recipe
+(docs/model-table.md); absent or `null` keeps the row's value, so every saved run and Resume is
+unchanged, and the agent leaves a `null` setting out of the `run.json` it writes. The app sends a
+setting only when the person changed it from the row's default. They are in the Resume-immutable
+list (Repeat may change them). The launcher writes them over the row's recipe and under `extra`,
+which still wins. Refused, by the agent and again by the launchers:
+
+- on `trainer-ltx`: `<keys>: AI Toolkit settings; set the LTX trainer's own through extra`;
+- for a row whose `trainer_config` hook builds the whole recipe (H3): `<keys>: this model's own
+  recipe sets these; change them through extra`.
 
 **Model references in `extra`: a Hub id where the trainer itself downloads, a workspace path
 where it opens files.** AI Toolkit's `name_or_path` (and `model_source`) take a Hub id or an
@@ -892,7 +924,11 @@ before exiting, so the supervisor never frees GPUs a trainer still holds.
 | `triggers` | run metadata only; no `process[0].trigger_word` is injected |
 | `rank`, `alpha` | `network.{type: lora, linear, linear_alpha}` |
 | `save_every` | `save.save_every` (+ `dtype` and `max_step_saves_to_keep` from the model's row; FLUX `float16`, 4) |
-| `dataset.path`, `caption_ext`, `resolution` | `datasets[0].{folder_path, caption_ext, resolution, cache_latents_to_disk: true, caption_dropout_rate: 0.05}` |
+| `dataset.path`, `caption_ext`, `resolution` | `datasets[0].{folder_path, caption_ext, resolution, cache_latents_to_disk: true, caption_dropout_rate}` |
+| `caption_dropout` | `datasets[*].caption_dropout_rate`; null: the row's `recipe.caption_dropout` (FLUX 0.05) |
+| `gradient_checkpointing` | `train.gradient_checkpointing`; null: the row's `architecture.gradient_checkpointing` (FLUX `true`) |
+| `optimizer` | `train.optimizer`; null: the row's `recipe.optimizer` (FLUX `adamw8bit`) |
+| `lr_scheduler`, `lr_warmup_steps` | `train.lr_scheduler` and, for `constant_with_warmup` only, `train.lr_scheduler_params.num_warmup_steps` (another schedule drops it: ai-toolkit passes the params to the schedule's constructor); null: the row's `recipe.lr_scheduler` / `lr_warmup_steps` (FLUX `constant`) |
 | `steps`, `learning_rate`, `batch_size`, `gradient_accumulation` | `train.{steps, lr, batch_size, gradient_accumulation_steps}` + `dtype`, `optimizer`, `gradient_checkpointing` from the model's row (FLUX `bf16`, `adamw8bit`, `true`), `noise_scheduler: flowmatch`, `train_text_encoder: false` |
 | `base_model` | `model.name_or_path` (+ the row's `arch`, extra model keys and `quantize` / `quantize_te`; FLUX `arch: flux, is_flux: true, quantize: true`; H3 uses the pinned `minimax_h3` BF16 recipe below) |
 | `sample_every`, `sample_prompts`, `seed` | `sample.{sample_every, prompts, seed, width/height = max(resolution), sampler: flowmatch, guidance_scale: 4, sample_steps: 20}` |
@@ -1188,7 +1224,7 @@ What the pod does with a row:
 | Site | Reads |
 | --- | --- |
 | `launch_aitoolkit.py` `model_block` | `architecture`: `arch`, `model_extra` (in order), `quantize`, `quantize_text_encoder` (written as `quantize_te` when not null) |
-| `launch_aitoolkit.py` `build_native_config` | for an exact row without a `trainer_config` hook: `train.dtype`, `train.gradient_checkpointing`, `train.optimizer`, `save.dtype` (when not null), `save.max_step_saves_to_keep`, then the row's `trainer_options.process` keys deep-merged, written over the skeleton before `extra` merges (`extra` wins) |
+| `launch_aitoolkit.py` `build_native_config` | for an exact row without a `trainer_config` hook: `train.dtype`, `train.gradient_checkpointing`, `train.optimizer`, `train.lr_scheduler` with its warmup (when not null), `save.dtype` (when not null), `save.max_step_saves_to_keep`, every dataset's `caption_dropout_rate` (when not null), then the row's `trainer_options.process` keys deep-merged, written over the skeleton; run.json's trainer settings follow, then `extra` merges (`extra` wins) |
 | `generate_results.py` | the exact row with a `generator` hook, else `Generation supports <display names>`; the row's frame law and cadence; for `aitoolkit_image`, the row's model settings; for `aitoolkit_arch_image`, the saved native config; `render_base` (the regularisation images), the row's model settings and `get_model_class` |
 | `push_lora.py` `model_card` | `license`: with `show_notice`, the licence in the front matter (`license: <id>` when `id` is a Hub licence identifier, else `license: other` with `id` as `license_name` and `url` as `license_link`) and a closing `## Licence` section; `usage_note`: the last paragraph of `## Use`; otherwise the card is unchanged |
 | `catalog.py` | the exact row for generation admission (above), external initialization (a `native_recipe` hook), the `trainer_config` / `generator` hooks' preparation, and the `regularization` / `repa` fields, which admit run.json's blocks of the same names (4.1) and the `draw-regularization` service (3.8) |
@@ -1382,10 +1418,12 @@ fully captioned set before installation and preserves the previous dataset on fa
 ### 7.2 `push_lora.py`
 
 `--run-dir DIR --repo ID [--private] [--no-samples] [--all-checkpoints] [--commit-message M]`.
-Creates the model repo if needed (`HfApi.create_repo(exist_ok=True)`), uploads with
-`upload_folder` and `allow_patterns`: the final `*.safetensors` (newest when there are several,
-unless `--all-checkpoints`), `run.json`, `config.yaml`, `samples/*` (unless `--no-samples`), and a
-generated `README.md` model card (base model, triggers, steps, rank, profile, dataset name, the
+Creates the model repo if needed (`HfApi.create_repo(exist_ok=True)`), uploads in one
+`create_commit`: the final `*.safetensors` (newest when there are several, unless
+`--all-checkpoints`), `run.json`, `config.yaml`, `samples/*` (unless `--no-samples`), the training
+logs under `logs/` (`trainer.log` as `logs/trainer.log` and every file under `tensorboard/` as
+`logs/tensorboard/...`, read into memory first because the launcher's own push still appends to
+`trainer.log`), and a generated `README.md` model card (base model, triggers, steps, rank, profile, dataset name, the
 `concept-captioner` version). When the base model's row in the model table (4.4) has
 `license.show_notice`, the card also carries the licence (front matter and a closing `## Licence`
 section). Prints the repo URL. Exit 1 when no `.safetensors` is found.

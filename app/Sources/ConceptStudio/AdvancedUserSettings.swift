@@ -65,6 +65,7 @@ extension GPUWorkspace {
         if Set(trainingResolutions) != Set(row.resolution.defaults) {
             values.append("Image resolutions: " + trainingResolutions.map { "\($0) px" }.joined(separator: ", "))
         }
+        values += trainerSettingOverrideLines
         if usesRegularization, regularizationWeight != regularizationOffer?.weight {
             values.append("Regularisation strength: \(regularizationWeight)")
         }

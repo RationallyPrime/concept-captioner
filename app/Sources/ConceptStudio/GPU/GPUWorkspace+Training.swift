@@ -176,6 +176,7 @@ extension GPUWorkspace {
             throw StudioError.message("Training length in epochs needs the number of included images and clips. "
                 + "Open the project that holds them.")
         }
+        try validateTrainerSettings()
         try validateTrainingAids()
         guard !resultNeedsSaving else {
             throw StudioError.message("Retrieve pending trained models or generated outputs before starting a run.")
@@ -264,9 +265,17 @@ extension GPUWorkspace {
     /// The optimizer steps the next run takes: the length as entered, or for a model that counts epochs the
     /// passes over each of `items` images and clips turned into steps.
     func optimizerSteps(items: Int) -> Int {
-        effectiveModelRow.recipe.lengthUnit.optimizerSteps(
-            length: steps, items: items, batchSize: batchSize, accumulation: accumulation
+        let samples = Self.samplesPerPass(items: items, trainer: trainer, buckets: trainingResolutions.count)
+        return effectiveModelRow.recipe.lengthUnit.optimizerSteps(
+            length: steps, items: samples, batchSize: batchSize, accumulation: accumulation
         )
+    }
+
+    /// What one pass over `items` images and clips trains on. AI Toolkit splits a dataset into one copy per
+    /// resolution bucket, so a pass sees every image once at each chosen size; the LTX trainer uses one bucket.
+    nonisolated static func samplesPerPass(items: Int, trainer: String, buckets: Int) -> Int {
+        let product = items.multipliedReportingOverflow(by: trainer == "aitoolkit" ? max(1, buckets) : 1)
+        return product.overflow ? Int.max : product.partialValue
     }
 
     func trainingParams(
@@ -291,6 +300,9 @@ extension GPUWorkspace {
         ]
         if samplesEnabled {
             params["sample_prompts"] = .array([.string(words.joined(separator: " "))])
+        }
+        for setting in trainerSettingOverrides.pairs {
+            params[setting.key] = setting.value
         }
         if let block = regularizationBlock(triggers: words) { params["regularization"] = .object(block) }
         if let block = repaBlock() { params["repa"] = .object(block) }

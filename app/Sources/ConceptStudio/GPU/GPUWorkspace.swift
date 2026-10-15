@@ -60,6 +60,8 @@ final class GPUWorkspace {
     var checkpointEvery: Int
     var checkpointRetention: Int
     var checkpointPrecision: String
+    /// Advanced's trainer settings, defaulting to the selected row's values.
+    var trainerSettings: TrainerSettings
     var guidanceLoss = false
     var guidanceTargetText = GPUWorkspace.defaultGuidanceTarget
     var guidanceTarget: JSONValue {
@@ -188,6 +190,7 @@ final class GPUWorkspace {
         checkpointEvery = start.recipe.checkpoints.every
         checkpointRetention = start.recipe.checkpoints.keep
         checkpointPrecision = modelTable.checkpointPrecision(for: start)
+        trainerSettings = TrainerSettings(start)
         trainingResolutions = start.resolution.defaults
         let reference = modelTable.models.lazy.compactMap(\.regularization).first
         regularizationImages = reference?.images ?? 1

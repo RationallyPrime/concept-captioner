@@ -119,8 +119,8 @@ extension GPUWorkspace {
 
     var trainingLengthSubtitle: String {
         effectiveModelRow.recipe.lengthUnit == .epochs
-            ? "An epoch is one pass over every image and clip. More epochs take longer; "
-            + "compare saved checkpoints to find the best result."
+            ? "An epoch is one pass over every image and clip, at each chosen resolution bucket. More epochs take "
+            + "longer; compare saved checkpoints to find the best result."
             : "A training step updates the model using a batch of your examples. More steps take longer; "
             + "compare saved checkpoints to find the best result."
     }
@@ -222,7 +222,8 @@ extension GPUWorkspace {
                 + "more than this computer was chosen for. Stop and remove it before choosing this model."
             return
         }
-        let previous = effectiveModelRow.recipe
+        let previousRow = effectiveModelRow
+        let previous = previousRow.recipe
         trainer = neededRow.trainer
         baseModel = model
         nativeRecipe = nil
@@ -230,6 +231,7 @@ extension GPUWorkspace {
         initialCheckpoint = nil
         let row = effectiveModelRow
         adoptDefaults(from: previous, to: row.recipe)
+        trainerSettings.adopt(from: previousRow, to: row)
         adoptTrainingAidDefaults(to: row)
         checkpointEvery = row.recipe.checkpoints.every
         checkpointRetention = row.recipe.checkpoints.keep

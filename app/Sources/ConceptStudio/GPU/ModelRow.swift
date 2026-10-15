@@ -63,10 +63,15 @@ struct ModelRow: Sendable, Identifiable, Equatable {
         let length: Int
         let learningRate: Double
         let optimizer: String
+        /// AI Toolkit's learning-rate schedule and its warmup steps; nil where the trainer takes them elsewhere (LTX).
+        let lrScheduler: String?
+        let lrWarmupSteps: Int?
         let rank: Int
         let alpha: Int
         let batchSize: Int
         let gradientAccumulation: Int
+        /// The share of training images seen without their caption; nil where the trainer has none (LTX).
+        let captionDropout: Double?
         let checkpoints: Checkpoints
     }
 
@@ -256,6 +261,13 @@ struct TableObject {
         return flag
     }
 
+    func optionalDouble(_ key: String) throws -> Double? {
+        let value = try raw(key)
+        if value == .null { return nil }
+        guard let number = value.doubleValue else { throw fail(key, "a number or null") }
+        return number
+    }
+
     func optionalInt(_ key: String) throws -> Int? {
         let value = try raw(key)
         if value == .null { return nil }
@@ -382,10 +394,13 @@ extension ModelRow.Recipe {
         self.length = try length.int("value")
         learningRate = try object.double("learning_rate")
         optimizer = try object.string("optimizer")
+        lrScheduler = try object.optionalString("lr_scheduler")
+        lrWarmupSteps = try object.optionalInt("lr_warmup_steps")
         rank = try object.int("rank")
         alpha = try object.int("alpha")
         batchSize = try object.int("batch_size")
         gradientAccumulation = try object.int("gradient_accumulation")
+        captionDropout = try object.optionalDouble("caption_dropout")
         let saved = try object.child("checkpoints")
         checkpoints = try ModelRow.Checkpoints(
             every: saved.int("every"), keep: saved.int("keep"), dtype: saved.optionalString("dtype"),

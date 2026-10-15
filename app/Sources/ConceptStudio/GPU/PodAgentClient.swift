@@ -116,6 +116,10 @@ protocol PodAgent: Sendable {
     func runFiles(runID: String) async throws -> [RunFile]
     /// Streams one run file to `destination` without holding it in memory.
     func download(runID: String, path: String, to destination: URL) async throws
+    /// The run's training logs (POD-SPEC 2.10a): `trainer.log` and its TensorBoard event files, relative to the run.
+    func runLogFiles(runID: String) async throws -> [RunFile]
+    /// Streams one of the run's log files to `destination`.
+    func downloadLogFile(runID: String, path: String, to destination: URL) async throws
     func runConfiguration(runID: String) async throws -> AgentRunConfiguration
     func storageUsage() async throws -> AgentStorageUsage
 }
@@ -143,6 +147,14 @@ extension PodAgent {
 
     func runConfiguration(runID: String) async throws -> AgentRunConfiguration {
         throw StudioError.message("This agent does not expose saved run configuration.")
+    }
+
+    func runLogFiles(runID: String) async throws -> [RunFile] {
+        []
+    }
+
+    func downloadLogFile(runID: String, path: String, to destination: URL) async throws {
+        throw StudioError.message("This computer does not serve training logs. Update its training image.")
     }
 }
 
@@ -258,6 +270,11 @@ struct PodAgentClient: PodAgent {
         return try await JSONDecoder().decode(Result.self, from: call("runs/\(runID)/files")).files
     }
 
+    func runLogFiles(runID: String) async throws -> [RunFile] {
+        struct Result: Decodable { let files: [RunFile] }
+        return try await JSONDecoder().decode(Result.self, from: call("runs/\(runID)/log-files")).files
+    }
+
     func runConfiguration(runID: String) async throws -> AgentRunConfiguration {
         let info = try await JSONValue(parsing: call("runs/\(runID)/config")).objectValue
         return AgentRunConfiguration(
@@ -267,7 +284,15 @@ struct PodAgentClient: PodAgent {
     }
 
     func download(runID: String, path: String, to destination: URL) async throws {
-        var url = baseURL.appendingPathComponent("runs/\(runID)/files")
+        try await fetch("runs/\(runID)/files", path: path, to: destination)
+    }
+
+    func downloadLogFile(runID: String, path: String, to destination: URL) async throws {
+        try await fetch("runs/\(runID)/log-files", path: path, to: destination)
+    }
+
+    private func fetch(_ route: String, path: String, to destination: URL) async throws {
+        var url = baseURL.appendingPathComponent(route)
         for component in path.split(separator: "/") {
             url.appendPathComponent(String(component))
         }

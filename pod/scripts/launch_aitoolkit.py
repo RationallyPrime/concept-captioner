@@ -5,7 +5,8 @@
 
 1. Validate run.json: an own copy of the RunConfig rules of POD-SPEC §4.1 (no podagent import).
    ``dataset.path`` must be an existing directory under ``<PODAGENT_WORKSPACE>/datasets``.
-2. Write ``<run>/config.yaml``: ai-toolkit ``job: extension`` with one ``sd_trainer`` process,
+2. Write ``<run>/config.yaml``: ai-toolkit ``job: extension`` with one ``sd_trainer`` process:
+   the model row's recipe, then run.json's ``TRAINER_SETTINGS`` (each one that is not null), then
    ``extra`` deep-merged last. ``--dry-run`` plans the regularisation set (below), prints its
    counts and stops with exit 0.
 2b. Regularisation set, when run.json has ``regularization`` (regularization.py; POD-SPEC 4.3):
@@ -82,8 +83,24 @@ DEFAULT_AGENT_PYTHON = "/opt/venvs/agent/bin/python"
 DEFAULT_RESOLUTION = [512, 768, 1024]
 CHILD_GRACE_SECONDS = 5.0  # SIGTERM -> this long -> SIGKILL, when the tee itself fails
 
+# Trainer settings that override the model's own recipe (POD-SPEC 4.1). Absent or null means the
+# recipe's value. AI Toolkit only: the LTX wrapper refuses them, as it refuses regularization.
+TRAINER_SETTINGS = (
+    "caption_dropout",
+    "gradient_checkpointing",
+    "optimizer",
+    "lr_scheduler",
+    "lr_warmup_steps",
+)
+OPTIMIZER_RE = re.compile(r"^[A-Za-z0-9_]{1,32}$")  # an ai-toolkit optimizer name
+# The learning-rate schedules ai-toolkit builds from a name and the run's steps alone; only the
+# warmup schedule takes a parameter, lr_warmup_steps.
+LR_SCHEDULERS = ("constant", "constant_with_warmup", "cosine")
+WARMUP_SCHEDULER = "constant_with_warmup"
+
 _TOP_KEYS = frozenset(
     {
+        *TRAINER_SETTINGS,
         "run_id",
         "dataset",
         "triggers",
@@ -180,6 +197,42 @@ def _validate_hub(value: Any, errors: list[str]) -> dict[str, Any] | None:
             out[key] = flag
         else:
             errors.append(f"hub.{key}: must be true or false")
+    return out
+
+
+def _validate_trainer_settings(raw: dict[str, Any], errors: list[str]) -> dict[str, Any]:
+    """``TRAINER_SETTINGS`` with null for each one run.json leaves to the model's recipe."""
+    out: dict[str, Any] = dict.fromkeys(TRAINER_SETTINGS)
+    dropout = raw.get("caption_dropout")
+    if dropout is not None:
+        if _is_number(dropout) and 0 <= dropout <= 1:
+            out["caption_dropout"] = float(dropout)
+        else:
+            errors.append("caption_dropout: must be a number from 0 to 1, or null")
+    checkpointing = raw.get("gradient_checkpointing")
+    if checkpointing is not None:
+        if isinstance(checkpointing, bool):
+            out["gradient_checkpointing"] = checkpointing
+        else:
+            errors.append("gradient_checkpointing: must be true, false or null")
+    optimizer = raw.get("optimizer")
+    if optimizer is not None:
+        if isinstance(optimizer, str) and OPTIMIZER_RE.match(optimizer):
+            out["optimizer"] = optimizer
+        else:
+            errors.append("optimizer: must be an optimizer name such as adamw8bit, or null")
+    scheduler = raw.get("lr_scheduler")
+    if scheduler is not None:
+        if scheduler in LR_SCHEDULERS:
+            out["lr_scheduler"] = scheduler
+        else:
+            errors.append("lr_scheduler: must be one of " + ", ".join(LR_SCHEDULERS) + ", or null")
+    warmup = raw.get("lr_warmup_steps")
+    if warmup is not None:
+        if _is_int(warmup) and warmup >= 0:
+            out["lr_warmup_steps"] = warmup
+        else:
+            errors.append("lr_warmup_steps: must be an integer >= 0, or null")
     return out
 
 
@@ -294,6 +347,7 @@ def validate_run_config(
             errors.append(f"{key}: must be an object or null")
             value = None
         cfg[key] = value
+    cfg.update(_validate_trainer_settings(raw, errors))
     if errors:
         raise ConfigError("; ".join(errors))
     return cfg
@@ -717,6 +771,7 @@ UNSUPPORTED_REGULARIZATION = (
     "Generated regularisation images need a supported model. Provide your own images instead."
 )
 NO_REGULARIZATION_HERE = "Regularisation images are not available for this model."
+RECIPE_SETS_THESE = "this model's own recipe sets these; change them through extra"
 UNSUPPORTED_REPA = "Representation alignment is not available for this model."
 GENERATION_KEYS = frozenset({"steps", "guidance_scale", "seed"})
 REPA_DEFAULT_ENCODER = "facebook/dinov2-giant"  # ai-toolkit's own default
@@ -747,18 +802,24 @@ def apply_row_recipe(process: dict[str, Any], row: dict[str, Any]) -> None:
     """A generic row's trainer settings over the skeleton, in place and before ``extra`` merges.
 
     The skeleton already carries FLUX's values, so for FLUX this changes nothing; a row whose
-    recipe differs (precision, checkpointing, optimizer, checkpoint retention) gets its own. A row
-    can also list further ``process`` keys under ``trainer_options.process`` (Qwen-Image-2.1's
-    ``train.timestep_type``, learning-rate schedule and ``train.cache_text_embeddings``): they
-    merge over the skeleton here and under run.json ``extra``, which still wins.
+    recipe differs (precision, checkpointing, optimizer, learning-rate schedule, checkpoint
+    retention, caption dropout) gets its own. A row can also list further ``process`` keys under
+    ``trainer_options.process`` (Qwen-Image-2.1's ``train.timestep_type`` and
+    ``train.cache_text_embeddings``): they merge over the skeleton here and under run.json's
+    trainer settings and ``extra``, which still win.
     """
     architecture, recipe = row["architecture"], row["recipe"]
     process["train"]["dtype"] = architecture["dtype"]
     process["train"]["gradient_checkpointing"] = architecture["gradient_checkpointing"]
     process["train"]["optimizer"] = recipe["optimizer"]
+    if recipe["lr_scheduler"] is not None:
+        set_lr_schedule(process["train"], recipe["lr_scheduler"], recipe["lr_warmup_steps"])
     if recipe["checkpoints"]["dtype"] is not None:
         process["save"]["dtype"] = recipe["checkpoints"]["dtype"]
     process["save"]["max_step_saves_to_keep"] = recipe["checkpoints"]["keep"]
+    if recipe["caption_dropout"] is not None:
+        for dataset in process["datasets"]:
+            dataset["caption_dropout_rate"] = recipe["caption_dropout"]
     trainer_options = row.get("trainer_options") or {}
     dataset_defaults = trainer_options.get("dataset")
     if dataset_defaults:
@@ -768,6 +829,58 @@ def apply_row_recipe(process: dict[str, Any], row: dict[str, Any]) -> None:
     options = trainer_options.get("process")
     if options:
         process.update(deep_merge(process, options))
+
+
+def apply_run_settings(process: dict[str, Any], cfg: dict[str, Any]) -> None:
+    """run.json's ``TRAINER_SETTINGS`` over the row's recipe, in place and before ``extra`` merges.
+
+    A null setting leaves the recipe's value. The regularisation dataset is copied from the first
+    dataset after this, so it trains with the same caption dropout.
+    """
+    if cfg.get("caption_dropout") is not None:
+        for dataset in process["datasets"]:
+            dataset["caption_dropout_rate"] = cfg["caption_dropout"]
+    train = process["train"]
+    if cfg.get("gradient_checkpointing") is not None:
+        train["gradient_checkpointing"] = cfg["gradient_checkpointing"]
+    if cfg.get("optimizer") is not None:
+        train["optimizer"] = cfg["optimizer"]
+    scheduler, warmup = cfg.get("lr_scheduler"), cfg.get("lr_warmup_steps")
+    if scheduler is None and warmup is None:
+        return
+    scheduler = scheduler or train.get("lr_scheduler", "constant")  # ai-toolkit's default
+    if warmup is not None and scheduler != WARMUP_SCHEDULER:
+        raise ConfigError(f"lr_warmup_steps: needs lr_scheduler {WARMUP_SCHEDULER}")
+    if warmup is None:
+        warmup = (train.get("lr_scheduler_params") or {}).get("num_warmup_steps", 0)
+    set_lr_schedule(train, scheduler, warmup)
+
+
+def set_lr_schedule(train: dict[str, Any], scheduler: str, warmup: int | None) -> None:
+    """``train.lr_scheduler`` and its warmup, in place.
+
+    ai-toolkit passes ``lr_scheduler_params`` to the schedule's constructor, and only the warmup
+    schedule takes ``num_warmup_steps``, so another schedule must not inherit one.
+    """
+    params = {
+        key: value
+        for key, value in (train.get("lr_scheduler_params") or {}).items()
+        if key != "num_warmup_steps"
+    }
+    if scheduler == WARMUP_SCHEDULER:
+        params["num_warmup_steps"] = warmup or 0
+    train["lr_scheduler"] = scheduler
+    if params:
+        train["lr_scheduler_params"] = params
+    else:
+        train.pop("lr_scheduler_params", None)
+
+
+def check_trainer_settings(cfg: dict[str, Any], hook: str | None) -> None:
+    """A ``trainer_config`` hook builds the whole recipe itself (H3), so run.json cannot set these."""
+    settings = [key for key in TRAINER_SETTINGS if cfg.get(key) is not None]
+    if hook is not None and settings:
+        raise ConfigError(", ".join(settings) + ": " + RECIPE_SETS_THESE)
 
 
 def _regularization_errors(
@@ -905,8 +1018,10 @@ def build_native_config(cfg: dict[str, Any], run_dir: Path) -> dict[str, Any]:
     table = model_table()
     row = table["exact_row"](cfg["base_model"], "aitoolkit")
     hook = table["hook"](row, "trainer_config") if row is not None else None
+    check_trainer_settings(cfg, hook)
     if row is not None and hook is None:
         apply_row_recipe(process, row)
+    apply_run_settings(process, cfg)
     # Regularisation weight and REPA are run.json's explicit values; `extra` still wins over both.
     regularization = cfg.get("regularization")
     if regularization is not None:

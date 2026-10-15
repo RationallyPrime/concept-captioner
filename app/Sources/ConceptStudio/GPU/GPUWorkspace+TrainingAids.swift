@@ -124,13 +124,21 @@ extension GPUWorkspace {
     var regularizationEstimate: RegularizationEstimate? {
         regularizationOffer.map {
             RegularizationEstimate(
-                images: regularizationImages, secondsPerImage: $0.secondsPerImage, hourlyRate: regularizationHourlyRate
+                images: regularizationImages, secondsPerImage: $0.secondsPerImage * regularizationAreaScale,
+                hourlyRate: regularizationHourlyRate
             )
         }
     }
 
+    /// The pictures are drawn at the largest chosen bucket, and the row's time per picture is for its default size:
+    /// the estimate grows with the drawn area.
+    var regularizationAreaScale: Double {
+        let side = Double(resolution) / Double(max(1, effectiveModelRow.resolution.defaults.max() ?? resolution))
+        return side * side
+    }
+
     /// The trainer's steps for the next run. With regularisation images on, every even step looks at one of them,
-    /// so a length in epochs doubles: "epochs" keeps meaning passes over the person's own images.
+    /// so a length in epochs doubles: "epochs" keeps meaning passes over the person's own images (at each bucket).
     func trainerSteps(items: Int) -> Int {
         let steps = optimizerSteps(items: items)
         return usesRegularization && effectiveModelRow.recipe.lengthUnit == .epochs ? steps * 2 : steps

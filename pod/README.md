@@ -9,7 +9,8 @@ is `docs/POD-STATUS.md`. No real concept names anywhere; fixtures use `NORA7` / 
 ```
 agent/     podagent: FastAPI control agent on port 8800 (PID 1 in the image). /health, /gpus,
            /plan (the GPU topology rule), /services/{name}/{start,stop,logs}, /runs/{id}/events,
-           /runs/{id}/files (the run's outputs), /tensorboard/ (proxied, with a session from
+           /runs/{id}/files (the run's outputs), /runs/{id}/log-files (its trainer log and
+           TensorBoard event files), /tensorboard/ (proxied, with a session from
            /tensorboard-session). Bearer token from PODAGENT_TOKEN on every call; refuses to
            start without one.
 podctl/    podctl: one subcommand per endpoint plus `train`, `caption-up` and `pull`; httpx only.

@@ -5,7 +5,8 @@
 
 1. Validate run.json: an own copy of the RunConfig rules of POD-SPEC §4.1 (no podagent import).
    ``dataset.path`` must be an existing directory under ``<PODAGENT_WORKSPACE>/datasets``.
-   ``regularization`` and ``repa`` belong to the AI Toolkit trainer; this wrapper refuses them.
+   ``regularization``, ``repa`` and the ``TRAINER_SETTINGS`` belong to the AI Toolkit trainer;
+   this wrapper refuses them.
 2. Prepare the Hub model when ``base_model`` is ``Lightricks/LTX-2`` (see "Model files"); a
    failure exits ``EXIT_MODEL_PREPARATION`` (69) before any run file is written. Skipped by
    ``--dry-run``.
@@ -111,8 +112,24 @@ DEFAULT_AGENT_PYTHON = "/opt/venvs/agent/bin/python"
 DEFAULT_RESOLUTION = [512, 768, 1024]
 CHILD_GRACE_SECONDS = 5.0  # SIGTERM -> this long -> SIGKILL, when the tee itself fails
 
+# Trainer settings that override the model's own recipe (POD-SPEC 4.1). Absent or null means the
+# recipe's value. AI Toolkit only: the LTX wrapper refuses them, as it refuses regularization.
+TRAINER_SETTINGS = (
+    "caption_dropout",
+    "gradient_checkpointing",
+    "optimizer",
+    "lr_scheduler",
+    "lr_warmup_steps",
+)
+OPTIMIZER_RE = re.compile(r"^[A-Za-z0-9_]{1,32}$")  # an ai-toolkit optimizer name
+# The learning-rate schedules ai-toolkit builds from a name and the run's steps alone; only the
+# warmup schedule takes a parameter, lr_warmup_steps.
+LR_SCHEDULERS = ("constant", "constant_with_warmup", "cosine")
+WARMUP_SCHEDULER = "constant_with_warmup"
+
 _TOP_KEYS = frozenset(
     {
+        *TRAINER_SETTINGS,
         "run_id",
         "dataset",
         "triggers",
@@ -209,6 +226,42 @@ def _validate_hub(value: Any, errors: list[str]) -> dict[str, Any] | None:
             out[key] = flag
         else:
             errors.append(f"hub.{key}: must be true or false")
+    return out
+
+
+def _validate_trainer_settings(raw: dict[str, Any], errors: list[str]) -> dict[str, Any]:
+    """``TRAINER_SETTINGS`` with null for each one run.json leaves to the model's recipe."""
+    out: dict[str, Any] = dict.fromkeys(TRAINER_SETTINGS)
+    dropout = raw.get("caption_dropout")
+    if dropout is not None:
+        if _is_number(dropout) and 0 <= dropout <= 1:
+            out["caption_dropout"] = float(dropout)
+        else:
+            errors.append("caption_dropout: must be a number from 0 to 1, or null")
+    checkpointing = raw.get("gradient_checkpointing")
+    if checkpointing is not None:
+        if isinstance(checkpointing, bool):
+            out["gradient_checkpointing"] = checkpointing
+        else:
+            errors.append("gradient_checkpointing: must be true, false or null")
+    optimizer = raw.get("optimizer")
+    if optimizer is not None:
+        if isinstance(optimizer, str) and OPTIMIZER_RE.match(optimizer):
+            out["optimizer"] = optimizer
+        else:
+            errors.append("optimizer: must be an optimizer name such as adamw8bit, or null")
+    scheduler = raw.get("lr_scheduler")
+    if scheduler is not None:
+        if scheduler in LR_SCHEDULERS:
+            out["lr_scheduler"] = scheduler
+        else:
+            errors.append("lr_scheduler: must be one of " + ", ".join(LR_SCHEDULERS) + ", or null")
+    warmup = raw.get("lr_warmup_steps")
+    if warmup is not None:
+        if _is_int(warmup) and warmup >= 0:
+            out["lr_warmup_steps"] = warmup
+        else:
+            errors.append("lr_warmup_steps: must be an integer >= 0, or null")
     return out
 
 
@@ -323,6 +376,7 @@ def validate_run_config(
             errors.append(f"{key}: must be an object or null")
             value = None
         cfg[key] = value
+    cfg.update(_validate_trainer_settings(raw, errors))
     if errors:
         raise ConfigError("; ".join(errors))
     return cfg
@@ -757,6 +811,7 @@ MEDIA_SUFFIXES = frozenset(
 )
 VIDEO_SUFFIXES = frozenset({".mp4", ".mov", ".m4v", ".webm", ".mkv"})
 PREPROCESS_KEY = "preprocess"  # the one `extra` key that is not a trainer config key
+LTX_TRAINER_SETTINGS = "AI Toolkit settings; set the LTX trainer's own through extra"
 # model.<key> -> process_dataset.py flag. The preprocessor loads the same files as the trainer
 # (text embeddings and latents), so both phases read them from the merged `model` block.
 MODEL_PATH_FLAGS = (
@@ -1199,6 +1254,9 @@ def main(argv: list[str] | None = None) -> int:
             raise ConfigError("External initial LoRA weights currently support AI Toolkit H3 only")
         if cfg.get("regularization") is not None or cfg.get("repa") is not None:
             raise ConfigError("regularization/repa are not available on the LTX trainer")
+        settings = [key for key in TRAINER_SETTINGS if cfg.get(key) is not None]
+        if settings:
+            raise ConfigError(", ".join(settings) + ": " + LTX_TRAINER_SETTINGS)
         source_cfg = cfg
         cfg = resolve_hub_model(cfg)
         entries, skipped = build_dataset_entries(

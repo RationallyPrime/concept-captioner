@@ -48,14 +48,16 @@ apply.
 | `source.first_download_gb` | Size of the first model download on a fresh volume, decimal GB. Shown in the picker for rows whose licence notice is on. |
 | `source.download_note` | What that size covers. |
 | `architecture.arch` | AI Toolkit `model.arch`; `null` for the LTX trainer. |
-| `architecture.dtype`, `quantize`, `quantize_text_encoder`, `gradient_checkpointing` | Training precision and memory settings. AI Toolkit: `train.dtype`, `model.quantize`, `model.quantize_te` (written when not `null`), `train.gradient_checkpointing`. For the LTX row they describe the settings in `trainer_options.run_extra`. |
+| `architecture.dtype`, `quantize`, `quantize_text_encoder`, `gradient_checkpointing` | Training precision and memory settings. AI Toolkit: `train.dtype`, `model.quantize`, `model.quantize_te` (written when not `null`), `train.gradient_checkpointing`. For the LTX row they describe the settings in `trainer_options.run_extra`. `gradient_checkpointing` is a trainer setting (below). |
 | `architecture.model_extra` | Further AI Toolkit `model` keys, in order (FLUX: `is_flux: true`). |
 | `family_match` | `substrings` and `tokens` that match a custom base model to this row's AI Toolkit `model` block; `null` for none. Tokens must not touch another letter or digit. |
 | `resolution.choices`, `default` | Selectable training resolutions and the ones applied when the model is selected. |
-| `resolution.multiple` | `true`: Advanced shows one toggle per resolution bucket. `false`: a single picker. |
+| `resolution.multiple` | `true`: Advanced shows one toggle per resolution bucket. `false`: a single picker. Each chosen bucket adds a pass over the images to an epoch (see [Training length](#training-length)); regularisation images are drawn at the largest. |
 | `recipe.length` | `{unit, value}`: the default training length in `steps`, or in `epochs` (passes over each training image and clip). |
 | `recipe.learning_rate`, `rank`, `alpha`, `batch_size`, `gradient_accumulation` | Defaults for the editable Advanced fields. |
-| `recipe.optimizer` | AI Toolkit `train.optimizer`; for LTX it describes `run_extra.optimization`. |
+| `recipe.optimizer` | AI Toolkit `train.optimizer`; for LTX it describes `run_extra.optimization`. A trainer setting. |
+| `recipe.lr_scheduler`, `lr_warmup_steps` | AI Toolkit `train.lr_scheduler` (`constant`, `constant_with_warmup` or `cosine`) and, for `constant_with_warmup`, `train.lr_scheduler_params.num_warmup_steps` (0 otherwise); `null` for LTX. Trainer settings. |
+| `recipe.caption_dropout` | The share of training images seen without their caption, 0 to 1 (AI Toolkit `caption_dropout_rate` on every dataset); `null` where the trainer has none (LTX). A trainer setting: see below. |
 | `recipe.checkpoints` | `every` (steps), `keep` (`max_step_saves_to_keep`; 0 keeps all), `dtype` (saved precision, `null` when the trainer has none) and `editable` (Advanced shows the three checkpoint controls and the app sends their values). |
 | `trainer_options` | Optional. `run_extra`: the exact `extra` object the app sends for an LTX run (key order matters). `process`: AI Toolkit `process` keys the typed fields do not cover; the pod deep-merges them over the generic config and under run.json `extra`, which still wins. The app does not read `process`. |
 | `gpu.min_vram_gb` | GPU offers with less memory are not shown. |
@@ -75,12 +77,25 @@ apply.
 Readers keep the order of `architecture.model_extra` and `trainer_options.run_extra`: use an
 order-preserving parser (the app uses `JSONValue(parsing:)`).
 
+### Trainer settings
+
+Some recipe values are defaults a person can change for one run: `recipe.caption_dropout`,
+`architecture.gradient_checkpointing`, `recipe.optimizer`, `recipe.lr_scheduler` and
+`recipe.lr_warmup_steps`. Advanced
+shows them for AI Toolkit rows without a `trainer_config` hook (such a hook builds the whole recipe,
+as H3's does, and the row's values only describe it). The app sends a value in run.json only when
+it differs from the row's (POD-SPEC 4.1); an absent value means the row's, so Repeat takes the
+row's current default for a setting the repeated run left alone.
+
 ### Training length
 
 A row in `epochs` shows passes over each image and clip, and the app sends
-`steps = ceil(epochs × items / (batch_size × gradient_accumulation))`, where `items` is the
-number of included training images and clips. run.json always carries `steps`; Resume and saved
-runs work on steps.
+`steps = ceil(epochs × items × buckets / (batch_size × gradient_accumulation))`, where `items` is
+the number of included training images and clips and `buckets` the number of chosen resolution
+buckets on AI Toolkit (1 on LTX): AI Toolkit splits a dataset into one copy per bucket, so a pass
+sees each image once at every chosen size. run.json always carries `steps`; Resume and saved runs
+work on steps, and Repeat turns them back into epochs with the repeated run's own item and bucket
+counts.
 
 ## Lookup rules
 
@@ -145,7 +160,7 @@ those captions. The captioner is told only the class nouns, with the skill's
 | `images` | Default number of images in a generated set; editable in the app. |
 | `weight` | Default `train.reg_weight`: how much a regularisation image counts against one of the subject's. |
 | `generation.steps`, `guidance_scale` | Sampling settings for the generated images. |
-| `generation.seconds_per_image` | Time per image, for the estimate the app shows. Display only. |
+| `generation.seconds_per_image` | Time per image at the row's largest default resolution, for the estimate the app shows; the app scales it by the area of the largest chosen bucket. Display only. |
 | `note` | Free text for maintainers. Not displayed. |
 
 The row needs a `generator` hook, because the images are drawn through the same model class as

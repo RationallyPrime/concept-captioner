@@ -67,6 +67,27 @@ extension StudioSession {
         showChatGPTPlanNotice = !preferences.bool(forKey: "chatGPTUsageAcknowledged")
     }
 
+    /// Choosing OpenAI for either role checks for a ChatGPT sign-in before falling back to an API key:
+    /// with a signed-in account that allows plan use, OpenAI switches to the ChatGPT plan and any role
+    /// on OpenAI whose model the account does not offer moves to the account's first model. Without
+    /// one, nothing changes and the API key is used as before.
+    func adoptChatGPTIfSignedIn() async {
+        guard !demoMode, !busy, !openAIUsesChatGPT else { return }
+        let generation = chatGPTWorkGeneration
+        await chatGPT.load()
+        guard generation == chatGPTWorkGeneration, !demoMode, !busy, !Task.isCancelled,
+              !openAIUsesChatGPT, chatGPTReady,
+              endpointKind == "openai" || (useCritic && criticKind == "openai") else { return }
+        openAIUsesChatGPT = true
+        if chatGPT.availableModels.isEmpty { await chatGPT.refreshModels() }
+        guard generation == chatGPTWorkGeneration, !Task.isCancelled else { return }
+        let offered = Set(chatGPT.availableModels.map(\.slug))
+        let first = chatGPT.availableModels.first?.slug ?? ""
+        if endpointKind == "openai", !offered.contains(modelName) { modelName = first }
+        if criticKind == "openai", !offered.contains(criticModel) { criticModel = first }
+        rememberChoices()
+    }
+
     func acknowledgeChatGPTPlan() {
         preferences.set(true, forKey: "chatGPTUsageAcknowledged")
         showChatGPTPlanNotice = false
