@@ -1,10 +1,13 @@
 # images
 
-Current public release: `ghcr.io/rationallyprime/concept-captioner-pod-{base,aitoolkit,ltx}:v0.3.3-20261014`,
-a **clean build from commit `126eb67`** (regularisation sets and REPA on top of the model table, the Hub licence ids,
-Qwen-Image-2.1 checkpoints every 500 steps and REPA on by default; the aitoolkit
-build applied the three REPA patches with `git am`): the three Dockerfiles as committed, built on cx53 with
-`docker buildx build` and no overlay. The previous releases stay published: `v0.3.2-20261014` (from `374e695`; base `3a809cae…`, aitoolkit `73266718…`,
+Current public release: `ghcr.io/rationallyprime/concept-captioner-pod-{base,aitoolkit,ltx}:v0.3.4-20261015`,
+a **clean build from commit `1adc7c8`** (PR #21: LTX-2.3 and LTX-2.5 Hub sources, the LTX trainer at `be6d6d0`, and
+PRs #19/#20's trainer settings and log push): the three Dockerfiles as committed, built on cx53 with
+`docker buildx build` and no overlay, pushed 2026-10-15. Digests: base `sha256:3226b5eefa6b7a5edb18564b746ec479694546071ef188757f7a3c343b29e2e9`,
+aitoolkit `sha256:76873ce8d9fd921bf0a58aa20d4872223c076c69d3ef89422e1d561bfb14e147`,
+ltx `sha256:fda47e2743d7a11238c2f4dea89ba7c4c46799f9bde587da5b19c3b20a781c4b`; each resolves anonymously.
+The LTX stage resolved ltx-trainer 1.4.2, ltx-core 1.4.2, torch 2.13.0+cu132 and natten 0.21.7.
+The previous releases stay published: `v0.3.3-20261014` (from `126eb67`; base `bfcb30c7…`, aitoolkit `24793dec…`, ltx `4aeb4e3b…`), `v0.3.2-20261014` (from `374e695`; base `3a809cae…`, aitoolkit `73266718…`,
 ltx `5bf0ef9e…`), `v0.3.1-20261014` (from `0124582`; base `0483ff50…`, aitoolkit `3bc32673…`,
 ltx `e568b43b…`), `v0.3.0-20261014` (from `f784947`,
 PR #10; base `eab5ddb9…`, aitoolkit `afe466d1…`, ltx `41a74204…`) and `v0.2.3-clean-20261011` (from `b7908618`;

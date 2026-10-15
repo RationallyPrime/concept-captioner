@@ -4,7 +4,7 @@ Updated 2026-10-14. A Developer ID-signed, notarised build has completed a full 
 driven only through its own interface: rent, publish, regularisation images, training with REPA,
 the push to the Hub on finish, the saved-run record and the idle stop. See
 [the run below](#end-to-end-run-through-the-app-2026-10-14). The app defaults to the
-`v0.3.3-20261014` pod images. The model table has five verified recipes, and an **Advanced user**
+`v0.3.4-20261015` pod images. The model table has six verified recipes, and an **Advanced user**
 switch in Settings gathers the detailed controls and 20 unverified AI Toolkit recipes. There is
 no public download yet. The sections that follow are dated records; each keeps the scope of
 what was tested at the time.
@@ -58,9 +58,11 @@ selected trainer and model. Where a model genuinely differs the row names a hook
 H3 native recipe, its guidance rules and the LTX video-bucket change to the trainer settings. No code
 outside a hook tests a model's name; the trainer (`aitoolkit`, `ltx`) is still branched on.
 
-The verified rows are FLUX.1-dev, MiniMax H3, Z-Image and Qwen-Image-2.1. LTX-2.3 and LTX-2.5
-replaced LTX-2 on 2026-10-15 and stay unverified (shown only to Advanced users) until a pod run
-confirms them; LTX-2.5's Hub repo is gated. Z-Image and
+The verified rows are FLUX.1-dev, LTX-2.3, LTX-2.5, MiniMax H3, Z-Image and Qwen-Image-2.1.
+LTX-2.3 and LTX-2.5 replaced LTX-2 on 2026-10-15, verified the same day on one 32 GB RTX 5090
+with the v0.3.4 LTX image: 100 steps each at 512 (5.0 and 5.8 min, 27.6 GB peak), then a matched
+base/LoRA clip each through `generate-ltx` (LTX-2.5 through the split-pack path). LTX-2.5's Hub
+repo is gated. Z-Image and
 Qwen-Image-2.1 count their training length in epochs (the app sends steps) and show their licence
 notice and first-download size under the picker. Both compare through the `aitoolkit_arch_image`
 generator hook; Z-Image's picker note says a Z-Image LoRA works on Z-Image-Turbo at about twice the
@@ -328,7 +330,7 @@ including rejected unauthenticated and out-of-scope requests. This proves backen
 not native WebKit rendering. Both new proof pods used one 32 GB GPU and 62 GB host RAM; these
 small recipes do not establish a memory guarantee for other datasets or settings.
 
-Current trainer images are published under `v0.3.3-20261014`, a clean build of `126eb67` (regularisation and REPA with the licence-id
+Current trainer images are published under `v0.3.4-20261015`, a clean build of `1adc7c8` (PR #21: LTX-2.3 and LTX-2.5); before it, `v0.3.3-20261014`, a clean build of `126eb67` (regularisation and REPA with the licence-id
 fix, Qwen-Image-2.1 checkpoints every 500 steps and REPA on by default; `v0.3.2-20261014` is the regularisation and
 REPA change at `374e695`, `v0.3.1-20261014` is the same change before its review fixes, at `0124582`; the earlier `v0.3.0-20261014` was built from PR #10 at `f784947`, and
 `v0.2.3-clean-20261011` from `main` at `b7908618`) (digests in `pod/images/README.md`), and verified by
