@@ -330,7 +330,7 @@
         "verify_message": null
       },
       "video": {
-        "title": "LTX 2.5",
+        "title": "LTX",
         "frame_law": {
           "first": 1,
           "step": 8
@@ -381,14 +381,15 @@
         "name": "LTX-2.x Community License Agreement",
         "url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
         "notice": "LTX-2.3 and LTX-2.5 are released under the LTX-2.x Community License Agreement. Read its terms before using these models, a LoRA trained on them, or their outputs commercially.",
-        "show_notice": false
+        "show_notice": true
       },
       "hooks": {
         "generator": "ltx_one_stage",
         "run_extra": "ltx_video_buckets"
       },
       "notes": "LTX trainer image (launch_ltx.py), split pack: transformer, text encoder and both VAEs are separate paths. Images and 8n+1-frame clips. Pinned in pod/agent/src/podagent/ltx_rules.py; this row mirrors it.",
-      "recipe_status": "verified"
+      "recipe_status": "verified",
+      "usage_note": "Gated on Hugging Face: before renting, sign in at huggingface.co/Lightricks/LTX-2.5 with the account whose token is in Settings and accept the licence. Without it the first download fails before training starts."
     },
     {
       "id": "minimax-h3",

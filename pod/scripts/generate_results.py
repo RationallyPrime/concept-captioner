@@ -237,21 +237,25 @@ def ltx_command(
 ) -> list[str]:
     # Public source: ltx_pipelines/ti2vid_one_stage.py and utils/args.py at LTX_PIN.
     text_encoder = Path(model["text_encoder_path"])
-    # A unified checkpoint holds both VAEs; a split pack (LTX-2.5) names each component.
-    split = model.get("video_vae_path") is not None
+    # The text encoder's form decides the layout: a unified checkpoint (LTX-2, LTX-2.3) pairs
+    # with a Gemma root directory, a split pack (LTX-2.5) with a packed .safetensors. VAE paths
+    # are passed whenever set: split packs need them, and a unified checkpoint may override them.
+    split = not text_encoder.is_dir()
     command = [
         sys.executable,
         "-m",
         "ltx_pipelines.ti2vid_one_stage",
         "--transformer-path" if split else "--checkpoint-path",
         str(model["model_path"]),
-        "--gemma-root" if text_encoder.is_dir() else "--text-encoder-path",
+        "--text-encoder-path" if split else "--gemma-root",
         str(text_encoder),
     ]
-    if split:
-        command += ["--video-vae-path", str(model["video_vae_path"])]
-        if model.get("audio_vae_path") is not None:
-            command += ["--audio-vae-path", str(model["audio_vae_path"])]
+    for key, flag in (
+        ("video_vae_path", "--video-vae-path"),
+        ("audio_vae_path", "--audio-vae-path"),
+    ):
+        if model.get(key) is not None:
+            command += [flag, str(model[key])]
     command += [
         "--prompt",
         row["prompt"],

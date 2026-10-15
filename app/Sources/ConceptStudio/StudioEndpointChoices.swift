@@ -262,8 +262,11 @@ extension StudioSession {
         gpu.datasetRevision = projectState.datasetRevision
         gpu.datasetContainsVideo = project?.images.contains { Sources.isVideo(Sources.suffix(of: $0.id)) } ?? false
         gpu.datasetItemCount = project?.images.count ?? 0
+        // A chosen model that already writes the project's caption profile stays chosen: LTX-2.3 and
+        // LTX-2.5 share one, and the profile alone would resolve to the first of them.
         if !preservingTrainer, !gpu.hasRunningPod, !gpu.hasNativeRecipe,
-           gpu.exactModelRow?.followsProjectProfile == true {
+           let row = gpu.exactModelRow, row.followsProjectProfile,
+           ![row.captions.imageProfile, row.captions.videoProfile].contains(gpu.profile) {
             // The model picker's path, so the project's model arrives with that model's checkpoint,
             // precision and resolution defaults; an unchanged model keeps the values already edited.
             gpu.chooseTrainingModel(GPUWorkspace.projectModel(forProfile: gpu.profile))

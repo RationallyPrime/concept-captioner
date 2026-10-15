@@ -325,6 +325,24 @@ struct H3TrainingTests {
         #expect(session.gpu.isH3Training && session.gpu.hasNativeRecipe)
     }
 
+    @MainActor @Test func aChosenLTXModelSurvivesTheSharedVideoProfile() async throws {
+        let (preferences, suite) = try temporaryPreferences()
+        defer { preferences.removePersistentDomain(forName: suite) }
+        var project = try await makeDemoProject()
+        defer { try? FileManager.default.removeItem(at: project.directory) }
+        project.job.profile = "ltx-video"
+        let session = StudioSession(preferences: preferences, secrets: MemorySecretStore())
+        session.project = project
+        session.updateTrainingProjectDefaults()
+        #expect(session.gpu.baseModel == "Lightricks/LTX-2.3")
+        session.gpu.chooseTrainingModel("Lightricks/LTX-2.5")
+        session.updateTrainingProjectDefaults()
+        #expect(session.gpu.baseModel == "Lightricks/LTX-2.5")
+        // The clip editor offers one LTX format, not one per row sharing the profile.
+        let ids = VideoTrainingFormat.allCases.map(\.id)
+        #expect(ids.count == Set(ids).count && ids.contains("ltx-video"))
+    }
+
     @MainActor @Test func h3ProjectDefaultsMatchTheModelPickersH3Defaults() async throws {
         let (preferences, suite) = try temporaryPreferences()
         defer { preferences.removePersistentDomain(forName: suite) }
