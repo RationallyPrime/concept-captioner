@@ -12,11 +12,7 @@ struct AdvancedTrainingControls: View {
                         ForEach(workspace.resolutionChoices, id: \.self) { resolution in
                             Toggle("\(resolution) px", isOn: Binding(
                                 get: { workspace.trainingResolutions.contains(resolution) },
-                                set: { selected in
-                                    workspace.trainingResolutions.removeAll { $0 == resolution }
-                                    if selected { workspace.trainingResolutions.append(resolution) }
-                                    workspace.trainingResolutions.sort()
-                                }
+                                set: { workspace.selectResolution(resolution, selected: $0) }
                             ))
                         }
                     }

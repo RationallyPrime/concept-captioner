@@ -111,6 +111,20 @@ extension GPUWorkspace {
         trainerSettingOverrides.pairs.map { TrainerSettings.line($0.key, $0.value) }
     }
 
+    /// Adds or removes one image bucket. A bucket larger than the model's own default sizes, on a model that trains
+    /// without gradient checkpointing, turns checkpointing on: the row's memory figures hold only for its default
+    /// sizes (Qwen-Image-2.1 at 1024 px on a 96 GB card). Advanced can still turn it off again.
+    func selectResolution(_ resolution: Int, selected: Bool) {
+        trainingResolutions.removeAll { $0 == resolution }
+        if selected { trainingResolutions.append(resolution) }
+        trainingResolutions.sort()
+        let row = effectiveModelRow
+        if selected, editsTrainerSettings, !row.architecture.gradientCheckpointing,
+           resolution > (row.resolution.defaults.max() ?? 0) {
+            trainerSettings.gradientCheckpointing = true
+        }
+    }
+
     func validateTrainerSettings() throws {
         guard editsTrainerSettings else { return }
         let dropout = trainerSettings.captionDropout

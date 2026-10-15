@@ -44,6 +44,20 @@ struct TrainerSettingsTests {
         #expect(repeated["gradient_checkpointing"] == .bool(true))
     }
 
+    /// Qwen-Image-2.1 trains without checkpointing at its default 768 px; adding the 1024 px bucket turns it on.
+    @Test func aBucketAboveTheModelsDefaultsTurnsCheckpointingOn() {
+        let workspace = GPUWorkspace(demoMode: true)
+        workspace.chooseTrainingModel(Self.qwen)
+        workspace.selectResolution(512, selected: true)
+        #expect(params(workspace)["gradient_checkpointing"] == nil)
+        workspace.selectResolution(1024, selected: true)
+        #expect(workspace.trainingResolutions == [512, 768, 1024])
+        #expect(params(workspace)["gradient_checkpointing"] == .bool(true))
+        workspace.trainerSettings.gradientCheckpointing = false
+        workspace.selectResolution(512, selected: false)
+        #expect(params(workspace)["gradient_checkpointing"] == nil)
+    }
+
     /// The pod keeps the row's warmup and takes one only with the warmup schedule, so the app sends warmup steps only
     /// with that schedule and only when they differ from the row's.
     @Test func warmupTravelsOnlyWithTheWarmupSchedule() {
