@@ -37,7 +37,9 @@ import json
 import os
 import re
 import runpy
+import shutil
 import sys
+import tempfile
 from datetime import UTC, datetime
 from importlib import metadata
 from pathlib import Path
@@ -48,7 +50,6 @@ SIDE_FILES = ("run.json", "config.yaml")
 LOG_FILE = "trainer.log"
 EVENTS_DIR = "tensorboard"
 LOGS_IN_REPO = "logs"  # the repo folder that holds LOG_FILE and EVENTS_DIR
-MAX_LOG_BYTES = 64 * 1024 * 1024  # held in memory until the commit; the CPU-only pods have 512 MB
 CARD_NAME = "README.md"
 RECEIPT_NAME = "push.json"
 # The Hub's licence identifiers (https://huggingface.co/docs/hub/en/repositories-licenses), less
@@ -185,11 +186,12 @@ def _regular(path: Path) -> bool:
     return path.is_file() and not path.is_symlink()
 
 
-def log_files(run_dir: Path) -> list[tuple[str, bytes]]:
-    """``(path in the repo, contents)`` of ``trainer.log`` and the TensorBoard event files.
+def log_files(run_dir: Path, snapshot_dir: Path) -> list[tuple[str, Path]]:
+    """``(path in the repo, snapshot)`` of ``trainer.log`` and the TensorBoard event files.
 
-    The logs ride along with the weights, so a log that cannot be read or is larger than
-    ``MAX_LOG_BYTES`` is left out with a warning instead of stopping the push.
+    Each log is copied into ``snapshot_dir`` as it is now, streamed rather than held in memory, so
+    lines written while the commit uploads cannot change a file mid-upload. The logs ride along with
+    the weights, so a log that cannot be copied is left out with a warning instead of stopping the push.
     """
     found = [run_dir / LOG_FILE] if _regular(run_dir / LOG_FILE) else []
     events = run_dir / EVENTS_DIR
@@ -198,29 +200,29 @@ def log_files(run_dir: Path) -> list[tuple[str, bytes]]:
     logs = []
     for path in found:
         name = f"{LOGS_IN_REPO}/{relative(run_dir, path)}"
+        snapshot = snapshot_dir / relative(run_dir, path)
         try:
-            if path.stat().st_size > MAX_LOG_BYTES:
-                print(
-                    f"push-lora: {name} is over {MAX_LOG_BYTES} bytes; pushing without it",
-                    file=sys.stderr,
-                )
-                continue
-            logs.append((name, path.read_bytes()))
+            snapshot.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, snapshot)
         except OSError as error:
             print(
                 f"push-lora: could not read {name} ({error}); pushing without it", file=sys.stderr
             )
+            continue
+        logs.append((name, snapshot))
     return logs
 
 
 def upload_plan(
-    run_dir: Path, *, weights: list[Path], samples: list[Path]
+    run_dir: Path, *, weights: list[Path], samples: list[Path], snapshot_dir: Path
 ) -> list[tuple[str, Path | bytes]]:
-    """Every file of the commit as ``(path in the repo, file or contents)``; the card comes last."""
+    """Every file of the commit as ``(path in the repo, file or contents)``; the card comes last.
+
+    Log snapshots are written to ``snapshot_dir``, which must outlive the commit."""
     plan: list[tuple[str, Path | bytes]] = [(relative(run_dir, w), w) for w in weights]
     plan += [(name, run_dir / name) for name in SIDE_FILES if (run_dir / name).is_file()]
     plan += [(relative(run_dir, sample), sample) for sample in samples]
-    plan += log_files(run_dir)
+    plan += log_files(run_dir, snapshot_dir)
     plan.append((CARD_NAME, run_dir / CARD_NAME))
     return plan
 
@@ -482,31 +484,32 @@ def main(argv: list[str] | None = None, hub: Hub | None = None) -> int:
     samples = [] if args.no_samples else sample_files(run_dir)
     weight_names = [relative(run_dir, w) for w in weights]
     version = concept_captioner_version()
-    plan = upload_plan(run_dir, weights=weights, samples=samples)
-    files = [path for path, _ in plan]
-    card = model_card(
-        run,
-        run_id=run_id,
-        weights=weight_names,
-        samples=len(samples),
-        dataset=dataset_info(run),
-        version=version,
-        logs=any(path.startswith(LOGS_IN_REPO + "/") for path in files),
-    )
-    (run_dir / CARD_NAME).write_text(card, encoding="utf-8")
-    print(
-        f"push_lora: {run_id} -> {args.repo}: {len(files)} files ({', '.join(weight_names)})",
-        flush=True,
-    )
+    with tempfile.TemporaryDirectory(prefix="push-lora-logs-") as snapshots:
+        plan = upload_plan(run_dir, weights=weights, samples=samples, snapshot_dir=Path(snapshots))
+        files = [path for path, _ in plan]
+        card = model_card(
+            run,
+            run_id=run_id,
+            weights=weight_names,
+            samples=len(samples),
+            dataset=dataset_info(run),
+            version=version,
+            logs=any(path.startswith(LOGS_IN_REPO + "/") for path in files),
+        )
+        (run_dir / CARD_NAME).write_text(card, encoding="utf-8")
+        print(
+            f"push_lora: {run_id} -> {args.repo}: {len(files)} files ({', '.join(weight_names)})",
+            flush=True,
+        )
 
-    if hub is None:
-        hub = Hub(token_from_env())
-    url = hub.create_repo(args.repo, private=args.private)
-    commit = hub.commit(
-        args.repo,
-        plan,
-        commit_message=args.commit_message or f"Upload LoRA {run_id} (push_lora.py)",
-    )
+        if hub is None:
+            hub = Hub(token_from_env())
+        url = hub.create_repo(args.repo, private=args.private)
+        commit = hub.commit(
+            args.repo,
+            plan,
+            commit_message=args.commit_message or f"Upload LoRA {run_id} (push_lora.py)",
+        )
     receipt = {
         "repo_id": args.repo,
         "url": url,

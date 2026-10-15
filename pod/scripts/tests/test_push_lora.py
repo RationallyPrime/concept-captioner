@@ -128,31 +128,32 @@ def test_logs_go_under_logs_as_they_are_now(tmp_path: Path):
     run_dir = make_run(tmp_path)
     (tmp_path / "elsewhere.log").write_text("not this run's", encoding="utf-8")
     (run_dir / "tensorboard" / "linked").symlink_to(tmp_path / "elsewhere.log")
-    logs = push.log_files(run_dir)
+    logs = push.log_files(run_dir, tmp_path / "snapshots")
     assert [path for path, _ in logs] == [
         "logs/trainer.log",
         "logs/tensorboard/events.out.tfevents.1.scraped",
         "logs/tensorboard/nora7-h3-001_20261015/events.out.tfevents.2",
     ]
     (run_dir / "trainer.log").write_text("appended after reading\n", encoding="utf-8")
-    assert logs[0][1] == b"step 500 loss 0.1\n"
+    assert logs[0][1].read_bytes() == b"step 500 loss 0.1\n"
 
 
-def test_a_log_that_cannot_be_read_or_is_too_large_is_left_out(tmp_path: Path, monkeypatch):
+def test_a_log_that_cannot_be_read_is_left_out(tmp_path: Path, monkeypatch):
     run_dir = make_run(tmp_path)
-    monkeypatch.setattr(push, "MAX_LOG_BYTES", 10)
-    (run_dir / "trainer.log").write_text("x" * 11, encoding="utf-8")
     unreadable = run_dir / "tensorboard" / "events.out.tfevents.1.scraped"
-    read_bytes = Path.read_bytes
+    copyfile = push.shutil.copyfile
 
-    def failing_read(path: Path) -> bytes:
-        if path == unreadable:
+    def failing_copy(source, destination):
+        if Path(source) == unreadable:
             raise PermissionError("denied")
-        return read_bytes(path)
+        return copyfile(source, destination)
 
-    monkeypatch.setattr(Path, "read_bytes", failing_read)
-    names = [path for path, _ in push.log_files(run_dir)]
-    assert names == ["logs/tensorboard/nora7-h3-001_20261015/events.out.tfevents.2"]
+    monkeypatch.setattr(push.shutil, "copyfile", failing_copy)
+    names = [path for path, _ in push.log_files(run_dir, tmp_path / "snapshots")]
+    assert names == [
+        "logs/trainer.log",
+        "logs/tensorboard/nora7-h3-001_20261015/events.out.tfevents.2",
+    ]
 
 
 # --- model card ----------------------------------------------------------------------------------

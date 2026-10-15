@@ -354,11 +354,10 @@ extension GPUWorkspace {
     private func lengthToRepeat(_ run: TrainingRun, row: ModelRow) -> Int {
         let items = run.itemCount ?? datasetItemCount
         guard row.recipe.lengthUnit == .epochs, items > 0 else { return run.targetSteps }
-        let perStep = Double(max(1, batchSize * accumulation))
         let ownSteps = run.params["regularization"]?.objectValue == nil ? run.targetSteps : run.targetSteps / 2
         let buckets = run.params["resolution"]?.arrayValue?.count ?? 1
-        let samples = Self.samplesPerPass(items: items, trainer: run.trainer, buckets: buckets)
-        return max(1, Int((Double(ownSteps) * perStep / Double(samples)).rounded()))
+        let batches = Self.batchesPerPass(items: items, trainer: run.trainer, buckets: buckets, batchSize: batchSize)
+        return max(1, Int((Double(ownSteps) * Double(max(1, accumulation)) / Double(batches)).rounded()))
     }
 
     func resumeRun(

@@ -28,4 +28,18 @@ struct TrainingLengthTests {
         #expect(workspace.steps == 4)
         #expect(workspace.trainingResolutions == [768, 1024])
     }
+
+    /// Each bucket's last batch is filled on its own: 3 images at two sizes in batches of 2 is 4 batches a pass, not
+    /// `ceil(6 / 2)`; with accumulation 2 that is 2 optimizer steps per pass.
+    @Test func eachBucketRoundsUpItsOwnLastBatch() {
+        let workspace = GPUWorkspace(demoMode: true)
+        workspace.chooseTrainingModel("Qwen/Qwen-Image-2.1")
+        workspace.regularizationOn = false
+        workspace.trainingResolutions = [768, 1024]
+        workspace.batchSize = 2
+        workspace.steps = 3
+        #expect(workspace.optimizerSteps(items: 3) == 12)
+        workspace.accumulation = 2
+        #expect(workspace.optimizerSteps(items: 3) == 6)
+    }
 }

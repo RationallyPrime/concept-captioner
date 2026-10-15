@@ -265,16 +265,21 @@ extension GPUWorkspace {
     /// The optimizer steps the next run takes: the length as entered, or for a model that counts epochs the
     /// passes over each of `items` images and clips turned into steps.
     func optimizerSteps(items: Int) -> Int {
-        let samples = Self.samplesPerPass(items: items, trainer: trainer, buckets: trainingResolutions.count)
+        let batches = Self.batchesPerPass(
+            items: items, trainer: trainer, buckets: trainingResolutions.count, batchSize: batchSize
+        )
         return effectiveModelRow.recipe.lengthUnit.optimizerSteps(
-            length: steps, items: samples, batchSize: batchSize, accumulation: accumulation
+            length: steps, batches: batches, accumulation: accumulation
         )
     }
 
-    /// What one pass over `items` images and clips trains on. AI Toolkit splits a dataset into one copy per
-    /// resolution bucket, so a pass sees every image once at each chosen size; the LTX trainer uses one bucket.
-    nonisolated static func samplesPerPass(items: Int, trainer: String, buckets: Int) -> Int {
-        let product = items.multipliedReportingOverflow(by: trainer == "aitoolkit" ? max(1, buckets) : 1)
+    /// The batches one pass over `items` images and clips takes. AI Toolkit splits a dataset into one copy per
+    /// resolution bucket and fills each copy's last batch on its own, so a pass is `ceil(items / batch)` batches at
+    /// every chosen size; the LTX trainer uses one bucket.
+    nonisolated static func batchesPerPass(items: Int, trainer: String, buckets: Int, batchSize: Int) -> Int {
+        let batch = max(1, batchSize)
+        let perBucket = items / batch + (items % batch == 0 ? 0 : 1)
+        let product = perBucket.multipliedReportingOverflow(by: trainer == "aitoolkit" ? max(1, buckets) : 1)
         return product.overflow ? Int.max : product.partialValue
     }
 

@@ -90,12 +90,12 @@ row's current default for a setting the repeated run left alone.
 ### Training length
 
 A row in `epochs` shows passes over each image and clip, and the app sends
-`steps = ceil(epochs × items × buckets / (batch_size × gradient_accumulation))`, where `items` is
-the number of included training images and clips and `buckets` the number of chosen resolution
-buckets on AI Toolkit (1 on LTX): AI Toolkit splits a dataset into one copy per bucket, so a pass
-sees each image once at every chosen size. run.json always carries `steps`; Resume and saved runs
-work on steps, and Repeat turns them back into epochs with the repeated run's own item and bucket
-counts.
+`steps = ceil(epochs × buckets × ceil(items / batch_size) / gradient_accumulation)`, where `items`
+is the number of included training images and clips and `buckets` the number of chosen resolution
+buckets on AI Toolkit (1 on LTX): AI Toolkit splits a dataset into one copy per bucket and fills
+each copy's last batch on its own, so a pass is `ceil(items / batch_size)` batches at every chosen
+size. run.json always carries `steps`; Resume and saved runs work on steps, and Repeat turns them
+back into epochs with the repeated run's own item and bucket counts.
 
 ## Lookup rules
 
