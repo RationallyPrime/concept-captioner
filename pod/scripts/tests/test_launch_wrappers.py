@@ -257,6 +257,7 @@ def test_validate_normalises_scalars(wrapper: ModuleType, workspace: Path) -> No
         ({"extra": []}, "extra"),
         ({"caption_dropout": 1.5}, "caption_dropout"),
         ({"caption_dropout": True}, "caption_dropout"),
+        ({"gradient_checkpointing": 1}, "gradient_checkpointing"),
         ({"bogus": 1}, "unknown keys: bogus"),
         ({"dataset": {"path": "/elsewhere/faces"}}, "dataset.path: must resolve under"),
         ({"dataset": {"path": "", "caption_ext": "txt"}}, "dataset.path"),
@@ -557,6 +558,13 @@ def test_aitoolkit_trainer_settings_override_the_row_recipe(workspace: Path) -> 
 
     assert process()["datasets"][0]["caption_dropout_rate"] == 0.05
     assert process(caption_dropout=0.0)["datasets"][0]["caption_dropout_rate"] == 0.0
+    assert process()["train"]["gradient_checkpointing"] is False
+    assert process(gradient_checkpointing=True)["train"]["gradient_checkpointing"] is True
+    extra = {"train": {"gradient_checkpointing": False}}
+    assert (
+        process(gradient_checkpointing=True, extra=extra)["train"]["gradient_checkpointing"]
+        is False
+    )
 
 
 def test_trainer_settings_are_refused_where_they_cannot_apply(

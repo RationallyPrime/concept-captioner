@@ -798,6 +798,7 @@ the pictures are in `output/`; 2 = bad input (nothing drawn), 1 = the drawing fa
 | `regularization` | no | null | AI Toolkit only (the LTX trainer refuses it). A regularisation (prior-preservation) set trained beside the subject: `{"source": "generate", "images", "weight", "class_nouns", "generation": {"steps", "guidance_scale", "seed"}, "captions"}` (drawn on the pod by `draw-regularization` from the subject captions with each trigger replaced by its class noun; `captions` maps each drawn picture's key to the caption the app's captioner wrote for it) or `{"source": "folder", "path", "weight"}` (images and sidecar captions already under `datasets/`). Explicit values, copied by the app from the model table. Details below |
 | `repa` | no | null | AI Toolkit only. Representation alignment: `{"encoder", "block_index", "weight", "projector", "projector_dim", "encoder_resolution"}`, all six explicit, written one to one as ai-toolkit's `process.repa` block. Details below |
 | `caption_dropout` | no | null | Trainer setting (below). The share of training images seen without their caption, a number from 0 to 1: every dataset's `caption_dropout_rate`, the regularisation copy included. Null: the row's `recipe.caption_dropout` |
+| `gradient_checkpointing` | no | null | Trainer setting. `train.gradient_checkpointing`: recompute activations rather than keep them, slower but far less GPU memory. Null: the row's `architecture.gradient_checkpointing` |
 | `save_every` / `sample_every` | no | 250 / 250 | 0 disables samples |
 | `sample_prompts` | no | `[]` | each should contain a trigger; the wrapper does not enforce it |
 | `hub` | no | null | `repo_id`, `private` (true), `push_on_finish` (false → push is a separate `push-lora` start) |
@@ -827,7 +828,7 @@ a second step, what the model and the layout need:
 `launch_aitoolkit.py` applies the same rules to its own copy of run.json (the launcher does not
 import `podagent`), so a run started by hand through `podctl` or the script gets the same answers.
 
-**Trainer settings** (`caption_dropout`). Each overrides one value of the model row's recipe
+**Trainer settings** (`caption_dropout`, `gradient_checkpointing`). Each overrides one value of the model row's recipe
 (docs/model-table.md); absent or `null` keeps the row's value, so every saved run and Resume is
 unchanged, and the agent leaves a `null` setting out of the `run.json` it writes. The app sends a
 setting only when the person changed it from the row's default. They are in the Resume-immutable
@@ -906,6 +907,7 @@ before exiting, so the supervisor never frees GPUs a trainer still holds.
 | `save_every` | `save.save_every` (+ `dtype` and `max_step_saves_to_keep` from the model's row; FLUX `float16`, 4) |
 | `dataset.path`, `caption_ext`, `resolution` | `datasets[0].{folder_path, caption_ext, resolution, cache_latents_to_disk: true, caption_dropout_rate}` |
 | `caption_dropout` | `datasets[*].caption_dropout_rate`; null: the row's `recipe.caption_dropout` (FLUX 0.05) |
+| `gradient_checkpointing` | `train.gradient_checkpointing`; null: the row's `architecture.gradient_checkpointing` (FLUX `true`) |
 | `steps`, `learning_rate`, `batch_size`, `gradient_accumulation` | `train.{steps, lr, batch_size, gradient_accumulation_steps}` + `dtype`, `optimizer`, `gradient_checkpointing` from the model's row (FLUX `bf16`, `adamw8bit`, `true`), `noise_scheduler: flowmatch`, `train_text_encoder: false` |
 | `base_model` | `model.name_or_path` (+ the row's `arch`, extra model keys and `quantize` / `quantize_te`; FLUX `arch: flux, is_flux: true, quantize: true`; H3 uses the pinned `minimax_h3` BF16 recipe below) |
 | `sample_every`, `sample_prompts`, `seed` | `sample.{sample_every, prompts, seed, width/height = max(resolution), sampler: flowmatch, guidance_scale: 4, sample_steps: 20}` |

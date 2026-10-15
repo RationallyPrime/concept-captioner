@@ -536,6 +536,7 @@ def test_run_config_public_redacts_hf_token(paths: Paths) -> None:
         {"extra": []},
         {"caption_dropout": 1.5},
         {"caption_dropout": -0.1},
+        {"gradient_checkpointing": "sometimes"},
         {"unknown": 1},
     ],
 )

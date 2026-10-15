@@ -74,10 +74,13 @@ struct AdvancedTrainingControls: View {
     }
 
     /// The settings the model's row supplies defaults for and the pod writes into the trainer's recipe.
-    private var trainerSettingControls: some View {
-        TextField("Caption dropout", value: $workspace.captionDropout, format: .number)
+    @ViewBuilder private var trainerSettingControls: some View {
+        TextField("Caption dropout", value: $workspace.trainerSettings.captionDropout, format: .number)
             .help("The share of training images seen without their caption, from 0 to 1. A little dropout "
                 + "helps the result respond to short prompts; 0 always trains with the caption.")
+        Toggle("Gradient checkpointing", isOn: $workspace.trainerSettings.gradientCheckpointing)
+            .help("Recomputes intermediate results instead of keeping them: slower, but uses far less GPU memory. "
+                + "Larger batches and 1024 px usually need it on.")
     }
 
     /// Shown only while the regularisation toggle is on.

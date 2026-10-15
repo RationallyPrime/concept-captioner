@@ -48,7 +48,7 @@ apply.
 | `source.first_download_gb` | Size of the first model download on a fresh volume, decimal GB. Shown in the picker for rows whose licence notice is on. |
 | `source.download_note` | What that size covers. |
 | `architecture.arch` | AI Toolkit `model.arch`; `null` for the LTX trainer. |
-| `architecture.dtype`, `quantize`, `quantize_text_encoder`, `gradient_checkpointing` | Training precision and memory settings. AI Toolkit: `train.dtype`, `model.quantize`, `model.quantize_te` (written when not `null`), `train.gradient_checkpointing`. For the LTX row they describe the settings in `trainer_options.run_extra`. |
+| `architecture.dtype`, `quantize`, `quantize_text_encoder`, `gradient_checkpointing` | Training precision and memory settings. AI Toolkit: `train.dtype`, `model.quantize`, `model.quantize_te` (written when not `null`), `train.gradient_checkpointing`. For the LTX row they describe the settings in `trainer_options.run_extra`. `gradient_checkpointing` is a trainer setting (below). |
 | `architecture.model_extra` | Further AI Toolkit `model` keys, in order (FLUX: `is_flux: true`). |
 | `family_match` | `substrings` and `tokens` that match a custom base model to this row's AI Toolkit `model` block; `null` for none. Tokens must not touch another letter or digit. |
 | `resolution.choices`, `default` | Selectable training resolutions and the ones applied when the model is selected. |
@@ -78,7 +78,8 @@ order-preserving parser (the app uses `JSONValue(parsing:)`).
 
 ### Trainer settings
 
-Some recipe values are defaults a person can change for one run: `recipe.caption_dropout`. Advanced
+Some recipe values are defaults a person can change for one run: `recipe.caption_dropout` and
+`architecture.gradient_checkpointing`. Advanced
 shows them for AI Toolkit rows without a `trainer_config` hook (such a hook builds the whole recipe,
 as H3's does, and the row's values only describe it). The app sends a value in run.json only when
 it differs from the row's (POD-SPEC 4.1); an absent value means the row's, so Repeat takes the

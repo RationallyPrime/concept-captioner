@@ -60,8 +60,8 @@ final class GPUWorkspace {
     var checkpointEvery: Int
     var checkpointRetention: Int
     var checkpointPrecision: String
-    /// The share of training images seen without their caption (the row's `recipe.caption_dropout`).
-    var captionDropout: Double
+    /// Advanced's trainer settings, defaulting to the selected row's values.
+    var trainerSettings: TrainerSettings
     var guidanceLoss = false
     var guidanceTargetText = GPUWorkspace.defaultGuidanceTarget
     var guidanceTarget: JSONValue {
@@ -190,7 +190,7 @@ final class GPUWorkspace {
         checkpointEvery = start.recipe.checkpoints.every
         checkpointRetention = start.recipe.checkpoints.keep
         checkpointPrecision = modelTable.checkpointPrecision(for: start)
-        captionDropout = start.recipe.captionDropout ?? 0
+        trainerSettings = TrainerSettings(start)
         trainingResolutions = start.resolution.defaults
         let reference = modelTable.models.lazy.compactMap(\.regularization).first
         regularizationImages = reference?.images ?? 1

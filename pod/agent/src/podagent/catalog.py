@@ -72,7 +72,7 @@ NO_REGULARIZATION_HERE = "Regularisation images are not available for this model
 UNSUPPORTED_REPA = "Representation alignment is not available for this model."
 LTX_NO_REGULARIZATION = "regularization/repa are not available on the LTX trainer"
 # RunConfig fields that override the model row's recipe; null keeps the recipe's value (POD-SPEC 4.1).
-TRAINER_SETTINGS = ("caption_dropout",)
+TRAINER_SETTINGS = ("caption_dropout", "gradient_checkpointing")
 LTX_TRAINER_SETTINGS = "AI Toolkit settings; set the LTX trainer's own through extra"
 RECIPE_SETS_THESE = "this model's own recipe sets these; change them through extra"
 
@@ -454,6 +454,7 @@ class RunConfig(ServiceParams):
     regularization: Regularization | None = None
     repa: Repa | None = None
     caption_dropout: float | None = Field(default=None, ge=0, le=1)
+    gradient_checkpointing: bool | None = None
 
     @field_validator("triggers")
     @classmethod

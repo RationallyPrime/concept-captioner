@@ -231,7 +231,7 @@ extension GPUWorkspace {
         initialCheckpoint = nil
         let row = effectiveModelRow
         adoptDefaults(from: previous, to: row.recipe)
-        adoptTrainerSettingDefaults(from: previousRow, to: row)
+        trainerSettings.adopt(from: previousRow, to: row)
         adoptTrainingAidDefaults(to: row)
         checkpointEvery = row.recipe.checkpoints.every
         checkpointRetention = row.recipe.checkpoints.keep

@@ -85,7 +85,7 @@ CHILD_GRACE_SECONDS = 5.0  # SIGTERM -> this long -> SIGKILL, when the tee itsel
 
 # Trainer settings that override the model's own recipe (POD-SPEC 4.1). Absent or null means the
 # recipe's value. AI Toolkit only: the LTX wrapper refuses them, as it refuses regularization.
-TRAINER_SETTINGS = ("caption_dropout",)
+TRAINER_SETTINGS = ("caption_dropout", "gradient_checkpointing")
 
 _TOP_KEYS = frozenset(
     {
@@ -198,6 +198,12 @@ def _validate_trainer_settings(raw: dict[str, Any], errors: list[str]) -> dict[s
             out["caption_dropout"] = float(dropout)
         else:
             errors.append("caption_dropout: must be a number from 0 to 1, or null")
+    checkpointing = raw.get("gradient_checkpointing")
+    if checkpointing is not None:
+        if isinstance(checkpointing, bool):
+            out["gradient_checkpointing"] = checkpointing
+        else:
+            errors.append("gradient_checkpointing: must be true, false or null")
     return out
 
 
@@ -803,6 +809,8 @@ def apply_run_settings(process: dict[str, Any], cfg: dict[str, Any]) -> None:
     if cfg.get("caption_dropout") is not None:
         for dataset in process["datasets"]:
             dataset["caption_dropout_rate"] = cfg["caption_dropout"]
+    if cfg.get("gradient_checkpointing") is not None:
+        process["train"]["gradient_checkpointing"] = cfg["gradient_checkpointing"]
 
 
 def check_trainer_settings(cfg: dict[str, Any], hook: str | None) -> None:

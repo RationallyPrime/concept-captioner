@@ -26,22 +26,28 @@ struct TrainerSettingsTests {
         let workspace = GPUWorkspace(demoMode: true)
         workspace.chooseTrainingModel(Self.qwen)
         #expect(params(workspace)["caption_dropout"] == nil)
-        workspace.captionDropout = 0.1
+        #expect(params(workspace)["gradient_checkpointing"] == nil)
+        workspace.trainerSettings.captionDropout = 0.1
+        workspace.trainerSettings.gradientCheckpointing = true
         let changed = params(workspace)
         #expect(changed["caption_dropout"] == .double(0.1))
+        #expect(changed["gradient_checkpointing"] == .bool(true))
         workspace.chooseTrainingModel(Self.flux)
-        #expect(workspace.captionDropout == 0.1)
-        workspace.captionDropout = 0.05
+        #expect(workspace.trainerSettings.captionDropout == 0.1)
+        #expect(params(workspace)["gradient_checkpointing"] == nil)
+        workspace.trainerSettings.captionDropout = 0.05
         let run = savedRun(changed)
         workspace.runHistory = [run]
         workspace.repeatSettings(from: run)
-        #expect(params(workspace, "concept-repeat")["caption_dropout"] == .double(0.1))
+        let repeated = params(workspace, "concept-repeat")
+        #expect(repeated["caption_dropout"] == .double(0.1))
+        #expect(repeated["gradient_checkpointing"] == .bool(true))
     }
 
     /// A row whose `trainer_config` hook builds its own recipe takes none of them.
     @Test func hookRecipeTakesNoTrainerSettings() {
         let workspace = GPUWorkspace(demoMode: true)
-        workspace.captionDropout = 0.3
+        workspace.trainerSettings.captionDropout = 0.3
         workspace.chooseTrainingModel(GPUWorkspace.h3BaseModel)
         #expect(!workspace.editsTrainerSettings)
         #expect(params(workspace)["caption_dropout"] == nil)
