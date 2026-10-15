@@ -18,6 +18,7 @@ from podagent.catalog import (
     CATALOG,
     FAKE_EXTRA_FLAGS,
     SERVICE_NAMES,
+    TRAINER_SETTINGS,
     VLLM_EXTRA_FLAGS,
     DrawRegularizationParams,
     GenerationParams,
@@ -458,6 +459,7 @@ def test_trainer_prepare_writes_run_json_without_secrets(paths: Paths, name: str
     }
     assert written["extra"] == {"train": {"optimizer": "prodigy"}}
     assert written["steps"] == 2000 and written["save_every"] == 250 and written["seed"] == 42
+    assert not set(TRAINER_SETTINGS) & set(written)  # left to the recipe: no key, as before
 
     # A second prepare (resume) overwrites run.json and leaves the directory alone.
     (run_dir / "output").mkdir()
@@ -532,6 +534,8 @@ def test_run_config_public_redacts_hf_token(paths: Paths) -> None:
         {"hub": {"repo_id": "you/x", "extra": 1}},
         {"hf_token": ""},
         {"extra": []},
+        {"caption_dropout": 1.5},
+        {"caption_dropout": -0.1},
         {"unknown": 1},
     ],
 )
@@ -800,6 +804,16 @@ def test_ltx_preprocess_is_checked_by_the_ltx_params_model(paths: Paths) -> None
         "Lightricks/LTX-2",
         "dfcc2108383fe1aaa0584bdf55d368a4bdadd90c",
     )
+
+
+def test_trainer_settings_are_refused_where_they_cannot_apply(paths: Paths) -> None:
+    body = run_config(paths, caption_dropout=0.1)
+    assert parse_params("trainer-aitoolkit", body, paths).trainer_settings() == ["caption_dropout"]
+    with pytest.raises(ValidationError, match="caption_dropout: AI Toolkit settings"):
+        parse_params("trainer-ltx", body, paths)
+    h3 = run_config(paths, base_model="Comfy-Org/MiniMax-H3", caption_dropout=0.1)
+    with pytest.raises(ValidationError, match="caption_dropout: this model's own recipe"):
+        parse_params("trainer-aitoolkit", h3, paths)
 
 
 # --- fake mode, parse_params, argv hygiene -------------------------------------------------------

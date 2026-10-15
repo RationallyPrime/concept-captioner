@@ -312,6 +312,7 @@ extension GPUWorkspace {
         batchSize = run.params["batch_size"]?.intValue ?? 1
         accumulation = run.params["gradient_accumulation"]?.intValue ?? 1
         steps = lengthToRepeat(run, row: row)
+        restoreTrainerSettings(from: run, row: row)
         restoreTrainingAids(from: run)
         nativeRecipe = nil
         nativeRecipeOriginal = nil

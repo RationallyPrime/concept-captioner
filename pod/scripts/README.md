@@ -175,9 +175,10 @@ working. What each script reads:
 
 - `launch_aitoolkit.py`: `model_block` is `model_table.aitoolkit_model_block` (exact row, else
   family match, else `name_or_path` only). `build_native_config` writes an exact row's
-  `train.dtype`, `train.gradient_checkpointing`, `train.optimizer`, `save.dtype` and
-  `save.max_step_saves_to_keep`, then its `trainer_options.process` keys, over the skeleton before
-  `extra` merges (run.json `extra` wins), unless the row names a
+  `train.dtype`, `train.gradient_checkpointing`, `train.optimizer`, `save.dtype`,
+  `save.max_step_saves_to_keep` and every dataset's `caption_dropout_rate`, then its
+  `trainer_options.process` keys, over the skeleton; run.json's trainer settings (POD-SPEC 4.1)
+  follow, then `extra` merges (run.json `extra` wins), unless the row names a
   `trainer_config` hook (H3's whole recipe, `minimax_h3_trainer_config`, and its asset download
   before launch).
 - `generate_results.py`: the exact row must name a `generator` hook (`aitoolkit_image` is

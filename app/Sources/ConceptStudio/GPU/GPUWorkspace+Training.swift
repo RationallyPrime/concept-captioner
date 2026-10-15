@@ -176,6 +176,7 @@ extension GPUWorkspace {
             throw StudioError.message("Training length in epochs needs the number of included images and clips. "
                 + "Open the project that holds them.")
         }
+        try validateTrainerSettings()
         try validateTrainingAids()
         guard !resultNeedsSaving else {
             throw StudioError.message("Retrieve pending trained models or generated outputs before starting a run.")
@@ -291,6 +292,9 @@ extension GPUWorkspace {
         ]
         if samplesEnabled {
             params["sample_prompts"] = .array([.string(words.joined(separator: " "))])
+        }
+        for setting in trainerSettingOverrides.pairs {
+            params[setting.key] = setting.value
         }
         if let block = regularizationBlock(triggers: words) { params["regularization"] = .object(block) }
         if let block = repaBlock() { params["repa"] = .object(block) }

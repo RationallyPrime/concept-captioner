@@ -222,7 +222,8 @@ extension GPUWorkspace {
                 + "more than this computer was chosen for. Stop and remove it before choosing this model."
             return
         }
-        let previous = effectiveModelRow.recipe
+        let previousRow = effectiveModelRow
+        let previous = previousRow.recipe
         trainer = neededRow.trainer
         baseModel = model
         nativeRecipe = nil
@@ -230,6 +231,7 @@ extension GPUWorkspace {
         initialCheckpoint = nil
         let row = effectiveModelRow
         adoptDefaults(from: previous, to: row.recipe)
+        adoptTrainerSettingDefaults(from: previousRow, to: row)
         adoptTrainingAidDefaults(to: row)
         checkpointEvery = row.recipe.checkpoints.every
         checkpointRetention = row.recipe.checkpoints.keep

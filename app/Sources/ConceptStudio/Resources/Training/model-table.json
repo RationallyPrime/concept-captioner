@@ -63,6 +63,7 @@
         "alpha": 16,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -149,6 +150,7 @@
         "alpha": 16,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": null,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -294,6 +296,7 @@
         "alpha": 16,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.0,
         "checkpoints": {
           "every": 300,
           "keep": 40,
@@ -407,6 +410,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 500,
           "keep": 20,
@@ -496,6 +500,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 500,
           "keep": 40,
@@ -621,6 +626,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -689,8 +695,7 @@
           }
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     },
@@ -739,6 +744,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -809,8 +815,7 @@
           }
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     },
@@ -859,6 +864,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -929,8 +935,7 @@
           }
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     },
@@ -987,6 +992,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -1052,8 +1058,7 @@
           "model": {}
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     },
@@ -1102,6 +1107,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -1172,8 +1178,7 @@
           }
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     },
@@ -1222,6 +1227,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -1292,8 +1298,7 @@
           }
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     },
@@ -1348,6 +1353,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -1415,8 +1421,7 @@
           }
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     },
@@ -1469,6 +1474,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -1537,8 +1543,7 @@
           }
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     },
@@ -1591,6 +1596,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -1659,8 +1665,7 @@
           }
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     },
@@ -1715,6 +1720,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -1782,8 +1788,7 @@
           }
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     },
@@ -1835,6 +1840,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -1903,8 +1909,7 @@
           }
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     },
@@ -1959,6 +1964,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -2026,8 +2032,7 @@
           }
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     },
@@ -2076,6 +2081,7 @@
         "alpha": 128,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -2149,8 +2155,7 @@
           }
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     },
@@ -2204,6 +2209,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -2277,8 +2283,7 @@
           }
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     },
@@ -2329,6 +2334,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -2396,8 +2402,7 @@
           }
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     },
@@ -2450,6 +2455,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -2515,8 +2521,7 @@
           }
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     },
@@ -2567,6 +2572,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -2634,8 +2640,7 @@
           }
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     },
@@ -2687,6 +2692,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -2754,8 +2760,7 @@
           }
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     },
@@ -2806,6 +2811,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -2873,8 +2879,7 @@
           }
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     },
@@ -2933,6 +2938,7 @@
         "alpha": 32,
         "batch_size": 1,
         "gradient_accumulation": 1,
+        "caption_dropout": 0.05,
         "checkpoints": {
           "every": 250,
           "keep": 4,
@@ -3002,8 +3008,7 @@
           }
         },
         "dataset": {
-          "cache_latents_to_disk": false,
-          "caption_dropout_rate": 0.05
+          "cache_latents_to_disk": false
         }
       }
     }

@@ -41,6 +41,7 @@ struct AdvancedTrainingControls: View {
             TextField("Gradient accumulation", value: $workspace.accumulation, format: .number.grouping(.never))
             TextField("Learning rate", value: $workspace.learningRate, format: .number)
                 .help("How much the model changes at each step. Keep the default for your first run.")
+            if workspace.editsTrainerSettings { trainerSettingControls }
             if workspace.usesRegularization { regularizationControls }
             TextField("Triggers", text: $workspace.triggerWords)
             TextField("Caption profile", text: $workspace.profile)
@@ -70,6 +71,13 @@ struct AdvancedTrainingControls: View {
                 .trigger,
             ])
         }.formStyle(.columns)
+    }
+
+    /// The settings the model's row supplies defaults for and the pod writes into the trainer's recipe.
+    private var trainerSettingControls: some View {
+        TextField("Caption dropout", value: $workspace.captionDropout, format: .number)
+            .help("The share of training images seen without their caption, from 0 to 1. A little dropout "
+                + "helps the result respond to short prompts; 0 always trains with the caption.")
     }
 
     /// Shown only while the regularisation toggle is on.

@@ -141,6 +141,7 @@ struct RunHistoryView: View {
             LabeledContent("Run ID", value: run.runID).textSelection(.enabled)
             LabeledContent("Trainer", value: run.trainer)
             LabeledContent("LoRA rank", value: "\(run.rank)")
+            ForEach(run.trainerSettingSummary, id: \.self) { Text($0) }
             LabeledContent(
                 run.localInputDigest == nil ? "Dataset revision" : "Local input digest",
                 value: run.localInputDigest ?? run.datasetRevision ?? "Not recorded"

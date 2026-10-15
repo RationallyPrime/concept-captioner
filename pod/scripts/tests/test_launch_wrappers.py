@@ -255,6 +255,8 @@ def test_validate_normalises_scalars(wrapper: ModuleType, workspace: Path) -> No
         ({"hub": {"repo_id": "you/x", "push": True}}, "hub: unknown keys"),
         ({"hf_token": ""}, "hf_token"),
         ({"extra": []}, "extra"),
+        ({"caption_dropout": 1.5}, "caption_dropout"),
+        ({"caption_dropout": True}, "caption_dropout"),
         ({"bogus": 1}, "unknown keys: bogus"),
         ({"dataset": {"path": "/elsewhere/faces"}}, "dataset.path: must resolve under"),
         ({"dataset": {"path": "", "caption_ext": "txt"}}, "dataset.path"),
@@ -542,6 +544,33 @@ def test_aitoolkit_extra_deep_merge(workspace: Path) -> None:
     assert doc["config"]["name"] == "renamed"
     assert doc["job"] == "extension"
     assert process["network"] == expected["config"]["process"][0]["network"]
+
+
+def test_aitoolkit_trainer_settings_override_the_row_recipe(workspace: Path) -> None:
+    """Null keeps the row's value; a set value replaces it; ``extra`` still has the last word."""
+    run = workspace / "runs" / RUN_ID
+
+    def process(**overrides: Any) -> dict[str, Any]:
+        raw = run_config(workspace, base_model="Qwen/Qwen-Image-2.1", **overrides)
+        cfg = aitoolkit.validate_run_config(raw, workspace)
+        return aitoolkit.build_native_config(cfg, run)["config"]["process"][0]
+
+    assert process()["datasets"][0]["caption_dropout_rate"] == 0.05
+    assert process(caption_dropout=0.0)["datasets"][0]["caption_dropout_rate"] == 0.0
+
+
+def test_trainer_settings_are_refused_where_they_cannot_apply(
+    workspace: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run = workspace / "runs" / RUN_ID
+    h3 = aitoolkit.validate_run_config(
+        run_config(workspace, base_model="Comfy-Org/MiniMax-H3", caption_dropout=0.1), workspace
+    )
+    with pytest.raises(aitoolkit.ConfigError, match="caption_dropout: this model's own recipe"):
+        aitoolkit.build_native_config(h3, run)
+    run_json = write_run_json(workspace, ltx_run_config(workspace, caption_dropout=0.1))
+    assert ltx.main(["--config", str(run_json), "--dry-run"]) == 2
+    assert "caption_dropout: AI Toolkit settings" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -1715,7 +1744,11 @@ def test_row_dataset_defaults_preserve_runtime_paths_and_user_extra():
     }
     row = {
         "architecture": {"dtype": "bf16", "gradient_checkpointing": True},
-        "recipe": {"optimizer": "adamw8bit", "checkpoints": {"dtype": "bf16", "keep": 4}},
+        "recipe": {
+            "optimizer": "adamw8bit",
+            "caption_dropout": None,
+            "checkpoints": {"dtype": "bf16", "keep": 4},
+        },
         "trainer_options": {"dataset": {"cache_latents_to_disk": False}},
     }
     launcher.apply_row_recipe(process, row)

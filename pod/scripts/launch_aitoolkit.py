@@ -5,7 +5,8 @@
 
 1. Validate run.json: an own copy of the RunConfig rules of POD-SPEC §4.1 (no podagent import).
    ``dataset.path`` must be an existing directory under ``<PODAGENT_WORKSPACE>/datasets``.
-2. Write ``<run>/config.yaml``: ai-toolkit ``job: extension`` with one ``sd_trainer`` process,
+2. Write ``<run>/config.yaml``: ai-toolkit ``job: extension`` with one ``sd_trainer`` process:
+   the model row's recipe, then run.json's ``TRAINER_SETTINGS`` (each one that is not null), then
    ``extra`` deep-merged last. ``--dry-run`` plans the regularisation set (below), prints its
    counts and stops with exit 0.
 2b. Regularisation set, when run.json has ``regularization`` (regularization.py; POD-SPEC 4.3):
@@ -82,8 +83,13 @@ DEFAULT_AGENT_PYTHON = "/opt/venvs/agent/bin/python"
 DEFAULT_RESOLUTION = [512, 768, 1024]
 CHILD_GRACE_SECONDS = 5.0  # SIGTERM -> this long -> SIGKILL, when the tee itself fails
 
+# Trainer settings that override the model's own recipe (POD-SPEC 4.1). Absent or null means the
+# recipe's value. AI Toolkit only: the LTX wrapper refuses them, as it refuses regularization.
+TRAINER_SETTINGS = ("caption_dropout",)
+
 _TOP_KEYS = frozenset(
     {
+        *TRAINER_SETTINGS,
         "run_id",
         "dataset",
         "triggers",
@@ -180,6 +186,18 @@ def _validate_hub(value: Any, errors: list[str]) -> dict[str, Any] | None:
             out[key] = flag
         else:
             errors.append(f"hub.{key}: must be true or false")
+    return out
+
+
+def _validate_trainer_settings(raw: dict[str, Any], errors: list[str]) -> dict[str, Any]:
+    """``TRAINER_SETTINGS`` with null for each one run.json leaves to the model's recipe."""
+    out: dict[str, Any] = dict.fromkeys(TRAINER_SETTINGS)
+    dropout = raw.get("caption_dropout")
+    if dropout is not None:
+        if _is_number(dropout) and 0 <= dropout <= 1:
+            out["caption_dropout"] = float(dropout)
+        else:
+            errors.append("caption_dropout: must be a number from 0 to 1, or null")
     return out
 
 
@@ -294,6 +312,7 @@ def validate_run_config(
             errors.append(f"{key}: must be an object or null")
             value = None
         cfg[key] = value
+    cfg.update(_validate_trainer_settings(raw, errors))
     if errors:
         raise ConfigError("; ".join(errors))
     return cfg
@@ -717,6 +736,7 @@ UNSUPPORTED_REGULARIZATION = (
     "Generated regularisation images need a supported model. Provide your own images instead."
 )
 NO_REGULARIZATION_HERE = "Regularisation images are not available for this model."
+RECIPE_SETS_THESE = "this model's own recipe sets these; change them through extra"
 UNSUPPORTED_REPA = "Representation alignment is not available for this model."
 GENERATION_KEYS = frozenset({"steps", "guidance_scale", "seed"})
 REPA_DEFAULT_ENCODER = "facebook/dinov2-giant"  # ai-toolkit's own default
@@ -747,10 +767,11 @@ def apply_row_recipe(process: dict[str, Any], row: dict[str, Any]) -> None:
     """A generic row's trainer settings over the skeleton, in place and before ``extra`` merges.
 
     The skeleton already carries FLUX's values, so for FLUX this changes nothing; a row whose
-    recipe differs (precision, checkpointing, optimizer, checkpoint retention) gets its own. A row
-    can also list further ``process`` keys under ``trainer_options.process`` (Qwen-Image-2.1's
-    ``train.timestep_type``, learning-rate schedule and ``train.cache_text_embeddings``): they
-    merge over the skeleton here and under run.json ``extra``, which still wins.
+    recipe differs (precision, checkpointing, optimizer, checkpoint retention, caption dropout)
+    gets its own. A row can also list further ``process`` keys under ``trainer_options.process``
+    (Qwen-Image-2.1's ``train.timestep_type``, learning-rate schedule and
+    ``train.cache_text_embeddings``): they merge over the skeleton here and under run.json's
+    trainer settings and ``extra``, which still win.
     """
     architecture, recipe = row["architecture"], row["recipe"]
     process["train"]["dtype"] = architecture["dtype"]
@@ -759,6 +780,9 @@ def apply_row_recipe(process: dict[str, Any], row: dict[str, Any]) -> None:
     if recipe["checkpoints"]["dtype"] is not None:
         process["save"]["dtype"] = recipe["checkpoints"]["dtype"]
     process["save"]["max_step_saves_to_keep"] = recipe["checkpoints"]["keep"]
+    if recipe["caption_dropout"] is not None:
+        for dataset in process["datasets"]:
+            dataset["caption_dropout_rate"] = recipe["caption_dropout"]
     trainer_options = row.get("trainer_options") or {}
     dataset_defaults = trainer_options.get("dataset")
     if dataset_defaults:
@@ -768,6 +792,24 @@ def apply_row_recipe(process: dict[str, Any], row: dict[str, Any]) -> None:
     options = trainer_options.get("process")
     if options:
         process.update(deep_merge(process, options))
+
+
+def apply_run_settings(process: dict[str, Any], cfg: dict[str, Any]) -> None:
+    """run.json's ``TRAINER_SETTINGS`` over the row's recipe, in place and before ``extra`` merges.
+
+    A null setting leaves the recipe's value. The regularisation dataset is copied from the first
+    dataset after this, so it trains with the same caption dropout.
+    """
+    if cfg.get("caption_dropout") is not None:
+        for dataset in process["datasets"]:
+            dataset["caption_dropout_rate"] = cfg["caption_dropout"]
+
+
+def check_trainer_settings(cfg: dict[str, Any], hook: str | None) -> None:
+    """A ``trainer_config`` hook builds the whole recipe itself (H3), so run.json cannot set these."""
+    settings = [key for key in TRAINER_SETTINGS if cfg.get(key) is not None]
+    if hook is not None and settings:
+        raise ConfigError(", ".join(settings) + ": " + RECIPE_SETS_THESE)
 
 
 def _regularization_errors(
@@ -905,8 +947,10 @@ def build_native_config(cfg: dict[str, Any], run_dir: Path) -> dict[str, Any]:
     table = model_table()
     row = table["exact_row"](cfg["base_model"], "aitoolkit")
     hook = table["hook"](row, "trainer_config") if row is not None else None
+    check_trainer_settings(cfg, hook)
     if row is not None and hook is None:
         apply_row_recipe(process, row)
+    apply_run_settings(process, cfg)
     # Regularisation weight and REPA are run.json's explicit values; `extra` still wins over both.
     regularization = cfg.get("regularization")
     if regularization is not None:
