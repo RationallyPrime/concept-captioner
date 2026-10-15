@@ -75,6 +75,30 @@ struct ChatGPTAuthTests {
         #expect(session.modelName == "gpt-fixture")
     }
 
+    @Test(arguments: [true, false])
+    func openAIReviewerUsesChatGPTSignInBeforeAnAPIKey(signedIn: Bool) async throws {
+        let f = try ChatGPTFixture(saved: signedIn ? ChatGPTFixture.saved() : nil)
+        defer { f.cleanup() }
+        let session = StudioSession(preferences: f.preferences, chatGPT: f.manager, secrets: MemorySecretStore())
+        session.endpointKind = "google"
+        session.useCritic = true
+        session.criticKind = "openai"
+        session.criticModel = ProviderChoices.defaultModel(for: "openai")
+        await session.adoptChatGPTIfSignedIn()
+        #expect(session.openAIUsesChatGPT == signedIn)
+        #expect(session.criticModel == (signedIn ? "gpt-fixture" : ProviderChoices.defaultModel(for: "openai")))
+        #expect(session.endpointKind == "google")
+        let reviewer = { try session.endpoint(
+            model: session.criticModel, kind: session.criticKind, thinking: session.criticThinking,
+            baseURL: session.criticTargetURL, keys: StaticKeyStore([:])
+        ) }
+        if signedIn {
+            #expect(try reviewer().client is ChatGPTModelClient)
+        } else {
+            #expect(throws: (any Error).self) { try reviewer() }
+        }
+    }
+
     @Test func initializationIsIdleAndLoadingKeepsDistinctRegistrationsAndSelection() async throws {
         let f = try ChatGPTFixture(saved: ChatGPTFixture.saved())
         defer { f.cleanup() }

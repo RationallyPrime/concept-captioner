@@ -102,6 +102,9 @@ extension StudioSession {
     /// on the account's first model.
     func providerChanged(from old: String, to new: String) {
         guard old != new else { return }
+        if new == "openai", !openAIUsesChatGPT, !demoMode {
+            Task { await adoptChatGPTIfSignedIn() }
+        }
         if new == "openai", openAIUsesChatGPT {
             modelName = chatGPT.availableModels.first?.slug ?? ""
             return
@@ -112,6 +115,9 @@ extension StudioSession {
     /// Call when the reviewer's provider changes, like `providerChanged(from:to:)`.
     func criticProviderChanged(from old: String, to new: String) {
         guard old != new else { return }
+        if new == "openai", !openAIUsesChatGPT, !demoMode {
+            Task { await adoptChatGPTIfSignedIn() }
+        }
         if new == "openai", openAIUsesChatGPT {
             criticModel = chatGPT.availableModels.first?.slug ?? ""
             return
