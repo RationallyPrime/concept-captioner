@@ -175,7 +175,8 @@ working. What each script reads:
 
 - `launch_aitoolkit.py`: `model_block` is `model_table.aitoolkit_model_block` (exact row, else
   family match, else `name_or_path` only). `build_native_config` writes an exact row's
-  `train.dtype`, `train.gradient_checkpointing`, `train.optimizer`, `save.dtype`,
+  `train.dtype`, `train.gradient_checkpointing`, `train.optimizer`, `train.lr_scheduler` with its
+  warmup, `save.dtype`,
   `save.max_step_saves_to_keep` and every dataset's `caption_dropout_rate`, then its
   `trainer_options.process` keys, over the skeleton; run.json's trainer settings (POD-SPEC 4.1)
   follow, then `extra` merges (run.json `extra` wins), unless the row names a

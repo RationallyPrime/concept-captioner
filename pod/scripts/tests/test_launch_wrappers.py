@@ -258,6 +258,9 @@ def test_validate_normalises_scalars(wrapper: ModuleType, workspace: Path) -> No
         ({"caption_dropout": 1.5}, "caption_dropout"),
         ({"caption_dropout": True}, "caption_dropout"),
         ({"gradient_checkpointing": 1}, "gradient_checkpointing"),
+        ({"optimizer": "adam w"}, "optimizer"),
+        ({"lr_scheduler": "step"}, "lr_scheduler"),
+        ({"lr_warmup_steps": -1}, "lr_warmup_steps"),
         ({"bogus": 1}, "unknown keys: bogus"),
         ({"dataset": {"path": "/elsewhere/faces"}}, "dataset.path: must resolve under"),
         ({"dataset": {"path": "", "caption_ext": "txt"}}, "dataset.path"),
@@ -435,6 +438,7 @@ def expected_aitoolkit(workspace: Path) -> dict[str, Any]:
                         "lr": 0.0001,
                         "dtype": "bf16",
                         "optimizer": "adamw8bit",
+                        "lr_scheduler": "constant",
                         "noise_scheduler": "flowmatch",
                         "gradient_checkpointing": True,
                         "train_text_encoder": False,
@@ -565,6 +569,32 @@ def test_aitoolkit_trainer_settings_override_the_row_recipe(workspace: Path) -> 
         process(gradient_checkpointing=True, extra=extra)["train"]["gradient_checkpointing"]
         is False
     )
+
+
+def test_aitoolkit_learning_rate_schedule(workspace: Path) -> None:
+    """Only the warmup schedule carries a warmup: ai-toolkit hands its params to the schedule."""
+    run = workspace / "runs" / RUN_ID
+
+    def train(base_model: str = "Qwen/Qwen-Image-2.1", **overrides: Any) -> dict[str, Any]:
+        raw = run_config(workspace, base_model=base_model, **overrides)
+        cfg = aitoolkit.validate_run_config(raw, workspace)
+        return aitoolkit.build_native_config(cfg, run)["config"]["process"][0]["train"]
+
+    def schedule(train: dict[str, Any]) -> tuple[str, Any]:
+        return train["lr_scheduler"], train.get("lr_scheduler_params")
+
+    assert schedule(train()) == ("constant_with_warmup", {"num_warmup_steps": 50})
+    assert schedule(train(lr_warmup_steps=100)) == (
+        "constant_with_warmup",
+        {"num_warmup_steps": 100},
+    )
+    assert schedule(train(lr_scheduler="cosine")) == ("cosine", None)
+    flux = "black-forest-labs/FLUX.1-dev"
+    warmup = train(flux, lr_scheduler="constant_with_warmup", lr_warmup_steps=20)
+    assert schedule(warmup) == ("constant_with_warmup", {"num_warmup_steps": 20})
+    assert train(flux, optimizer="adamw")["optimizer"] == "adamw"
+    with pytest.raises(aitoolkit.ConfigError, match="lr_warmup_steps: needs lr_scheduler"):
+        train(lr_scheduler="cosine", lr_warmup_steps=10)
 
 
 def test_trainer_settings_are_refused_where_they_cannot_apply(
@@ -1754,6 +1784,8 @@ def test_row_dataset_defaults_preserve_runtime_paths_and_user_extra():
         "architecture": {"dtype": "bf16", "gradient_checkpointing": True},
         "recipe": {
             "optimizer": "adamw8bit",
+            "lr_scheduler": None,
+            "lr_warmup_steps": None,
             "caption_dropout": None,
             "checkpoints": {"dtype": "bf16", "keep": 4},
         },

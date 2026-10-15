@@ -537,6 +537,9 @@ def test_run_config_public_redacts_hf_token(paths: Paths) -> None:
         {"caption_dropout": 1.5},
         {"caption_dropout": -0.1},
         {"gradient_checkpointing": "sometimes"},
+        {"optimizer": "adam w"},
+        {"lr_scheduler": "step"},
+        {"lr_warmup_steps": -1},
         {"unknown": 1},
     ],
 )
@@ -815,6 +818,13 @@ def test_trainer_settings_are_refused_where_they_cannot_apply(paths: Paths) -> N
     h3 = run_config(paths, base_model="Comfy-Org/MiniMax-H3", caption_dropout=0.1)
     with pytest.raises(ValidationError, match="caption_dropout: this model's own recipe"):
         parse_params("trainer-aitoolkit", h3, paths)
+    # Warmup belongs to the warmup schedule: the run's own, else the model's.
+    qwen = run_config(paths, base_model="Qwen/Qwen-Image-2.1", lr_warmup_steps=100)
+    assert parse_params("trainer-aitoolkit", qwen, paths).lr_warmup_steps == 100
+    with pytest.raises(ValidationError, match="lr_warmup_steps: needs lr_scheduler"):
+        parse_params("trainer-aitoolkit", {**qwen, "lr_scheduler": "cosine"}, paths)
+    with pytest.raises(ValidationError, match="lr_warmup_steps: needs lr_scheduler"):
+        parse_params("trainer-aitoolkit", run_config(paths, lr_warmup_steps=100), paths)
 
 
 # --- fake mode, parse_params, argv hygiene -------------------------------------------------------

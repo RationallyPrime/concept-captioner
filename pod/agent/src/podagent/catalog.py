@@ -72,7 +72,14 @@ NO_REGULARIZATION_HERE = "Regularisation images are not available for this model
 UNSUPPORTED_REPA = "Representation alignment is not available for this model."
 LTX_NO_REGULARIZATION = "regularization/repa are not available on the LTX trainer"
 # RunConfig fields that override the model row's recipe; null keeps the recipe's value (POD-SPEC 4.1).
-TRAINER_SETTINGS = ("caption_dropout", "gradient_checkpointing")
+TRAINER_SETTINGS = (
+    "caption_dropout",
+    "gradient_checkpointing",
+    "optimizer",
+    "lr_scheduler",
+    "lr_warmup_steps",
+)
+WARMUP_SCHEDULER = "constant_with_warmup"
 LTX_TRAINER_SETTINGS = "AI Toolkit settings; set the LTX trainer's own through extra"
 RECIPE_SETS_THESE = "this model's own recipe sets these; change them through extra"
 
@@ -455,6 +462,9 @@ class RunConfig(ServiceParams):
     repa: Repa | None = None
     caption_dropout: float | None = Field(default=None, ge=0, le=1)
     gradient_checkpointing: bool | None = None
+    optimizer: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_]{1,32}$")
+    lr_scheduler: Literal["constant", "constant_with_warmup", "cosine"] | None = None
+    lr_warmup_steps: int | None = Field(default=None, ge=0)
 
     @field_validator("triggers")
     @classmethod
@@ -906,6 +916,11 @@ def _validate_training_start(name: str, params: RunConfig, paths: Paths) -> None
         row = table["exact_row"](params.base_model, name.removeprefix("trainer-"))
         if _row_hook(table, row, "trainer_config") is not None:
             _invalid(params, ", ".join(settings) + ": " + RECIPE_SETS_THESE, (settings[0],))
+        # The schedule the run trains with: its own, else the row's, else ai-toolkit's default.
+        scheduler = params.lr_scheduler or (row or {}).get("recipe", {}).get("lr_scheduler")
+        if params.lr_warmup_steps is not None and (scheduler or "constant") != WARMUP_SCHEDULER:
+            reason = f"lr_warmup_steps: needs lr_scheduler {WARMUP_SCHEDULER}"
+            _invalid(params, reason, ("lr_warmup_steps",))
     if params.initialization is not None:
         # External weights warm-start only a model whose row names a native_recipe hook, on the
         # trainer that row belongs to; the hook supplies the rules that read them.

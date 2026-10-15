@@ -63,6 +63,9 @@ struct ModelRow: Sendable, Identifiable, Equatable {
         let length: Int
         let learningRate: Double
         let optimizer: String
+        /// AI Toolkit's learning-rate schedule and its warmup steps; nil where the trainer takes them elsewhere (LTX).
+        let lrScheduler: String?
+        let lrWarmupSteps: Int?
         let rank: Int
         let alpha: Int
         let batchSize: Int
@@ -391,6 +394,8 @@ extension ModelRow.Recipe {
         self.length = try length.int("value")
         learningRate = try object.double("learning_rate")
         optimizer = try object.string("optimizer")
+        lrScheduler = try object.optionalString("lr_scheduler")
+        lrWarmupSteps = try object.optionalInt("lr_warmup_steps")
         rank = try object.int("rank")
         alpha = try object.int("alpha")
         batchSize = try object.int("batch_size")

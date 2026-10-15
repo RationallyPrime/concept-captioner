@@ -55,7 +55,8 @@ apply.
 | `resolution.multiple` | `true`: Advanced shows one toggle per resolution bucket. `false`: a single picker. Each chosen bucket adds a pass over the images to an epoch (see [Training length](#training-length)); regularisation images are drawn at the largest. |
 | `recipe.length` | `{unit, value}`: the default training length in `steps`, or in `epochs` (passes over each training image and clip). |
 | `recipe.learning_rate`, `rank`, `alpha`, `batch_size`, `gradient_accumulation` | Defaults for the editable Advanced fields. |
-| `recipe.optimizer` | AI Toolkit `train.optimizer`; for LTX it describes `run_extra.optimization`. |
+| `recipe.optimizer` | AI Toolkit `train.optimizer`; for LTX it describes `run_extra.optimization`. A trainer setting. |
+| `recipe.lr_scheduler`, `lr_warmup_steps` | AI Toolkit `train.lr_scheduler` (`constant`, `constant_with_warmup` or `cosine`) and, for `constant_with_warmup`, `train.lr_scheduler_params.num_warmup_steps` (0 otherwise); `null` for LTX. Trainer settings. |
 | `recipe.caption_dropout` | The share of training images seen without their caption, 0 to 1 (AI Toolkit `caption_dropout_rate` on every dataset); `null` where the trainer has none (LTX). A trainer setting: see below. |
 | `recipe.checkpoints` | `every` (steps), `keep` (`max_step_saves_to_keep`; 0 keeps all), `dtype` (saved precision, `null` when the trainer has none) and `editable` (Advanced shows the three checkpoint controls and the app sends their values). |
 | `trainer_options` | Optional. `run_extra`: the exact `extra` object the app sends for an LTX run (key order matters). `process`: AI Toolkit `process` keys the typed fields do not cover; the pod deep-merges them over the generic config and under run.json `extra`, which still wins. The app does not read `process`. |
@@ -78,8 +79,9 @@ order-preserving parser (the app uses `JSONValue(parsing:)`).
 
 ### Trainer settings
 
-Some recipe values are defaults a person can change for one run: `recipe.caption_dropout` and
-`architecture.gradient_checkpointing`. Advanced
+Some recipe values are defaults a person can change for one run: `recipe.caption_dropout`,
+`architecture.gradient_checkpointing`, `recipe.optimizer`, `recipe.lr_scheduler` and
+`recipe.lr_warmup_steps`. Advanced
 shows them for AI Toolkit rows without a `trainer_config` hook (such a hook builds the whole recipe,
 as H3's does, and the row's values only describe it). The app sends a value in run.json only when
 it differs from the row's (POD-SPEC 4.1); an absent value means the row's, so Repeat takes the

@@ -114,7 +114,18 @@ CHILD_GRACE_SECONDS = 5.0  # SIGTERM -> this long -> SIGKILL, when the tee itsel
 
 # Trainer settings that override the model's own recipe (POD-SPEC 4.1). Absent or null means the
 # recipe's value. AI Toolkit only: the LTX wrapper refuses them, as it refuses regularization.
-TRAINER_SETTINGS = ("caption_dropout", "gradient_checkpointing")
+TRAINER_SETTINGS = (
+    "caption_dropout",
+    "gradient_checkpointing",
+    "optimizer",
+    "lr_scheduler",
+    "lr_warmup_steps",
+)
+OPTIMIZER_RE = re.compile(r"^[A-Za-z0-9_]{1,32}$")  # an ai-toolkit optimizer name
+# The learning-rate schedules ai-toolkit builds from a name and the run's steps alone; only the
+# warmup schedule takes a parameter, lr_warmup_steps.
+LR_SCHEDULERS = ("constant", "constant_with_warmup", "cosine")
+WARMUP_SCHEDULER = "constant_with_warmup"
 
 _TOP_KEYS = frozenset(
     {
@@ -233,6 +244,24 @@ def _validate_trainer_settings(raw: dict[str, Any], errors: list[str]) -> dict[s
             out["gradient_checkpointing"] = checkpointing
         else:
             errors.append("gradient_checkpointing: must be true, false or null")
+    optimizer = raw.get("optimizer")
+    if optimizer is not None:
+        if isinstance(optimizer, str) and OPTIMIZER_RE.match(optimizer):
+            out["optimizer"] = optimizer
+        else:
+            errors.append("optimizer: must be an optimizer name such as adamw8bit, or null")
+    scheduler = raw.get("lr_scheduler")
+    if scheduler is not None:
+        if scheduler in LR_SCHEDULERS:
+            out["lr_scheduler"] = scheduler
+        else:
+            errors.append("lr_scheduler: must be one of " + ", ".join(LR_SCHEDULERS) + ", or null")
+    warmup = raw.get("lr_warmup_steps")
+    if warmup is not None:
+        if _is_int(warmup) and warmup >= 0:
+            out["lr_warmup_steps"] = warmup
+        else:
+            errors.append("lr_warmup_steps: must be an integer >= 0, or null")
     return out
 
 

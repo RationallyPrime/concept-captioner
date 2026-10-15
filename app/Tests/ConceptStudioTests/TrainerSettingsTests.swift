@@ -44,6 +44,25 @@ struct TrainerSettingsTests {
         #expect(repeated["gradient_checkpointing"] == .bool(true))
     }
 
+    /// The pod keeps the row's warmup and takes one only with the warmup schedule, so the app sends warmup steps only
+    /// with that schedule and only when they differ from the row's.
+    @Test func warmupTravelsOnlyWithTheWarmupSchedule() {
+        let workspace = GPUWorkspace(demoMode: true)
+        workspace.chooseTrainingModel(Self.qwen)
+        #expect(workspace.trainerSettings.lrScheduler == "constant_with_warmup")
+        workspace.trainerSettings.lrWarmupSteps = 100
+        #expect(params(workspace)["lr_warmup_steps"] == .int(100))
+        workspace.trainerSettings.lrScheduler = "cosine"
+        #expect(params(workspace)["lr_scheduler"] == .string("cosine"))
+        #expect(params(workspace)["lr_warmup_steps"] == nil)
+        workspace.chooseTrainingModel(Self.flux)
+        #expect(workspace.trainerSettings.lrScheduler == "constant")
+        workspace.trainerSettings.lrScheduler = "constant_with_warmup"
+        let flux = params(workspace)
+        #expect(flux["lr_scheduler"] == .string("constant_with_warmup"))
+        #expect(flux["lr_warmup_steps"] == nil)
+    }
+
     /// A row whose `trainer_config` hook builds its own recipe takes none of them.
     @Test func hookRecipeTakesNoTrainerSettings() {
         let workspace = GPUWorkspace(demoMode: true)

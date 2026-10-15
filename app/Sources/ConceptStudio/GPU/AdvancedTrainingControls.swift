@@ -81,6 +81,22 @@ struct AdvancedTrainingControls: View {
         Toggle("Gradient checkpointing", isOn: $workspace.trainerSettings.gradientCheckpointing)
             .help("Recomputes intermediate results instead of keeping them: slower, but uses far less GPU memory. "
                 + "Larger batches and 1024 px usually need it on.")
+        Picker("Optimizer", selection: $workspace.trainerSettings.optimizer) {
+            ForEach(TrainerSettings.optimizers, id: \.0) { Text($0.1).tag($0.0) }
+            if !TrainerSettings.optimizers.contains(where: { $0.0 == workspace.trainerSettings.optimizer }) {
+                Text("Saved: " + workspace.trainerSettings.optimizer).tag(workspace.trainerSettings.optimizer)
+            }
+        }
+        .help("How each step's change is computed. The 8-bit variant keeps its state in less GPU memory.")
+        Picker("Learning-rate schedule", selection: $workspace.trainerSettings.lrScheduler) {
+            ForEach(TrainerSettings.schedulers, id: \.0) { Text($0.1).tag($0.0) }
+        }
+        .help("How the learning rate changes over the run: held constant, raised over the first steps and then "
+            + "held, or lowered smoothly to zero by the last step.")
+        if workspace.trainerSettings.usesWarmup {
+            TextField("Warmup steps", value: $workspace.trainerSettings.lrWarmupSteps, format: .number.grouping(.never))
+                .help("Steps at the start over which the learning rate rises to its full value.")
+        }
     }
 
     /// Shown only while the regularisation toggle is on.
