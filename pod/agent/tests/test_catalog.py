@@ -804,10 +804,6 @@ def test_ltx_preprocess_is_checked_by_the_ltx_params_model(paths: Paths) -> None
     cfg = LtxRunConfig.model_validate(run_config(paths, extra={"preprocess": good, "lora": {}}))
     assert cfg.extra == {"preprocess": good, "lora": {}}
     assert LtxRunConfig.model_validate(run_config(paths)).extra == {}
-    assert LtxRunConfig.hub_source == (
-        "Lightricks/LTX-2",
-        "dfcc2108383fe1aaa0584bdf55d368a4bdadd90c",
-    )
 
 
 def test_trainer_settings_are_refused_where_they_cannot_apply(paths: Paths) -> None:

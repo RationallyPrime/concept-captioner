@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 AI_PIN = "f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47"
-LTX_PIN = "9ec55f9f22798a3198d9c923856824821bc3317e"
+LTX_PIN = "be6d6d0a69d11a0a399c462ed92606692e5f8697"
 RENDER_CHUNK = 8  # images per ``generate_images`` call in ``render_base``
 
 # Generator hook name -> (function that renders the pairs, function that adds the hook's fields to
@@ -237,14 +237,26 @@ def ltx_command(
 ) -> list[str]:
     # Public source: ltx_pipelines/ti2vid_one_stage.py and utils/args.py at LTX_PIN.
     text_encoder = Path(model["text_encoder_path"])
+    # The text encoder's form decides the layout: a unified checkpoint (LTX-2, LTX-2.3) pairs
+    # with a Gemma root directory, a split pack (LTX-2.5) with a packed .safetensors. VAE paths
+    # are passed whenever set: split packs need them, and a unified checkpoint may override them.
+    split = not text_encoder.is_dir()
     command = [
         sys.executable,
         "-m",
         "ltx_pipelines.ti2vid_one_stage",
-        "--checkpoint-path",
+        "--transformer-path" if split else "--checkpoint-path",
         str(model["model_path"]),
-        "--gemma-root" if text_encoder.is_dir() else "--text-encoder-path",
+        "--text-encoder-path" if split else "--gemma-root",
         str(text_encoder),
+    ]
+    for key, flag in (
+        ("video_vae_path", "--video-vae-path"),
+        ("audio_vae_path", "--audio-vae-path"),
+    ):
+        if model.get(key) is not None:
+            command += [flag, str(model[key])]
+    command += [
         "--prompt",
         row["prompt"],
         "--seed",

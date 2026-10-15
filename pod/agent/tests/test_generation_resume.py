@@ -28,7 +28,7 @@ def saved_run(paths, *, model="black-forest-labs/FLUX.1-dev"):
     (run / "run.json").write_text(json.dumps(cfg))
     checkpoint = (
         run / "output/lora_step_00002.safetensors"
-        if model == "Lightricks/LTX-2"
+        if model == "Lightricks/LTX-2.3"
         else run / "output/source-run/source-run_000002.safetensors"
     )
     checkpoint.parent.mkdir(exist_ok=True)
@@ -112,7 +112,7 @@ def test_resume_preserves_settings_and_requires_existing_checkpoint(settings):
 
 
 def test_ltx_resume_requires_matching_native_training_state(settings):
-    run, cfg = saved_run(settings.paths, model="Lightricks/LTX-2")
+    run, cfg = saved_run(settings.paths, model="Lightricks/LTX-2.3")
     with pytest.raises(ValidationError, match="training_state_step"):
         parse_params("trainer-ltx", {**cfg, "resume": True}, settings.paths)
     (run / "output/training_state_step_00002.pt").write_bytes(b"native state")
@@ -120,7 +120,7 @@ def test_ltx_resume_requires_matching_native_training_state(settings):
 
 
 def test_ltx_approved_bucket_mode_is_validated_by_shared_preprocess_policy(settings):
-    _, cfg = saved_run(settings.paths, model="Lightricks/LTX-2")
+    _, cfg = saved_run(settings.paths, model="Lightricks/LTX-2.3")
     params = parse_params(
         "trainer-ltx",
         {**cfg, "extra": {"preprocess": {"buckets_from_media": True}}},
@@ -200,7 +200,7 @@ def test_resume_refuses_unknown_checkpoint_step(settings):
 
 @pytest.mark.parametrize("steps", [1, 2])
 def test_ltx_resume_refuses_no_op_with_matching_native_state(settings, steps):
-    run, cfg = saved_run(settings.paths, model="Lightricks/LTX-2")
+    run, cfg = saved_run(settings.paths, model="Lightricks/LTX-2.3")
     (run / "output/training_state_step_00002.pt").write_bytes(b"native state")
     with pytest.raises(ValidationError, match=r"must exceed.*step 2"):
         parse_params("trainer-ltx", {**cfg, "steps": steps, "resume": True}, settings.paths)
@@ -240,7 +240,7 @@ def test_resume_pruned_dataset_requires_exact_manifest_before_prepare(settings):
     ],
 )
 def test_ltx_resume_refuses_overrides_that_restart_or_select_another_checkpoint(settings, extra):
-    run, cfg = saved_run(settings.paths, model="Lightricks/LTX-2")
+    run, cfg = saved_run(settings.paths, model="Lightricks/LTX-2.3")
     extra = json.loads(json.dumps(extra))
     if extra.get("model", {}).get("load_checkpoint") is not None:
         extra["model"]["load_checkpoint"] = str(settings.paths.models / "older.safetensors")
@@ -253,7 +253,7 @@ def test_ltx_resume_refuses_overrides_that_restart_or_select_another_checkpoint(
 
 
 def test_ltx_resume_accepts_explicit_native_state_restoration(settings):
-    run, cfg = saved_run(settings.paths, model="Lightricks/LTX-2")
+    run, cfg = saved_run(settings.paths, model="Lightricks/LTX-2.3")
     cfg["extra"] = {"checkpoints": {"no_resume": False}}
     (run / "run.json").write_text(json.dumps(cfg))
     (run / "output/training_state_step_00002.pt").write_bytes(b"native state")

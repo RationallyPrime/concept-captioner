@@ -53,12 +53,15 @@ struct VideoTrainingFormat: Hashable, Identifiable, Sendable {
         rawValue
     }
 
-    /// The formats of the bundled table's video rows, in table order.
+    /// The formats of the bundled table's video rows, in table order. Rows that share a video caption
+    /// profile (LTX-2.3 and LTX-2.5) share one format: the profile is the identity the project stores.
     static var allCases: [VideoTrainingFormat] {
-        ModelTable.shared.models.compactMap(VideoTrainingFormat.init(row:))
+        var seen = Set<String>()
+        return ModelTable.shared.models.compactMap(VideoTrainingFormat.init(row:))
+            .filter { seen.insert($0.rawValue).inserted }
     }
 
-    static let ltx = named("ltx-2")
+    static let ltx = named("ltx-2.3")
     static let h3 = named("minimax-h3")
 
     private static func named(_ id: String) -> VideoTrainingFormat {

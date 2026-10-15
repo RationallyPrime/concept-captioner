@@ -657,7 +657,8 @@ requested settings for both arms; prompts are argv values, never shell input.
 
 A source run is admitted when the model table (4.4) has a row for its `base_model` on this
 trainer that names a `generator` hook: today `black-forest-labs/FLUX.1-dev`,
-`Comfy-Org/MiniMax-H3` and `Tongyi-MAI/Z-Image` on AI Toolkit, and `Lightricks/LTX-2` on LTX.
+`Comfy-Org/MiniMax-H3` and `Tongyi-MAI/Z-Image` on AI Toolkit, and `Lightricks/LTX-2.3` and
+`Lightricks/LTX-2.5` on LTX.
 Other models return `422 invalid_params` before creating a generation run, naming the trainer's
 default model (`This generation path supports <model_ref> checkpoints only`). The frame count and frame
 rate are then checked against the row's `video` law and fixed cadence, in this order: an
@@ -866,8 +867,9 @@ inside the workspace. LTX's `model.model_path`, `model.text_encoder_path`,
 `model.video_vae_path`, `model.audio_vae_path` and `model.load_checkpoint` must be absolute
 paths under `/workspace`: the LTX-2 trainer opens them as local files and has no Hub
 resolution, so a Hub id there could only fail at load time, after the GPUs were reserved. LTX's
-one Hub source, `base_model: Lightricks/LTX-2`, is downloaded by the wrapper itself at a pinned
-revision into `/workspace/models/ltx-2` (4.3) and reaches the trainer as those local paths.
+Hub sources (`base_model: Lightricks/LTX-2.3`, `Lightricks/LTX-2.5`, and `Lightricks/LTX-2` for
+older runs) are downloaded by the wrapper itself at pinned revisions into
+`/workspace/models/<dir>` (4.3) and reach the trainer as those local paths.
 
 Output layout, both trainers: `/workspace/runs/<id>/run.json`, `config.yaml` (native config as
 written by the wrapper), `trainer.log`, `tensorboard/` (event files), `output/` (checkpoints and
@@ -1096,15 +1098,17 @@ so the image build's `--help` check fails if the copy is missing. Supported swit
 using `--flag=value` with values 1 through 64. Duplicates, unknown flags and values on switches
 are rejected. Model paths, output paths, device and column names remain wrapper-owned.
 
-For LTX's first run, `base_model: Lightricks/LTX-2` prepares the unified
-`ltx-2-19b-dev.safetensors` checkpoint and its mirrored Gemma model/tokenizer assets from that
-Hub repository into `/workspace/models/ltx-2`, at revision
-`dfcc2108383fe1aaa0584bdf55d368a4bdadd90c` (`LTX_HUB_REVISION` in `ltx_rules.py`, also
-`LtxRunConfig.hub_source` in the catalog): the repository's head since 2026-08-04 and what the
-verified 2026-10-10 run downloaded, 22 files. Moving it is a reviewed edit; the download never
-follows the repository's `main`. The wrapper uses only its declared file patterns and the fixed
-destination, then supplies local checkpoint and text encoder paths to upstream. No SSH or
-separate model path is needed. Existing files are reused. The download runs after validation
+`LTX_HUB_SOURCES` in `ltx_rules.py` lists the Hub sources the wrapper prepares itself, each at a
+pinned revision; moving one is a reviewed edit, and the download never follows a repository's
+`main`. `base_model: Lightricks/LTX-2.3` takes the unified `ltx-2.3-22b-dev.safetensors` from
+`Lightricks/LTX-2.3@3c6a4e66…` and, because that repository has no text encoder, the Gemma 3
+model/tokenizer root from `Lightricks/LTX-2@dfcc2108…` (the files the verified 2026-10-10 LTX-2
+run downloaded), both into `/workspace/models/ltx-2.3`. `base_model: Lightricks/LTX-2.5` takes
+the split pack from `Lightricks/LTX-2.5@49b093a3…` (gated: the token's account must have accepted
+the licence) into `/workspace/models/ltx-2.5`: the dev transformer, the packed Gemma 4 text
+encoder and both VAEs, each passed to the trainer as its own path. `Lightricks/LTX-2` stays so a
+run started on it still resumes. The wrapper uses only the declared file patterns and the fixed
+destination, then supplies local paths to upstream. No SSH or separate model path is needed. Existing files are reused. The download runs after validation
 and before any run file is written; a failure (unreachable, gated, licence not accepted, disk
 full) exits **69** with the exception, HTTP status and message on one line, and leaves the run
 directory as the agent created it. `--dry-run` writes the planned config without downloading.

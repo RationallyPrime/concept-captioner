@@ -112,6 +112,57 @@ def test_ltx_argv_preserves_pair_settings_and_loads_lora_only_on_trained_side(tm
         assert base[base.index(flag) + 1] == trained[trained.index(flag) + 1]
 
 
+def test_ltx_argv_names_each_component_of_a_split_pack(tmp_path):
+    model = {
+        "model_path": str(tmp_path / "transformer.safetensors"),
+        "text_encoder_path": str(tmp_path / "gemma4.safetensors"),
+        "video_vae_path": str(tmp_path / "video-vae.safetensors"),
+        "audio_vae_path": str(tmp_path / "audio-vae.safetensors"),
+    }
+    request = {
+        "width": 512,
+        "height": 512,
+        "num_frames": 17,
+        "frame_rate": 24,
+        "inference_steps": 20,
+        "guidance_scale": 4,
+    }
+    row = {"prompt": "NORA7 walks", "seed": 42, "base_path": "base.mp4", "lora_path": "lora.mp4"}
+    argv = generation.ltx_command(model, tmp_path / "c.safetensors", request, row, "base", tmp_path)
+    assert "--checkpoint-path" not in argv and "--gemma-root" not in argv
+    for flag, key in (
+        ("--transformer-path", "model_path"),
+        ("--text-encoder-path", "text_encoder_path"),
+        ("--video-vae-path", "video_vae_path"),
+        ("--audio-vae-path", "audio_vae_path"),
+    ):
+        assert argv[argv.index(flag) + 1] == model[key]
+
+
+def test_ltx_argv_keeps_a_unified_checkpoint_with_a_vae_override(tmp_path):
+    encoder = tmp_path / "gemma"
+    encoder.mkdir()
+    model = {
+        "model_path": str(tmp_path / "ltx-2.3-22b-dev.safetensors"),
+        "text_encoder_path": str(encoder),
+        "video_vae_path": str(tmp_path / "other-vae.safetensors"),
+    }
+    request = {
+        "width": 512,
+        "height": 512,
+        "num_frames": 17,
+        "frame_rate": 24,
+        "inference_steps": 20,
+        "guidance_scale": 4,
+    }
+    row = {"prompt": "NORA7 walks", "seed": 42, "base_path": "base.mp4", "lora_path": "lora.mp4"}
+    argv = generation.ltx_command(model, tmp_path / "c.safetensors", request, row, "base", tmp_path)
+    assert argv[argv.index("--checkpoint-path") + 1] == model["model_path"]
+    assert "--transformer-path" not in argv
+    assert argv[argv.index("--gemma-root") + 1] == str(encoder)
+    assert argv[argv.index("--video-vae-path") + 1] == model["video_vae_path"]
+
+
 def test_checkpoint_escape_fails_before_inference(tmp_path, monkeypatch):
     path, request = setup(tmp_path, monkeypatch)
     request["checkpoint"] = "../run.json"
@@ -227,7 +278,7 @@ def test_ltx_generation_uses_retained_config_without_pruned_training_inputs(tmp_
         "run_id": "source",
         "dataset": {"path": str(tmp_path / "datasets/pruned")},
         "triggers": ["NORA7"],
-        "base_model": "Lightricks/LTX-2",
+        "base_model": "Lightricks/LTX-2.3",
         "steps": 2,
     }
     request = {

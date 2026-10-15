@@ -52,7 +52,8 @@ sizes and checkpoint schedule chosen for that model:
 | [FLUX.1-dev](https://huggingface.co/black-forest-labs/FLUX.1-dev) | images | Non-commercial licence |
 | [Z-Image](https://huggingface.co/Tongyi-MAI/Z-Image) | images | Apache 2.0; adapters also work on Z-Image-Turbo |
 | [Qwen-Image-2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) | images | Regularisation and REPA on by default; 80 GB GPUs |
-| [LTX-2](https://huggingface.co/Lightricks/LTX-2) | images and video | Lightricks' own trainer; moving to LTX 2.3+ |
+| [LTX-2.3](https://huggingface.co/Lightricks/LTX-2.3) | images and video | Lightricks' own trainer |
+| [LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5) | images and video | Lightricks' own trainer; accept the licence on the Hub first |
 | [MiniMax H3](https://huggingface.co/Comfy-Org/MiniMax-H3) | images and video | Native recipe with guidance controls |
 
 Turn on **Advanced user** in Settings to reveal every detailed control, plus 20 more

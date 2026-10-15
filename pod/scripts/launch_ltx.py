@@ -7,7 +7,7 @@
    ``dataset.path`` must be an existing directory under ``<PODAGENT_WORKSPACE>/datasets``.
    ``regularization``, ``repa`` and the ``TRAINER_SETTINGS`` belong to the AI Toolkit trainer;
    this wrapper refuses them.
-2. Prepare the Hub model when ``base_model`` is ``Lightricks/LTX-2`` (see "Model files"); a
+2. Prepare the Hub model when ``base_model`` names a supported source (see "Model files"); a
    failure exits ``EXIT_MODEL_PREPARATION`` (69) before any run file is written. Skipped by
    ``--dry-run``.
 3. Write ``<run>/dataset.json`` (one ``{"caption", "media_path"}`` per captioned image or video
@@ -42,9 +42,11 @@ datasets; the default ``<max>x<max>x1`` is for stills; several buckets separate 
 and appends allowlisted arguments to the preprocess command. Paths, columns and device
 remain fixed by the wrapper; switches take no value and numeric options use --flag=value.
 
-Model files. ``base_model: Lightricks/LTX-2`` automatically prepares its unified checkpoint
-and mirrored Gemma assets in ``<workspace>/models/ltx-2`` before preprocessing, from the Hub
-revision pinned in the shared rule file (``LTX_HUB_REVISION``), never the moving main branch.
+Model files. ``base_model`` naming one of ``LTX_HUB_SOURCES`` (``Lightricks/LTX-2.3``,
+``Lightricks/LTX-2.5``, and ``Lightricks/LTX-2`` for older runs) automatically prepares its files in
+``<workspace>/models/<dir>`` before preprocessing, from the Hub revisions pinned in the shared rule
+file, never a moving main branch. A unified checkpoint (LTX-2.3, LTX-2) gets the Gemma root as
+its text encoder; the split LTX-2.5 pack gets its packed text encoder and both VAEs as paths.
 The dry run only writes those planned paths and downloads nothing. Alternatively, ``base_model`` may be
 a checkpoint ``.safetensors`` under the workspace (``/workspace/models/...``) and becomes
 ``model.model_path``; the Gemma text encoder is a second path the RunConfig has no field for,
@@ -827,53 +829,60 @@ TEXT_ENCODER_HINT = (
 # One rule file for the API and this isolated wrapper (python -I: no podagent import).
 SHARED_RULES = Path(__file__).resolve().parents[1] / "agent" / "src" / "podagent" / "ltx_rules.py"
 _RULES = runpy.run_path(str(SHARED_RULES))
-LTX_HUB_MODEL: str = _RULES["LTX_HUB_MODEL"]
-LTX_HUB_REVISION: str = _RULES["LTX_HUB_REVISION"]
-LTX_HUB_CHECKPOINT: str = _RULES["LTX_HUB_CHECKPOINT"]
-LTX_HUB_FILES: tuple[str, ...] = tuple(_RULES["LTX_HUB_FILES"])
+LTX_HUB_SOURCES: dict[str, dict[str, Any]] = _RULES["LTX_HUB_SOURCES"]
 EXIT_MODEL_PREPARATION = 69  # sysexits EX_UNAVAILABLE: the model source could not be prepared
 
 
 def resolve_hub_model(cfg: dict[str, Any]) -> dict[str, Any]:
-    """Map the supported Hub source to fixed workspace paths; this step performs no I/O."""
+    """Map a supported Hub source to fixed workspace paths; this step performs no I/O."""
     if cfg["base_model"].startswith("/"):
         return cfg
-    if cfg["base_model"] != LTX_HUB_MODEL:
+    source = LTX_HUB_SOURCES.get(cfg["base_model"])
+    if source is None:
         raise ConfigError(
-            f"base_model: automatic LTX preparation supports {LTX_HUB_MODEL}; "
-            "otherwise provide local checkpoint and text encoder paths under the workspace"
+            "base_model: automatic LTX preparation supports "
+            + ", ".join(LTX_HUB_SOURCES)
+            + "; otherwise provide local checkpoint and text encoder paths under the workspace"
         )
-    model_dir = workspace_root() / "models" / "ltx-2"
+    model_dir = workspace_root() / "models" / source["dir"]
+    paths = {key: str(model_dir / name) for key, name in source["model"].items()}
     extra_model = cfg["extra"].get("model", {})
     if not isinstance(extra_model, dict):
         raise ConfigError("extra.model: must be a mapping")
     return deep_merge(
         cfg,
         {
-            "base_model": str(model_dir / LTX_HUB_CHECKPOINT),
-            "extra": {"model": {"text_encoder_path": str(model_dir), **extra_model}},
+            "base_model": paths.pop("model_path"),
+            "extra": {"model": {**paths, **extra_model}},
         },
     )
 
 
+def hub_source_label(model: str) -> str:
+    """``repo@revision`` of each download a Hub source makes, for log lines."""
+    return ", ".join(f"{repo}@{rev[:12]}" for repo, rev, _ in LTX_HUB_SOURCES[model]["downloads"])
+
+
 def download_hub_model(cfg: dict[str, Any]) -> None:
-    """Prepare the source's checkpoint and Gemma assets at the already-validated paths."""
-    if cfg["base_model"] != LTX_HUB_MODEL:
+    """Prepare the source's files at the already-validated paths."""
+    source = LTX_HUB_SOURCES.get(cfg["base_model"])
+    if source is None:
         return
     from huggingface_hub import snapshot_download
 
-    model_dir = workspace_root() / "models" / "ltx-2"
+    model_dir = workspace_root() / "models" / source["dir"]
     say(
-        f"preparing {LTX_HUB_MODEL}@{LTX_HUB_REVISION[:12]} in {model_dir}; "
+        f"preparing {cfg['base_model']} ({hub_source_label(cfg['base_model'])}) in {model_dir}; "
         "existing files are reused"
     )
-    snapshot_download(
-        repo_id=LTX_HUB_MODEL,
-        revision=LTX_HUB_REVISION,
-        local_dir=str(model_dir),
-        allow_patterns=list(LTX_HUB_FILES),
-        token=cfg.get("hf_token") or os.environ.get("HF_TOKEN"),
-    )
+    for repo, revision, patterns in source["downloads"]:
+        snapshot_download(
+            repo_id=repo,
+            revision=revision,
+            local_dir=str(model_dir),
+            allow_patterns=list(patterns),
+            token=cfg.get("hf_token") or os.environ.get("HF_TOKEN"),
+        )
 
 
 YAML_HEADER = (
@@ -1290,7 +1299,7 @@ def main(argv: list[str] | None = None) -> int:
             detail = f" (HTTP {status})" if status is not None else ""
             reason = " ".join(str(error).split())[:300]
             say(
-                f"model preparation failed for {LTX_HUB_MODEL}@{LTX_HUB_REVISION[:12]}: "
+                f"model preparation failed for {hub_source_label(source_cfg['base_model'])}: "
                 f"{type(error).__name__}{detail}" + (f": {reason}" if reason else "")
             )
             return EXIT_MODEL_PREPARATION

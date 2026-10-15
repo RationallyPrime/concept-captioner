@@ -1,7 +1,7 @@
 # POD-STATUS
 
 State after the 2026-10-11 source review repairs and the Phase 2 H3 source additions. The
-current published tag, `v0.3.3-20261014`, is a clean build of `126eb67` (adds the Hub licence ids, the
+current published tag, `v0.3.4-20261015`, is a clean build of `1adc7c8` (LTX-2.3 and LTX-2.5 Hub sources, the LTX trainer at `be6d6d0`; both LTX rows verified on a 32 GB RTX 5090 on 2026-10-15); `v0.3.3-20261014` is a clean build of `126eb67` (adds the Hub licence ids, the
 Qwen-Image-2.1 checkpoint cadence and REPA on by default); `v0.3.2-20261014` is a clean build of `374e695`
 (regularisation sets and REPA on top of the model table, with its review fixes); `v0.3.1-20261014` is the same change at `0124582`; `v0.3.0-20261014` is a clean build of PR #10 at `f784947` (the model table);
 the tag before, `v0.2.3-clean-20261011`, is a clean build of `main` at
@@ -38,8 +38,8 @@ hash and billing bucket, is in
   (FLUX/H3) and LTX launchers, LoRA push. H3 still-image training has the owner/Claude runtime acceptance above;
   clip training, external warm-start, Resume and matched generation remain unexercised live.
 - **podctl** (`pod/podctl`): command-line client for the agent.
-- **Images**, public on GHCR under tag `v0.3.3-20261014` (clean build from commit
-  `126eb67`; digests in [images/README](../images/README.md)): `concept-captioner-pod-base`,
+- **Images**, public on GHCR under tag `v0.3.4-20261015` (clean build from commit
+  `1adc7c8`; digests in [images/README](../images/README.md)): `concept-captioner-pod-base`,
   `-aitoolkit`, `-ltx`; plus a fake image for compose tests. Public RunPod template
   `87fxs5v8fn` points at the base image; it carries no token, and the agent refuses to start
   without one.
@@ -104,9 +104,8 @@ published), with a SHA-256 manifest. Build and push logs are on cx53 under
   - The `/tensorboard` proxy targets the catalog's fixed port 6006; the `tensorboard` service
     no longer takes a `port` param.
   - `trainer-ltx` validates with `LtxRunConfig`; the shared rule file is `ltx_rules.py`.
-  - `launch_ltx.py` downloads LTX-2 at revision `dfcc2108383fe1aaa0584bdf55d368a4bdadd90c`
-    (the repo's head since 2026-08-04, so the same files the 2026-10-10 run fetched) before
-    writing run files, and exits 69 on failure.
+  - `launch_ltx.py` downloads the pinned `LTX_HUB_SOURCES` (LTX-2.3, LTX-2.5, and LTX-2 for older
+    runs) before writing run files, and exits 69 on failure.
   - `Dockerfile.ltx` pins TensorBoard 2.21.0; `Dockerfile.base` runs
     `images/check_vllm_flags.py`, the automated form of the 2026-10-10 manual source probe.
     The full runtime builds executed these steps; r2 overlays preserve those verified layers.

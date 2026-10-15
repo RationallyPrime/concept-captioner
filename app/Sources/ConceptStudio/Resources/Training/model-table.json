@@ -9,7 +9,7 @@
     },
     "ltx": {
       "min_cuda": "13.0",
-      "default_model": "ltx-2"
+      "default_model": "ltx-2.3"
     }
   },
   "models": [
@@ -110,16 +110,19 @@
       "recipe_status": "verified"
     },
     {
-      "id": "ltx-2",
-      "display_name": "LTX-2",
+      "id": "ltx-2.3",
+      "display_name": "LTX-2.3",
       "short_name": "LTX",
       "trainer": "ltx",
-      "model_ref": "Lightricks/LTX-2",
+      "model_ref": "Lightricks/LTX-2.3",
       "source": {
-        "revision": "dfcc2108383fe1aaa0584bdf55d368a4bdadd90c",
+        "revision": "3c6a4e66e5d0a684231950b9c74dd4ded7b6fadc",
+        "weight_repos": [
+          "Lightricks/LTX-2"
+        ],
         "gated": false,
-        "first_download_gb": 92.1,
-        "download_note": "The 22 files launch_ltx.py prepares at the pinned revision: the ltx-2-19b-dev checkpoint, the Gemma text encoder and its tokenizer."
+        "first_download_gb": 95.0,
+        "download_note": "The ltx-2.3-22b-dev checkpoint (46.2 GB) at the pinned revision, plus the Gemma 3 text encoder and tokenizer (48.8 GB) that LTX-2.3 shares with LTX-2, from the Lightricks/LTX-2 repo at its pinned revision."
       },
       "architecture": {
         "arch": null,
@@ -184,7 +187,7 @@
       "gpu": {
         "min_vram_gb": 32,
         "verify_on_pod": false,
-        "note": "The included FLUX and LTX defaults were tested on 32 GB GPUs.",
+        "note": "Uses the LTX trainer's low-VRAM settings (int8 transformer, 8-bit text encoder). Verified on a 32 GB RTX 5090: 100 steps at 512 used 27.6 GB at peak (2026-10-15).",
         "verify_message": null
       },
       "video": {
@@ -235,18 +238,158 @@
         "follows_project_profile": true
       },
       "license": {
-        "id": "ltx-2-community-license-agreement",
-        "name": "LTX-2 Community License Agreement",
-        "url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE",
-        "notice": "LTX-2 is released under the LTX-2 Community License Agreement. Read its terms before using this model, a LoRA trained on it, or their outputs commercially.",
+        "id": "ltx-2.x-community-license-agreement",
+        "name": "LTX-2.x Community License Agreement",
+        "url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
+        "notice": "LTX-2.3 and LTX-2.5 are released under the LTX-2.x Community License Agreement. Read its terms before using these models, a LoRA trained on them, or their outputs commercially.",
         "show_notice": false
       },
       "hooks": {
         "generator": "ltx_one_stage",
         "run_extra": "ltx_video_buckets"
       },
-      "notes": "Separate LTX-2 trainer image (launch_ltx.py). Images and 8n+1-frame clips. The pinned Hub source and preprocess allowlist live in pod/agent/src/podagent/ltx_rules.py; this row mirrors them.",
+      "notes": "LTX trainer image (launch_ltx.py), unified checkpoint. Images and 8n+1-frame clips. The pinned Hub sources and preprocess allowlist live in pod/agent/src/podagent/ltx_rules.py; this row mirrors them.",
       "recipe_status": "verified"
+    },
+    {
+      "id": "ltx-2.5",
+      "display_name": "LTX-2.5",
+      "short_name": "LTX 2.5",
+      "trainer": "ltx",
+      "model_ref": "Lightricks/LTX-2.5",
+      "source": {
+        "revision": "49b093a39c19169a8a81721dcc541e07e945232f",
+        "gated": true,
+        "first_download_gb": 70.1,
+        "download_note": "The four split components at the pinned revision: the 22B dev transformer (42.0 GB), the packed Gemma 4 text encoder (26.3 GB) and the video and audio VAEs (1.8 GB)."
+      },
+      "architecture": {
+        "arch": null,
+        "dtype": "bf16",
+        "quantize": true,
+        "quantize_text_encoder": true,
+        "gradient_checkpointing": true,
+        "model_extra": {}
+      },
+      "family_match": null,
+      "resolution": {
+        "choices": [
+          512,
+          768,
+          1024
+        ],
+        "default": [
+          512
+        ],
+        "multiple": false
+      },
+      "recipe": {
+        "length": {
+          "unit": "steps",
+          "value": 200
+        },
+        "learning_rate": 0.0001,
+        "optimizer": "adamw8bit",
+        "lr_scheduler": null,
+        "lr_warmup_steps": null,
+        "rank": 16,
+        "alpha": 16,
+        "batch_size": 1,
+        "gradient_accumulation": 1,
+        "caption_dropout": null,
+        "checkpoints": {
+          "every": 250,
+          "keep": 4,
+          "dtype": null,
+          "editable": false
+        }
+      },
+      "trainer_options": {
+        "run_extra": {
+          "optimization": {
+            "optimizer_type": "adamw8bit"
+          },
+          "acceleration": {
+            "quantization": "int8-quanto",
+            "load_text_encoder_in_8bit": true,
+            "offload_optimizer_during_validation": true
+          },
+          "preprocess": {
+            "args": [
+              "--load-text-encoder-in-8bit",
+              "--vae-tiling",
+              "--skip-audio"
+            ]
+          }
+        }
+      },
+      "gpu": {
+        "min_vram_gb": 32,
+        "verify_on_pod": false,
+        "note": "Uses the LTX trainer's low-VRAM settings (int8 transformer, 8-bit text encoder). Verified on a 32 GB RTX 5090: 100 steps at 512 used 27.6 GB at peak (2026-10-15).",
+        "verify_message": null
+      },
+      "video": {
+        "title": "LTX",
+        "frame_law": {
+          "first": 1,
+          "step": 8
+        },
+        "fixed_fps": null,
+        "min_frames": 9,
+        "initial_frames": 33,
+        "duration_choices": [
+          9,
+          17,
+          33,
+          49,
+          97,
+          129,
+          257
+        ],
+        "select_whole_clip": false
+      },
+      "preview": {
+        "training_samples": true,
+        "still": false,
+        "video": {
+          "min_frames": 9,
+          "max_frames": 257,
+          "choices": [
+            17,
+            49,
+            97,
+            129
+          ],
+          "default_frames": 49
+        }
+      },
+      "captions": {
+        "image_profile": "ltx-image",
+        "video_profile": "ltx-video",
+        "profile_prefix": "ltx-",
+        "titles": {
+          "ltx-image": "LTX · image captions",
+          "ltx-video": "LTX · video captions"
+        }
+      },
+      "selection": {
+        "follows_project_profile": true
+      },
+      "license": {
+        "id": "ltx-2.x-community-license-agreement",
+        "name": "LTX-2.x Community License Agreement",
+        "url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
+        "notice": "LTX-2.3 and LTX-2.5 are released under the LTX-2.x Community License Agreement. Read its terms before using these models, a LoRA trained on them, or their outputs commercially.",
+        "show_notice": true
+      },
+      "hooks": {
+        "generator": "ltx_one_stage",
+        "run_extra": "ltx_video_buckets"
+      },
+      "notes": "LTX trainer image (launch_ltx.py), split pack: transformer, text encoder and both VAEs are separate paths. Images and 8n+1-frame clips. Pinned in pod/agent/src/podagent/ltx_rules.py; this row mirrors it.",
+      "recipe_status": "verified",
+      "usage_note": "Gated on Hugging Face: before renting, sign in at huggingface.co/Lightricks/LTX-2.5 with the account whose token is in Settings and accept the licence. Without it the first download fails before training starts."
     },
     {
       "id": "minimax-h3",

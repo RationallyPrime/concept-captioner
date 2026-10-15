@@ -1030,8 +1030,32 @@ def test_ltx_dry_run_refuses_extra_outside_workspace(
     assert not (run / "config.yaml").exists() and not (run / "dataset.json").exists()
 
 
+@pytest.mark.parametrize(
+    ("source", "directory", "model"),
+    [
+        (
+            "Lightricks/LTX-2.3",
+            "ltx-2.3",
+            {"model_path": "ltx-2.3-22b-dev.safetensors", "text_encoder_path": ""},
+        ),
+        (
+            "Lightricks/LTX-2.5",
+            "ltx-2.5",
+            {
+                "model_path": "diffusion_models/ltx-2.5-22b-dev-transformer-bf16.safetensors",
+                "text_encoder_path": "text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors",
+                "video_vae_path": "vae/ltx-2.5-video-vae-bf16.safetensors",
+                "audio_vae_path": "vae/ltx-2.5-audio-vae-bf16.safetensors",
+            },
+        ),
+    ],
+)
 def test_ltx_prepares_supported_hub_model_without_network_on_dry_run(
-    workspace: Path, monkeypatch: pytest.MonkeyPatch
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    directory: str,
+    model: dict[str, str],
 ) -> None:
     import huggingface_hub
 
@@ -1039,16 +1063,20 @@ def test_ltx_prepares_supported_hub_model_without_network_on_dry_run(
         pytest.fail("dry run downloaded a model")
 
     monkeypatch.setattr(huggingface_hub, "snapshot_download", refuse_download)
-    cfg = ltx_run_config(
-        workspace, base_model="Lightricks/LTX-2", extra={"model": {"text_encoder_path": None}}
-    )
+    cfg = ltx_run_config(workspace, base_model=source)
     cfg["extra"].pop("model")
     run_json = write_run_json(workspace, cfg)
     assert ltx.main(["--config", str(run_json), "--dry-run"]) == 0
     native = load_yaml_if_available(run_json.parent / "config.yaml")
-    model_dir = workspace / "models" / "ltx-2"
-    assert native["model"]["model_path"] == str(model_dir / "ltx-2-19b-dev.safetensors")
-    assert native["model"]["text_encoder_path"] == str(model_dir)
+    model_dir = workspace / "models" / directory
+    for key, name in model.items():
+        assert native["model"][key] == str(model_dir / name)
+    # The preprocessor loads the same files as the trainer, split VAEs included.
+    argv = ltx.preprocess_argv(
+        run_json.parent, ltx.resolve_hub_model(ltx.validate_run_config(cfg, workspace))
+    )
+    for key, flag, _required in ltx.MODEL_PATH_FLAGS:
+        assert (flag in argv) == (key in model)
     assert not model_dir.exists()
 
 
@@ -1060,27 +1088,17 @@ def test_ltx_hub_download_uses_controlled_destination(
     calls: list[dict[str, Any]] = []
     monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda **kwargs: calls.append(kwargs))
     cfg = ltx.validate_run_config(
-        ltx_run_config(workspace, base_model="Lightricks/LTX-2"), workspace
+        ltx_run_config(workspace, base_model="Lightricks/LTX-2.3"), workspace
     )
     ltx.download_hub_model(cfg)
-    assert len(calls) == 1
-    assert calls[0]["repo_id"] == "Lightricks/LTX-2"
-    assert calls[0]["local_dir"] == str(workspace / "models" / "ltx-2")
-    assert calls[0]["allow_patterns"] == list(ltx.LTX_HUB_FILES)
-    # Pinned: the weights never float on the Hub repo's main branch.
-    assert calls[0]["revision"] == ltx.LTX_HUB_REVISION
-    assert re.fullmatch(r"[0-9a-f]{40}", ltx.LTX_HUB_REVISION)
-
-
-def test_ltx_hub_source_comes_from_the_shared_rule_file() -> None:
-    rules: dict[str, Any] = {}
-    exec(ltx.SHARED_RULES.read_text(encoding="utf-8"), rules)
-    assert ltx.SHARED_RULES.name == "ltx_rules.py" and ltx.SHARED_RULES.is_file()
-    assert (
-        rules["LTX_HUB_MODEL"],
-        rules["LTX_HUB_REVISION"],
-    ) == (ltx.LTX_HUB_MODEL, ltx.LTX_HUB_REVISION)
-    assert tuple(rules["LTX_HUB_FILES"]) == ltx.LTX_HUB_FILES
+    # The checkpoint from its own repo, the Gemma 3 root from the LTX-2 mirror, one directory.
+    assert [c["repo_id"] for c in calls] == ["Lightricks/LTX-2.3", "Lightricks/LTX-2"]
+    assert {c["local_dir"] for c in calls} == {str(workspace / "models" / "ltx-2.3")}
+    assert calls[0]["allow_patterns"] == ["ltx-2.3-22b-dev.safetensors"]
+    assert "tokenizer/*" in calls[1]["allow_patterns"]
+    # Pinned: the weights never float on a Hub repo's main branch.
+    for call in calls:
+        assert re.fullmatch(r"[0-9a-f]{40}", call["revision"])
 
 
 def test_ltx_failed_model_preparation_writes_nothing_and_exits_69(
@@ -1090,7 +1108,7 @@ def test_ltx_failed_model_preparation_writes_nothing_and_exits_69(
 
     class GatedRepo(Exception):
         def __init__(self) -> None:
-            super().__init__("403 Client Error: access to model Lightricks/LTX-2 is restricted")
+            super().__init__("403 Client Error: access to model Lightricks/LTX-2.5 is restricted")
             self.response = type("R", (), {"status_code": 403})()
 
     def refuse(**_kwargs: Any) -> None:
@@ -1102,13 +1120,13 @@ def test_ltx_failed_model_preparation_writes_nothing_and_exits_69(
     monkeypatch.setattr(huggingface_hub, "snapshot_download", refuse)
     monkeypatch.setattr(ltx, "tee", no_trainer)
     monkeypatch.setattr(ltx, "run_trainer", no_trainer)
-    cfg = ltx_run_config(workspace, base_model="Lightricks/LTX-2")
+    cfg = ltx_run_config(workspace, base_model="Lightricks/LTX-2.5")
     cfg["extra"].pop("model", None)
     run_json = write_run_json(workspace, cfg)
     assert ltx.main(["--config", str(run_json)]) == ltx.EXIT_MODEL_PREPARATION == 69
     out = capsys.readouterr().out
     assert "model preparation failed" in out and "GatedRepo (HTTP 403)" in out
-    assert "restricted" in out
+    assert "restricted" in out and "Lightricks/LTX-2.5@49b093a39c19" in out
     run = run_json.parent
     assert not (run / "config.yaml").exists() and not (run / "dataset.json").exists()
     assert not (run / "preprocessed").exists()
@@ -1120,7 +1138,7 @@ def test_ltx_refuses_unknown_hub_source(
     cfg = ltx_run_config(workspace, base_model="other/model")
     run_json = write_run_json(workspace, cfg)
     assert ltx.main(["--config", str(run_json), "--dry-run"]) == 2
-    assert "automatic LTX preparation supports Lightricks/LTX-2" in capsys.readouterr().out
+    assert "automatic LTX preparation supports Lightricks/LTX-2.3" in capsys.readouterr().out
 
 
 def test_ltx_requires_text_encoder_path(
