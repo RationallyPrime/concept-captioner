@@ -38,13 +38,12 @@ struct ModelRow: Sendable, Identifiable, Equatable {
     enum LengthUnit: String, Sendable {
         case steps, epochs
 
-        /// The optimizer steps a run of `length` in this unit takes: steps as given, or passes over
-        /// `items` training images and clips, which is `ceil(epochs × items / (batch × accumulation))`.
-        func optimizerSteps(length: Int, items: Int, batchSize: Int, accumulation: Int) -> Int {
+        /// The optimizer steps a run of `length` in this unit takes: steps as given, or passes of `batches` batches
+        /// each, which is `ceil(epochs × batches / accumulation)`.
+        func optimizerSteps(length: Int, batches: Int, accumulation: Int) -> Int {
             guard self == .epochs else { return length }
-            let group = batchSize.multipliedReportingOverflow(by: accumulation)
-            let perStep = group.overflow ? Int.max : max(1, group.partialValue)
-            let passes = length.multipliedReportingOverflow(by: items)
+            let perStep = max(1, accumulation)
+            let passes = length.multipliedReportingOverflow(by: batches)
             guard !passes.overflow else { return Int.max / perStep }
             return passes.partialValue / perStep + (passes.partialValue % perStep == 0 ? 0 : 1)
         }
