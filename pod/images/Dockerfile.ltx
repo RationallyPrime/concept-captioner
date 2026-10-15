@@ -17,11 +17,13 @@ ARG BASE_IMAGE=concept-captioner-pod-base:dev
 FROM --platform=linux/amd64 ${BASE_IMAGE}
 
 LABEL org.opencontainers.image.title="concept-captioner-pod-ltx" \
-      org.opencontainers.image.description="concept-captioner pod base plus the Lightricks LTX-2 trainer in /opt/venvs/ltx"
+      org.opencontainers.image.description="concept-captioner pod base plus the Lightricks LTX-2 trainer (LTX-2.3, LTX-2.5) in /opt/venvs/ltx"
 
 # --- pins (images/README.md keeps the record) -------------------------------------------------------
-# Lightricks/LTX-2 at 9ec55f9f22798a3198d9c923856824821bc3317e ("Automated PR - 2026-10-02"): the top
-# of main when this was written; the packages inside call themselves 1.4.2. It is a uv workspace
+# Lightricks/LTX-2 at be6d6d0a69d11a0a399c462ed92606692e5f8697 ("Merge pull request #326", 2026-10-13):
+# the top of main when this was written; the packages inside call themselves 1.4.2. It differs from
+# the previous pin 9ec55f9f only in LICENSE-2_x. This one trainer trains LTX-2, LTX-2.3 (unified
+# checkpoints, Gemma 3) and LTX-2.5 (split pack, Gemma 4); ltx_rules.py pins the weights. It is a uv workspace
 # (packages/ltx-core, ltx-pipelines, ltx-trainer; ltx-kernels is excluded upstream because it
 # compiles CUDA) with no committed lock file, so `uv lock` runs here first and the lock stays at
 # /opt/ltx-2/uv.lock as the record of what was resolved. `uv sync --all-packages --all-extras` is the
@@ -32,7 +34,7 @@ LABEL org.opencontainers.image.title="concept-captioner-pod-ltx" \
 # driver must be R580 or newer (see images/README.md). --no-dev leaves out the dev groups (the
 # root's pulls a full CUDA 13.2 toolkit); the `kernels` group is opt-in upstream and stays off.
 ARG LTX2_REPO=https://github.com/Lightricks/LTX-2.git
-ARG LTX2_COMMIT=9ec55f9f22798a3198d9c923856824821bc3317e
+ARG LTX2_COMMIT=be6d6d0a69d11a0a399c462ed92606692e5f8697
 ARG LTX2_TORCH="2.13.0+cu132"
 
 # Where scripts/launch_ltx.py finds the trainer: it joins this with scripts/process_dataset.py and

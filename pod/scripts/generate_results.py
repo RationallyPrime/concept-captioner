@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 AI_PIN = "f7a1fb9a77e5418269b1e9eda4ace6d7c1b7bb47"
-LTX_PIN = "9ec55f9f22798a3198d9c923856824821bc3317e"
+LTX_PIN = "be6d6d0a69d11a0a399c462ed92606692e5f8697"
 RENDER_CHUNK = 8  # images per ``generate_images`` call in ``render_base``
 
 # Generator hook name -> (function that renders the pairs, function that adds the hook's fields to
@@ -237,14 +237,22 @@ def ltx_command(
 ) -> list[str]:
     # Public source: ltx_pipelines/ti2vid_one_stage.py and utils/args.py at LTX_PIN.
     text_encoder = Path(model["text_encoder_path"])
+    # A unified checkpoint holds both VAEs; a split pack (LTX-2.5) names each component.
+    split = model.get("video_vae_path") is not None
     command = [
         sys.executable,
         "-m",
         "ltx_pipelines.ti2vid_one_stage",
-        "--checkpoint-path",
+        "--transformer-path" if split else "--checkpoint-path",
         str(model["model_path"]),
         "--gemma-root" if text_encoder.is_dir() else "--text-encoder-path",
         str(text_encoder),
+    ]
+    if split:
+        command += ["--video-vae-path", str(model["video_vae_path"])]
+        if model.get("audio_vae_path") is not None:
+            command += ["--audio-vae-path", str(model["audio_vae_path"])]
+    command += [
         "--prompt",
         row["prompt"],
         "--seed",

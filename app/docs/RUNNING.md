@@ -276,7 +276,7 @@ Checkpoints, generated results and model caches remain. There is no cleanup time
 ### Try a trained result and reuse a run
 
 Monitor → Generated results can generate a matched base-versus-LoRA comparison for the
-supported FLUX.1-dev, LTX-2 and H3 routes. H3 offers still images or video, including for a
+supported FLUX.1-dev, LTX-2.3/2.5 and H3 routes. H3 offers still images or video, including for a
 LoRA trained on still images. Select an available checkpoint, enter prompts and seeds,
 and generate. Both sides use the same inputs; the LoRA is the changed variable. Results are
 saved in the project gallery. A failed/incomplete comparison keeps downloaded partial files and

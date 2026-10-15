@@ -6,7 +6,7 @@ image at `/opt/pod/scripts/` and must stay standalone: argparse, standard librar
 They never import `podagent`, and nothing heavy is imported at module level, so
 `python -I <script> --help` works from any interpreter. One exception to "standalone":
 `launch_ltx.py` reads the LTX rules it shares with the agent (preprocess allowlist, pinned
-LTX-2 Hub revision) from `../agent/src/podagent/ltx_rules.py` at import, by path with runpy.
+LTX Hub sources) from `../agent/src/podagent/ltx_rules.py` at import, by path with runpy.
 The image recreates that layout under `/opt/pod`, and the build's `--help` check fails if the
 copy is missing. H3 helpers read the single native/pod recipe field-and-asset JSON
 resource, copied beside scripts; they also remain stdlib-only at import. `model_table.py`
@@ -140,12 +140,12 @@ launcher only logs where the encoder weights come from.
 | --- | --- |
 | `0` | the trainer finished (and, with `hub.push_on_finish`, the push landed); with `--dry-run`, the config was written |
 | `2` | invalid run config, or `extra` tried to leave the workspace; one line says why, nothing is written |
-| `69` | `launch_ltx.py` only: preparing `base_model: Lightricks/LTX-2` from the Hub failed (unreachable, gated, licence not accepted, disk full). The line names the exception, the HTTP status when there is one, and its message. Nothing is written to the run directory, so a retry starts clean |
+| `69` | `launch_ltx.py` only: preparing a pinned Hub source (`base_model: Lightricks/LTX-2.3`, `Lightricks/LTX-2.5`) failed (unreachable, gated, licence not accepted, disk full). The line names the exception, the HTTP status when there is one, and its message. Nothing is written to the run directory, so a retry starts clean |
 | other | the preprocessor's (LTX), the trainer's or `push_lora.py`'s own code; a signal-killed trainer is `128 + signal` |
 
 `69` is sysexits' `EX_UNAVAILABLE`, chosen because no trainer or Python itself exits with it.
-The LTX download is pinned to `LTX_HUB_REVISION` in `ltx_rules.py`; changing it is a reviewed
-edit, never the Hub repo's moving `main`.
+The LTX downloads are pinned in `LTX_HUB_SOURCES` in `ltx_rules.py`; changing a revision is a
+reviewed edit, never a Hub repo's moving `main`.
 
 ## Tests
 

@@ -38,7 +38,7 @@ struct GPURunHistoryTests {
             "triggers": .array([.string("NORA7")]), "profile": .string("flux-image"),
         ]
         if trainer == "ltx" {
-            params["base_model"] = .string("Lightricks/LTX-2")
+            params["base_model"] = .string("Lightricks/LTX-2.3")
             params["profile"] = .string("ltx-video")
             params["extra"] = .object([
                 "preprocess": .object(["resolution_buckets": .string("512x512x33;512x512x1")]),
@@ -79,7 +79,7 @@ struct GPURunHistoryTests {
             #expect(session.gpu.selectedHistoryRunID == run.runID)
             #expect(session.gpu.trainer == "ltx")
             #expect(session.gpu.profile == "ltx-video")
-            #expect(session.gpu.baseModel == "Lightricks/LTX-2")
+            #expect(session.gpu.baseModel == "Lightricks/LTX-2.3")
             #expect(session.gpu.triggerWords == "NORA7")
             #expect(session.gpu.seed == 42)
             #expect(session.gpu.steps == 600)

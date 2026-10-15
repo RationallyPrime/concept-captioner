@@ -58,7 +58,7 @@ struct VideoTrainingFormat: Hashable, Identifiable, Sendable {
         ModelTable.shared.models.compactMap(VideoTrainingFormat.init(row:))
     }
 
-    static let ltx = named("ltx-2")
+    static let ltx = named("ltx-2.3")
     static let h3 = named("minimax-h3")
 
     private static func named(_ id: String) -> VideoTrainingFormat {

@@ -6,8 +6,8 @@ it. Two things live here:
 
 - the preprocess allowlist. Flags follow process_dataset.py at the pinned LTX-2 commit; paths,
   device and columns belong to the wrapper and cannot be overridden through extra arguments;
-- the one Hub source the wrapper prepares on its own (``base_model: Lightricks/LTX-2``), pinned
-  to the commit the live run on 2026-10-10 downloaded, and the files it takes from it.
+- the Hub sources the wrapper prepares on its own (``base_model`` naming one of
+  ``LTX_HUB_SOURCES``), each pinned to a revision, and the files it takes from each.
 """
 
 from __future__ import annotations
@@ -15,19 +15,70 @@ from __future__ import annotations
 import re
 from typing import Any
 
-# Hub model repo the wrapper downloads into <workspace>/models/ltx-2. The revision is the repo's
-# main head from 2026-08-04 until at least the verified run of 2026-10-10 (22 files matched the
-# patterns below, the same 22 the run fetched); moving it is a reviewable change, never a float.
-LTX_HUB_MODEL = "Lightricks/LTX-2"
-LTX_HUB_REVISION = "dfcc2108383fe1aaa0584bdf55d368a4bdadd90c"
-LTX_HUB_CHECKPOINT = "ltx-2-19b-dev.safetensors"
-LTX_HUB_FILES = (
-    LTX_HUB_CHECKPOINT,
+# Hub sources the wrapper downloads into <workspace>/models/<dir>. Every revision is pinned;
+# moving one is a reviewable change, never a float. ``downloads`` lists (repo, revision, file
+# patterns) fetched into that one directory; ``model`` names the trainer's model paths relative
+# to it ("." is the directory itself, the Gemma root of a unified checkpoint).
+#
+# - LTX-2.3: unified checkpoint. Its repo carries no text encoder; LTX-2.3 uses the same Gemma 3
+#   as LTX-2, so the Gemma root comes from the LTX-2 repo's mirror at the revision the verified
+#   LTX-2 run of 2026-10-10 downloaded.
+# - LTX-2.5: split layout, one file per component; Gemma 4 packed with its tokenizer and the
+#   text projections. The repo is gated (licence accepted on the Hub, then a token).
+# - LTX-2: kept so runs started on it still resume and generate; no longer offered by the app.
+_LTX2_REVISION = "dfcc2108383fe1aaa0584bdf55d368a4bdadd90c"
+_GEMMA3_FILES = (
     "text_encoder/model*.safetensors",
     "text_encoder/config.json",
     "text_encoder/generation_config.json",
     "tokenizer/*",
 )
+LTX_HUB_SOURCES: dict[str, dict[str, Any]] = {
+    "Lightricks/LTX-2.3": {
+        "dir": "ltx-2.3",
+        "downloads": (
+            (
+                "Lightricks/LTX-2.3",
+                "3c6a4e66e5d0a684231950b9c74dd4ded7b6fadc",
+                ("ltx-2.3-22b-dev.safetensors",),
+            ),
+            ("Lightricks/LTX-2", _LTX2_REVISION, _GEMMA3_FILES),
+        ),
+        "model": {"model_path": "ltx-2.3-22b-dev.safetensors", "text_encoder_path": "."},
+    },
+    "Lightricks/LTX-2.5": {
+        "dir": "ltx-2.5",
+        "downloads": (
+            (
+                "Lightricks/LTX-2.5",
+                "49b093a39c19169a8a81721dcc541e07e945232f",
+                (
+                    "diffusion_models/ltx-2.5-22b-dev-transformer-bf16.safetensors",
+                    "text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors",
+                    "vae/ltx-2.5-video-vae-bf16.safetensors",
+                    "vae/ltx-2.5-audio-vae-bf16.safetensors",
+                ),
+            ),
+        ),
+        "model": {
+            "model_path": "diffusion_models/ltx-2.5-22b-dev-transformer-bf16.safetensors",
+            "text_encoder_path": "text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors",
+            "video_vae_path": "vae/ltx-2.5-video-vae-bf16.safetensors",
+            "audio_vae_path": "vae/ltx-2.5-audio-vae-bf16.safetensors",
+        },
+    },
+    "Lightricks/LTX-2": {
+        "dir": "ltx-2",
+        "downloads": (
+            (
+                "Lightricks/LTX-2",
+                _LTX2_REVISION,
+                ("ltx-2-19b-dev.safetensors", *_GEMMA3_FILES),
+            ),
+        ),
+        "model": {"model_path": "ltx-2-19b-dev.safetensors", "text_encoder_path": "."},
+    },
+}
 
 BUCKET_RE = re.compile(r"\d+x\d+x\d+(?:;\d+x\d+x\d+)*")
 PREPROCESS_SWITCHES = frozenset(

@@ -29,7 +29,7 @@ import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Literal, NoReturn, TypeVar
+from typing import Annotated, Any, Literal, NoReturn, TypeVar
 
 from pydantic import (
     AfterValidator,
@@ -48,7 +48,7 @@ from typing_extensions import TypedDict
 from .artifacts import resolve_run_file
 from .checkpoints import checkpoint_step, latest_checkpoint
 from .errors import AgentError
-from .ltx_rules import LTX_HUB_MODEL, LTX_HUB_REVISION, check_preprocess
+from .ltx_rules import check_preprocess
 from .settings import Paths, Settings
 from .storage import RUN_STATE_FILE, cleanup_datasets
 from .uploads import claim_initialization, claim_stage, release_stage, upload_folder
@@ -540,9 +540,6 @@ class LtxRunConfig(RunConfig):
     """``RunConfig`` for ``trainer-ltx``: ``extra.preprocess`` must pass the shared allowlist
     (``ltx_rules.py``, which the isolated wrapper loads too), so a bad flag is a 422 before any
     run directory exists."""
-
-    # The Hub source launch_ltx.py prepares on its own, and the revision it is pinned to.
-    hub_source: ClassVar[tuple[str, str]] = (LTX_HUB_MODEL, LTX_HUB_REVISION)
 
     # Narrowing the inherited field is how pydantic validates `extra.preprocess` in place (errors
     # at ["extra", "preprocess"]); nothing assigns `extra` after validation.

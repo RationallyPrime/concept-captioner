@@ -47,7 +47,7 @@ struct GPUWorkflowTests {
         // Signed in, but the Hub account could not be read (whoami 401): downloaded, not pushed.
         #expect(params["hub"] == nil)
         if trainerName == "ltx" {
-            #expect(params["base_model"]?.stringValue == "Lightricks/LTX-2")
+            #expect(params["base_model"]?.stringValue == "Lightricks/LTX-2.3")
             let extra = try #require(params["extra"]?.objectValue)
             #expect(extra["optimization"] == .object(["optimizer_type": .string("adamw8bit")]))
             #expect(extra["acceleration"] == .object([
@@ -132,7 +132,7 @@ struct GPUWorkflowTests {
     func trainerDefaultsApplyBeforeAnyTrainingViewExists() {
         let workspace = GPUWorkspace(demoMode: true)
         workspace.trainer = "ltx"
-        #expect(workspace.baseModel == "Lightricks/LTX-2")
+        #expect(workspace.baseModel == "Lightricks/LTX-2.3")
         workspace.baseModel = "custom/model"
         workspace.trainer = "ltx"
         #expect(workspace.baseModel == "custom/model")

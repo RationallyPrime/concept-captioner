@@ -58,7 +58,9 @@ selected trainer and model. Where a model genuinely differs the row names a hook
 H3 native recipe, its guidance rules and the LTX video-bucket change to the trainer settings. No code
 outside a hook tests a model's name; the trainer (`aitoolkit`, `ltx`) is still branched on.
 
-The table has five rows: FLUX.1-dev, LTX-2, MiniMax H3, Z-Image and Qwen-Image-2.1. Z-Image and
+The verified rows are FLUX.1-dev, MiniMax H3, Z-Image and Qwen-Image-2.1. LTX-2.3 and LTX-2.5
+replaced LTX-2 on 2026-10-15 and stay unverified (shown only to Advanced users) until a pod run
+confirms them; LTX-2.5's Hub repo is gated. Z-Image and
 Qwen-Image-2.1 count their training length in epochs (the app sends steps) and show their licence
 notice and first-download size under the picker. Both compare through the `aitoolkit_arch_image`
 generator hook; Z-Image's picker note says a Z-Image LoRA works on Z-Image-Turbo at about twice the
@@ -158,7 +160,7 @@ controls); the three terms the sections link to are `StudioTerm.regularizationIm
   checkpoint resume. Each new run captures its budget and rental-spend baseline before
   preparing inputs, and records them before transfer. Resume retains that cap and adds its continuation cost. The existing
   whole-computer cap still applies. Missing revision or cost information is shown as unavailable.
-- **Generated results:** pod generation services for FLUX.1-dev, LTX-2 and H3, checkpoint
+- **Generated results:** pod generation services for FLUX.1-dev, LTX-2.3/2.5 and H3, checkpoint
   choice, paired base/LoRA generation with matched prompts and seeds, downloaded galleries,
   and Save trained model to this Mac. A comparison is successful only when its downloaded
   manifest says complete and every listed pair is present; partial files remain available

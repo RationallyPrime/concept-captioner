@@ -348,7 +348,7 @@ struct H3TrainingTests {
         gpu.checkpointPrecision = "float32"
         session.project?.job.profile = "ltx-video"
         session.updateTrainingProjectDefaults()
-        #expect(gpu.trainer == "ltx" && gpu.baseModel == "Lightricks/LTX-2")
+        #expect(gpu.trainer == "ltx" && gpu.baseModel == "Lightricks/LTX-2.3")
         #expect(gpu.checkpointPrecision == "float16" && gpu.trainingResolutions == [512])
     }
 
