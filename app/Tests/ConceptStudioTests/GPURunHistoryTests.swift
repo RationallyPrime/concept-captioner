@@ -437,6 +437,8 @@ extension GPURunHistoryTests {
         workspace.result = pending
         let weights = Data("synthetic selected checkpoint".utf8)
         await agent.serve(["saved-run/final.safetensors": weights, "run.yaml": Data("synthetic config".utf8)])
+        let events = Data("synthetic events".utf8)
+        await agent.serveLogs(["trainer.log": Data("step 2\n".utf8), "tensorboard/run/events.out.tfevents.1": events])
         await workspace.downloadRun(selected)
         #expect(await agent.listedRunIDs == [selected.runID])
         #expect(await agent.downloadedRunIDs.allSatisfy { $0 == selected.runID })
@@ -447,6 +449,9 @@ extension GPURunHistoryTests {
         let saved = try #require(workspace.runHistory.first?.localFolder)
         #expect(try Data(contentsOf: URL(fileURLWithPath: saved)
                 .appendingPathComponent("saved-run/final.safetensors")) == weights)
+        #expect(try Data(contentsOf: URL(fileURLWithPath: saved)
+                .appendingPathComponent("logs/tensorboard/run/events.out.tfevents.1")) == events)
+        #expect(workspace.message.contains("training logs are in the logs folder"))
         #expect(workspace.runHistory.first?.result?.state == .pushed(repo: "me/published-model"))
         let reopened = makeWorkspace(GPUTransport(), preferences)
         reopened.projectFolder = folder

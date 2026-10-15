@@ -11,6 +11,7 @@ actor HistoryAgent: PodAgent {
     private(set) var downloadedRunIDs: [String] = []
     var files: [RunFile] = []
     var bodies: [String: Data] = [:]
+    var logBodies: [String: Data] = [:]
     var damageDownloads = false
     var loseStartReply = false
     private var pauseProgress = false
@@ -96,5 +97,17 @@ actor HistoryAgent: PodAgent {
     func download(runID: String, path: String, to destination: URL) throws {
         downloadedRunIDs.append(runID)
         try (damageDownloads ? Data("damaged".utf8) : bodies[path] ?? Data()).write(to: destination)
+    }
+
+    func serveLogs(_ bodies: [String: Data]) {
+        logBodies = bodies
+    }
+
+    func runLogFiles(runID: String) -> [RunFile] {
+        logBodies.map { RunFile(path: $0.key, size: $0.value.count, sha256: sha256($0.value)) }
+    }
+
+    func downloadLogFile(runID: String, path: String, to destination: URL) throws {
+        try (logBodies[path] ?? Data()).write(to: destination)
     }
 }

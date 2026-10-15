@@ -14,7 +14,8 @@ What a client can observe is decided here and in ``errors.py``:
   checks the bearer first, so an unauthenticated client never sees anything but ``401``;
 - ``/tensorboard`` proxies the catalog's fixed loopback TensorBoard port; a browser reaches it
   with the derived session cookie that ``POST /tensorboard-session`` issues (``auth.py``);
-- ``/runs/{id}/files`` serves the run's output directory and nothing else (``artifacts.py``);
+- ``/runs/{id}/files`` serves the run's output directory and nothing else, and
+  ``/runs/{id}/log-files`` its ``trainer.log`` and TensorBoard event files (``artifacts.py``);
 - the lifespan's exit stops every running child: the agent is PID 1, so its shutdown is the
   container's.
 """
@@ -41,7 +42,7 @@ from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import __version__
-from .artifacts import RunFiles, list_run_files, resolve_run_file
+from .artifacts import RunFiles, list_run_files, list_run_logs, resolve_log_file, resolve_run_file
 from .auth import (
     TENSORBOARD_COOKIE,
     TENSORBOARD_PREFIX,
@@ -477,6 +478,15 @@ def create_app(settings: Settings | None = None, backend: GpuBackend | None = No
     @app.api_route("/runs/{run_id}/files/{path:path}", methods=["GET", "HEAD"])
     def run_file(run_id: str, path: str) -> FileResponse:
         real = resolve_run_file(run_id, run_dir_or_404(run_id), path)
+        return FileResponse(real, media_type="application/octet-stream", filename=real.name)
+
+    @app.get("/runs/{run_id}/log-files", response_model=RunFiles)
+    def run_log_files(run_id: str) -> RunFiles:
+        return list_run_logs(run_id, run_dir_or_404(run_id))
+
+    @app.api_route("/runs/{run_id}/log-files/{path:path}", methods=["GET", "HEAD"])
+    def run_log_file(run_id: str, path: str) -> FileResponse:
+        real = resolve_log_file(run_id, run_dir_or_404(run_id), path)
         return FileResponse(real, media_type="application/octet-stream", filename=real.name)
 
     return app

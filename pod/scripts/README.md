@@ -16,7 +16,7 @@ checkout); see "The model table" below.
 | script | runs in | purpose |
 | --- | --- | --- |
 | `pull_dataset.py` | `/opt/venvs/agent` | Hub dataset → `/workspace/datasets/<name>`: images, `<stem>.txt` captions, `metadata.jsonl`, `manifest.json`, `job.yaml` |
-| `push_lora.py` | `/opt/venvs/agent` | `/workspace/runs/<id>` → model repo: newest `.safetensors` (not the trainers' caches), samples, `run.json`, `config.yaml`, generated model card |
+| `push_lora.py` | `/opt/venvs/agent` | `/workspace/runs/<id>` → model repo: newest `.safetensors` (not the trainers' caches), samples, `run.json`, `config.yaml`, the training logs under `logs/`, generated model card |
 | `model_table.py` | stdlib | the model table (`model-table.json`): which models exist and what each needs; lookups and hook registry |
 | `launch_aitoolkit.py` | `/opt/venvs/aitoolkit` | `run.json` → ai-toolkit YAML → `run.py` for the AI Toolkit models in the table; effective native snapshot, log tee and loss scraper |
 | `h3_recipe.py`, `h3_dataset.py` | stdlib admission, then AI Toolkit | canonical H3 quality/initializer contracts, fixed pinned BF16 asset download, exact approved clip grouping |
@@ -88,14 +88,17 @@ push_lora.py --run-dir /workspace/runs/<id> --repo OWNER/NAME [--private] [--no-
 ```
 
 Creates the model repo when missing (`create_repo(exist_ok=True)`; `--private` applies to that
-creation), then one `upload_folder` of the run directory with these allow-patterns:
+creation), then one commit (`create_commit`) of these files:
 
 - the newest `*.safetensors` under the run dir by mtime (`preprocessed/` and dot-folders are not
   searched, so LTX latents and caches never count), or every one with `--all-checkpoints`. None
   found → exit `1` before anything touches the Hub;
 - `run.json` and `config.yaml` when present;
-- `samples/*` and `*/samples/*` (the run's `samples/` and ai-toolkit's `output/<name>/samples/`)
-  unless `--no-samples`;
+- every file under the run's `samples/` and ai-toolkit's `output/<name>/samples/` unless
+  `--no-samples`;
+- the training logs, `trainer.log` and every file under `tensorboard/`, under `logs/` in the repo
+  (`logs/trainer.log`, `logs/tensorboard/...`). They are read into memory first: when the launcher
+  pushes on finish, its tee is still appending this script's own output to `trainer.log`;
 - `README.md`: a model card generated from `run.json` — `base_model` and `instance_prompt`
   (the first trigger) in the front matter, a table with base model, triggers, steps, rank/alpha,
   learning rate, resolution, caption profile (from `run.json`, else `profile:` in the dataset's
@@ -103,8 +106,8 @@ creation), then one `upload_folder` of the run directory with these allow-patter
   when readable), the installed `concept-captioner` version, the weight paths, sample prompts.
   It overwrites `<run>/README.md` and the repo's README on every push.
 
-Files keep their run-relative paths in the repo (`output/<name>/<name>.safetensors`); the card
-lists them. On success the repo URL is printed last and `<run>/push.json` records `repo_id`,
+Files other than the logs keep their run-relative paths in the repo
+(`output/<name>/<name>.safetensors`); the card lists them. On success the repo URL is printed last and `<run>/push.json` records `repo_id`,
 `url`, `commit`, `run_id`, `files`, `pushed_at`. Token from `HF_TOKEN`.
 
 ## `regularization.py` and REPA (POD-SPEC §4.3, §7.5)

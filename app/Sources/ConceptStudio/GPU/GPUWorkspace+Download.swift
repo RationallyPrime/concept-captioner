@@ -29,6 +29,7 @@ extension GPUWorkspace {
                 self.message = "Saving \(file.path) to this Mac…"
                 try await self.download(file, runID: run.runID, into: folder, agent: agent)
             }
+            let logs = try await self.saveRunLogs(runID: run.runID, into: folder, agent: agent)
             try Task.checkCancellation()
             guard self.projectFolder == project,
                   let current = self.runHistory.firstIndex(where: { $0.runID == run.runID }) else {
@@ -40,7 +41,7 @@ extension GPUWorkspace {
                 self.runHistory[current].localFolder = previousFolder
                 throw StudioError.message(self.message)
             }
-            self.message = "The selected run's trained model is saved to \(folder.path)."
+            self.message = "The selected run's trained model is saved to \(folder.path)." + Self.logsSentence(logs)
         }
     }
 }

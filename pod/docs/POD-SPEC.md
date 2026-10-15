@@ -422,6 +422,21 @@ a symlink, and a symlinked file, directory or `output` itself is left out. `size
 path, size, mtime and inode, so the first listing of a large output hashes every file (seconds
 per gigabyte) and later ones only what changed.
 
+### 2.10a `GET /runs/{id}/log-files` and `GET /runs/{id}/log-files/{path}`
+
+The run's training logs, so they leave the pod with the model: `trainer.log` and every regular
+file under `tensorboard/` (the scraper's event file and the trainer's native ones, recursively).
+Both follow 2.10 and 2.11 exactly, with the run directory `/workspace/runs/<id>/` as the root:
+`root` is that directory and `path` is relative to it (`trainer.log`,
+`tensorboard/nora7-h3-001_20261015-1200/events.out.tfevents...`). Nothing else under the run is
+served: a path that is neither `trainer.log` nor under `tensorboard/` is `404 not_found`, and a
+symlink named `trainer.log` or `tensorboard`, or anywhere below it, is left out of the listing
+and never fetched. A run that is still writing its log lists the size and digest of the moment;
+a client that fetched a changed file sees a digest mismatch and treats the logs as not saved.
+The app saves them under `logs/` beside the model (`logs/trainer.log`, `logs/tensorboard/...`),
+the layout `push_lora.py` gives the model repo (7.2), and an image older than this route leaves
+the model saved and says the logs were not.
+
 ### 2.11 `GET /runs/{id}/files/{path}`
 
 One file from that listing, streamed: `200`, `Content-Type: application/octet-stream`,
@@ -1403,10 +1418,12 @@ fully captioned set before installation and preserves the previous dataset on fa
 ### 7.2 `push_lora.py`
 
 `--run-dir DIR --repo ID [--private] [--no-samples] [--all-checkpoints] [--commit-message M]`.
-Creates the model repo if needed (`HfApi.create_repo(exist_ok=True)`), uploads with
-`upload_folder` and `allow_patterns`: the final `*.safetensors` (newest when there are several,
-unless `--all-checkpoints`), `run.json`, `config.yaml`, `samples/*` (unless `--no-samples`), and a
-generated `README.md` model card (base model, triggers, steps, rank, profile, dataset name, the
+Creates the model repo if needed (`HfApi.create_repo(exist_ok=True)`), uploads in one
+`create_commit`: the final `*.safetensors` (newest when there are several, unless
+`--all-checkpoints`), `run.json`, `config.yaml`, `samples/*` (unless `--no-samples`), the training
+logs under `logs/` (`trainer.log` as `logs/trainer.log` and every file under `tensorboard/` as
+`logs/tensorboard/...`, read into memory first because the launcher's own push still appends to
+`trainer.log`), and a generated `README.md` model card (base model, triggers, steps, rank, profile, dataset name, the
 `concept-captioner` version). When the base model's row in the model table (4.4) has
 `license.show_notice`, the card also carries the licence (front matter and a closing `## Licence`
 section). Prints the repo URL. Exit 1 when no `.safetensors` is found.

@@ -1,4 +1,5 @@
-"""Run artifact retrieval (POD-SPEC §2.10, §2.11): list and fetch the run's output directory.
+"""Run artifact retrieval (POD-SPEC §2.10, §2.10a, §2.11): list and fetch the run's output
+directory and its training logs.
 
 A user without a Hub account gets the trained LoRA through these two routes, so they are
 checked for what they serve (sizes, digests, bytes) and, mostly, for what they must never
@@ -154,8 +155,37 @@ def test_symlinked_output_root_is_not_served(
     expect_error(client.get("/runs/linked-run/files/secret.txt"), 404, "not_found")
 
 
+def test_logs_are_the_trainer_log_and_event_files_only(
+    client: TestClient, run_dir: Path, tmp_path: Path
+) -> None:
+    (run_dir / "trainer.log").write_text("step 2 loss 0.1\n")
+    events = run_dir / "tensorboard" / "nora7_20261015"
+    events.mkdir(parents=True)
+    (events / "events.out.tfevents.1").write_bytes(b"event")
+    (run_dir / "tensorboard" / "leak").symlink_to(tmp_path / "outside" / "secret.txt")
+    listing = client.get(f"/runs/{RUN}/log-files").json()
+    assert listing["root"].endswith(f"/runs/{RUN}")
+    assert [item["path"] for item in listing["files"]] == [
+        "tensorboard/nora7_20261015/events.out.tfevents.1",
+        "trainer.log",
+    ]
+    assert client.get(f"/runs/{RUN}/log-files/trainer.log").content == b"step 2 loss 0.1\n"
+    event = client.get(f"/runs/{RUN}/log-files/tensorboard/nora7_20261015/events.out.tfevents.1")
+    assert event.content == b"event"
+    for path in ("run.json", "output/samples/step%202.png", "tensorboard", "tensorboard/leak"):
+        expect_error(client.get(f"/runs/{RUN}/log-files/{path}"), 404, "not_found")
+    expect_error(
+        client.get(f"/runs/{RUN}/log-files/tensorboard/%2E%2E/run.json"), 422, "validation"
+    )
+
+
 def test_files_need_the_bearer(anon_client: TestClient, run_dir: Path) -> None:
-    for path in (f"/runs/{RUN}/files", f"/runs/{RUN}/files/samples/step%202.png"):
+    for path in (
+        f"/runs/{RUN}/files",
+        f"/runs/{RUN}/files/samples/step%202.png",
+        f"/runs/{RUN}/log-files",
+        f"/runs/{RUN}/log-files/trainer.log",
+    ):
         expect_error(anon_client.get(path), 401, "unauthorized")
         expect_error(
             anon_client.get(path, headers={"Authorization": "Bearer wrong-token-000"}),

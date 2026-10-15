@@ -43,6 +43,9 @@ struct TrainingResult: Codable, Equatable {
 }
 
 enum RunArtifacts {
+    /// Where a saved run keeps its training logs, as the pushed Hub repo does.
+    static let logsFolder = "logs"
+
     static func validRunID(_ value: String) -> Bool {
         value.range(of: "\\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\\z", options: .regularExpression) != nil
     }
@@ -381,18 +384,50 @@ extension GPUWorkspace {
             message = "Downloading \(file.path)…"
             try await download(file, runID: result.runID, into: folder, agent: agent)
         }
+        let logs = try await saveRunLogs(runID: result.runID, into: folder, agent: agent)
         updateResult(.saved(folder: folder.path))
-        message = "Your LoRA was saved to \(folder.path)."
+        message = "Your LoRA was saved to \(folder.path)." + Self.logsSentence(logs)
     }
 
-    func download(_ file: RunFile, runID: String, into folder: URL, agent: any PodAgent) async throws {
+    /// Saves the run's training logs under `logs/` in `folder`, as the Hub repo carries them, and returns how many it
+    /// saved, or nil when it could not. The logs are a record beside the model, not the model: a computer whose image
+    /// predates the log route, or a log that changed while it downloaded, leaves the saved model in place.
+    func saveRunLogs(runID: String, into folder: URL, agent: any PodAgent) async throws -> Int? {
+        do {
+            let files = try await agent.runLogFiles(runID: runID)
+            for file in files {
+                try Task.checkCancellation()
+                message = "Saving the training log \(file.path)…"
+                try await download(file, runID: runID, into: folder, agent: agent, log: true)
+            }
+            return files.count
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            return nil
+        }
+    }
+
+    /// The sentence after "saved to <folder>." about the logs `saveRunLogs` saved.
+    nonisolated static func logsSentence(_ saved: Int?) -> String {
+        guard let saved else {
+            return " Its training logs could not be saved here; they stay on the computer's storage."
+        }
+        return saved > 0 ? " Its training logs are in the logs folder beside it." : ""
+    }
+
+    /// Saves one run file into `folder`. A `log` file comes from the run's logs and lands under `logs/`.
+    func download(
+        _ file: RunFile, runID: String, into folder: URL, agent: any PodAgent, log: Bool = false
+    ) async throws {
         let manager = FileManager.default
         guard RunArtifacts.validRunID(runID) else { throw StudioError.message("Invalid saved run identifier.") }
+        let localPath = log ? RunArtifacts.logsFolder + "/" + file.path : file.path
         let root = folder.resolvingSymlinksInPath().standardizedFileURL
-        let destination = root.appendingPathComponent(file.path).standardizedFileURL
+        let destination = root.appendingPathComponent(localPath).standardizedFileURL
         // Foundation can leave a nonexistent leaf unresolved. Inspect every existing parent
         // before creating directories, so a nested symlink cannot redirect that creation.
-        let parts = file.path.split(separator: "/", omittingEmptySubsequences: false)
+        let parts = localPath.split(separator: "/", omittingEmptySubsequences: false)
         guard !parts.contains(where: { ["", ".", ".."].contains(String($0)) }) else {
             throw StudioError.message("The computer listed an invalid run file: \(file.path).")
         }
@@ -414,7 +449,11 @@ extension GPUWorkspace {
         // A stale partial is disposable; remove it before the downloader opens it.
         try? manager.removeItem(at: partial)
         defer { try? manager.removeItem(at: partial) }
-        try await agent.download(runID: runID, path: file.path, to: partial)
+        if log {
+            try await agent.downloadLogFile(runID: runID, path: file.path, to: partial)
+        } else {
+            try await agent.download(runID: runID, path: file.path, to: partial)
+        }
         guard try RunArtifacts.sha256(of: partial) == file.sha256.lowercased() else {
             throw StudioError.message("\(file.path) arrived damaged (checksum mismatch). Retrieve it again.")
         }

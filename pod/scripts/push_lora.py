@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Upload a trained LoRA (+ samples, run.json, config.yaml, model card) to a model repo (POD-SPEC §7.2).
+"""Upload a trained LoRA (+ samples, logs, run.json, config.yaml, model card) to a model repo (POD-SPEC §7.2).
 
 Usage:
   push_lora.py --run-dir DIR --repo ID [--private] [--no-samples] [--all-checkpoints]
                [--commit-message M]
 
-What goes up, as ``upload_folder`` allow-patterns relative to DIR:
+What goes up, in one commit, at its path relative to DIR unless said otherwise:
 
 - the newest ``*.safetensors`` under DIR (by mtime; ``preprocessed/``, ``regularization/`` and
   dot-folders are not searched: they hold the trainers' latent and feature caches, which are
@@ -14,6 +14,10 @@ What goes up, as ``upload_folder`` allow-patterns relative to DIR:
 - ``run.json`` and ``config.yaml`` when present;
 - every file under a ``samples`` folder (``DIR/samples`` or ``DIR/output/*/samples``) unless
   ``--no-samples``;
+- the training logs under ``logs/`` in the repo: ``DIR/trainer.log`` as ``logs/trainer.log`` and
+  every file under ``DIR/tensorboard`` (the event files, recursively) as ``logs/tensorboard/...``.
+  They are small and are read into memory first: the launcher's own push still appends to
+  ``trainer.log``, and an upload must not read a file that changes under it;
 - ``README.md``: a model card generated from ``run.json`` (base model, triggers, steps, rank,
   profile, dataset name, the installed concept-captioner version). It overwrites
   ``DIR/README.md`` and, on the Hub, the repo's README. When the base model's row in the model
@@ -41,7 +45,9 @@ from typing import Any
 
 SKIPPED_DIRS = frozenset({"preprocessed", "regularization"})
 SIDE_FILES = ("run.json", "config.yaml")
-SAMPLE_PATTERNS = ("samples/*", "*/samples/*")
+LOG_FILE = "trainer.log"
+EVENTS_DIR = "tensorboard"
+LOGS_IN_REPO = "logs"  # the repo folder that holds LOG_FILE and EVENTS_DIR
 CARD_NAME = "README.md"
 RECEIPT_NAME = "push.json"
 # The Hub's licence identifiers (https://huggingface.co/docs/hub/en/repositories-licenses), less
@@ -166,7 +172,7 @@ def select_weights(run_dir: Path, *, all_checkpoints: bool) -> list[Path]:
 
 
 def sample_files(run_dir: Path) -> list[Path]:
-    """Files under any ``samples`` folder that the ``SAMPLE_PATTERNS`` would upload."""
+    """Files under any ``samples`` folder (``DIR/samples``, ``DIR/output/*/samples``)."""
     files: list[Path] = []
     for folder in sorted(run_dir.rglob("samples")):
         if folder.is_dir() and not _skipped(run_dir, folder):
@@ -174,18 +180,29 @@ def sample_files(run_dir: Path) -> list[Path]:
     return files
 
 
-def escape_pattern(name: str) -> str:
-    """A literal path as an fnmatch pattern."""
-    return name.replace("[", "[[]").replace("*", "[*]").replace("?", "[?]")
+def _regular(path: Path) -> bool:
+    return path.is_file() and not path.is_symlink()
 
 
-def allow_patterns(run_dir: Path, *, weights: list[Path], include_samples: bool) -> list[str]:
-    patterns = [escape_pattern(relative(run_dir, weight)) for weight in weights]
-    patterns.extend(name for name in SIDE_FILES if (run_dir / name).is_file())
-    if include_samples:
-        patterns.extend(SAMPLE_PATTERNS)
-    patterns.append(CARD_NAME)
-    return patterns
+def log_files(run_dir: Path) -> list[tuple[str, bytes]]:
+    """``(path in the repo, contents)`` of ``trainer.log`` and the TensorBoard event files."""
+    found = [run_dir / LOG_FILE] if _regular(run_dir / LOG_FILE) else []
+    events = run_dir / EVENTS_DIR
+    if events.is_dir() and not events.is_symlink():
+        found += sorted(path for path in events.rglob("*") if _regular(path))
+    return [(f"{LOGS_IN_REPO}/{relative(run_dir, path)}", path.read_bytes()) for path in found]
+
+
+def upload_plan(
+    run_dir: Path, *, weights: list[Path], samples: list[Path]
+) -> list[tuple[str, Path | bytes]]:
+    """Every file of the commit as ``(path in the repo, file or contents)``; the card comes last."""
+    plan: list[tuple[str, Path | bytes]] = [(relative(run_dir, w), w) for w in weights]
+    plan += [(name, run_dir / name) for name in SIDE_FILES if (run_dir / name).is_file()]
+    plan += [(relative(run_dir, sample), sample) for sample in samples]
+    plan += log_files(run_dir)
+    plan.append((CARD_NAME, run_dir / CARD_NAME))
+    return plan
 
 
 # --- model card ---------------------------------------------------------------------------------
@@ -275,6 +292,7 @@ def model_card(
     samples: int,
     dataset: dict[str, Any],
     version: str,
+    logs: bool = False,
 ) -> str:
     """The README.md pushed with the LoRA. Everything in it comes from run.json and the dataset folder."""
     triggers = [str(t) for t in (run.get("triggers") or [])]
@@ -350,6 +368,7 @@ def model_card(
         f"- `samples/` — {samples} sample image{'s' if samples != 1 else ''}"
         if samples
         else "- no samples uploaded",
+        *([f"- `{LOGS_IN_REPO}/` — the trainer log and TensorBoard event files"] if logs else []),
     ]
     if sample_prompts:
         body += ["", "## Sample prompts", "", *(f"- {prompt}" for prompt in sample_prompts)]
@@ -390,14 +409,22 @@ class Hub:
     def create_repo(self, repo_id: str, *, private: bool) -> str:
         return str(self.api.create_repo(repo_id, repo_type="model", private=private, exist_ok=True))
 
-    def upload_folder(
-        self, repo_id: str, folder: Path, *, allow_patterns: list[str], commit_message: str
+    def commit(
+        self, repo_id: str, files: list[tuple[str, Path | bytes]], *, commit_message: str
     ) -> str | None:
-        info = self.api.upload_folder(
+        from huggingface_hub import CommitOperationAdd
+
+        operations = [
+            CommitOperationAdd(
+                path_in_repo=path,
+                path_or_fileobj=str(source) if isinstance(source, Path) else source,
+            )
+            for path, source in files
+        ]
+        info = self.api.create_commit(
             repo_id=repo_id,
             repo_type="model",
-            folder_path=str(folder),
-            allow_patterns=allow_patterns,
+            operations=operations,
             commit_message=commit_message,
         )
         return getattr(info, "oid", None)
@@ -435,6 +462,8 @@ def main(argv: list[str] | None = None, hub: Hub | None = None) -> int:
     samples = [] if args.no_samples else sample_files(run_dir)
     weight_names = [relative(run_dir, w) for w in weights]
     version = concept_captioner_version()
+    plan = upload_plan(run_dir, weights=weights, samples=samples)
+    files = [path for path, _ in plan]
     card = model_card(
         run,
         run_id=run_id,
@@ -442,15 +471,9 @@ def main(argv: list[str] | None = None, hub: Hub | None = None) -> int:
         samples=len(samples),
         dataset=dataset_info(run),
         version=version,
+        logs=any(path.startswith(LOGS_IN_REPO + "/") for path in files),
     )
     (run_dir / CARD_NAME).write_text(card, encoding="utf-8")
-    patterns = allow_patterns(run_dir, weights=weights, include_samples=not args.no_samples)
-    files = (
-        weight_names
-        + [name for name in SIDE_FILES if (run_dir / name).is_file()]
-        + [relative(run_dir, s) for s in samples]
-        + [CARD_NAME]
-    )
     print(
         f"push_lora: {run_id} -> {args.repo}: {len(files)} files ({', '.join(weight_names)})",
         flush=True,
@@ -459,10 +482,9 @@ def main(argv: list[str] | None = None, hub: Hub | None = None) -> int:
     if hub is None:
         hub = Hub(token_from_env())
     url = hub.create_repo(args.repo, private=args.private)
-    commit = hub.upload_folder(
+    commit = hub.commit(
         args.repo,
-        run_dir,
-        allow_patterns=patterns,
+        plan,
         commit_message=args.commit_message or f"Upload LoRA {run_id} (push_lora.py)",
     )
     receipt = {
