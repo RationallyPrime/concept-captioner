@@ -178,19 +178,30 @@ struct GenerationView: View {
         }
     }
 
+    /// A generated output as a print, labelled in its margin, so base and trained read as a pair.
     private func generatedMedia(_ path: String, comparison: GeneratedComparison, label: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label).font(.subheadline.bold())
-            if let url = workspace.comparisonFile(path, in: comparison) {
-                if url.pathExtension == "mp4" {
-                    GeneratedVideo(url: url).frame(height: 220)
+        VStack(alignment: .leading, spacing: 0) {
+            Group {
+                if let url = workspace.comparisonFile(path, in: comparison) {
+                    if url.pathExtension == "mp4" {
+                        GeneratedVideo(url: url)
+                    } else {
+                        PhotoView(url: url)
+                    }
                 } else {
-                    PhotoView(url: url).frame(height: 220)
+                    Text("This output is not downloaded.").foregroundStyle(InstantPrint.inkSecondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            } else {
-                Text("This output is not downloaded.").foregroundStyle(StudioStyle.supportingText).frame(height: 120)
             }
-        }.frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 220).frame(maxWidth: .infinity)
+            Text(label).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(InstantPrint.ink)
+                .padding(.horizontal, 4).padding(.top, 9).padding(.bottom, 11)
+        }
+        .padding([.horizontal, .top], 7)
+        .background(InstantPrint.paper, in: RoundedRectangle(cornerRadius: 4))
+        .shadow(color: .black.opacity(0.10), radius: 3, x: 0, y: 1.5)
+        .environment(\.colorScheme, .light)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

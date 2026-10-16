@@ -27,267 +27,214 @@ struct CaptioningView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: StudioStyle.contentSpacing) {
-                StudioSection(
-                    title: "How captions are written",
-                    subtitle: "Choose a model and the format your training model needs."
-                ) {
-                    Form {
-                        Picker("Captioning provider", selection: $session.endpointKind) {
-                            ForEach(ProviderChoices.kinds, id: \.self) { Text(ProviderChoices.title($0)).tag($0) }
-                        }.disabled(session.busy)
-                        if session.endpointKind == "openai", session.openAIUsesChatGPT, !session.demoMode {
-                            ChatGPTModelPicker(
-                                title: "Model", model: $session.modelName, models: session.chatGPT.availableModels
-                            ).disabled(session.busy)
-                        } else {
-                            ProviderModelPicker(
-                                title: "Model",
-                                providerKind: session.endpointKind,
-                                model: $session.modelName,
-                                choices: availableModels,
-                                isRefreshing: refreshingModels,
-                                refresh: { Task { await refreshModels(force: true) } }
-                            ).disabled(session.busy)
-                        }
-                        Picker("Caption format", selection: captionFormatSelection) {
-                            ForEach(profiles, id: \.self) { Text(Self.profileTitle($0)).tag($0) }
-                        }.disabled(session.demoMode)
-                    }.formStyle(.columns).disabled(session.busy)
-                    if !session.demoMode && !(session.endpointKind == "openai" && session.openAIUsesChatGPT) {
-                        if let modelCatalogStatus {
-                            Text(modelCatalogStatus)
-                                .font(.callout)
-                                .foregroundStyle(StudioStyle.supportingText)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    HStack(spacing: 12) {
-                        Button(testingConnection ? "Testing connection…" : "Test captioning connection") {
-                            testConnection()
-                        }
-                        .disabled(session.busy || session.editing || refreshingModels)
-                        .help(
-                            "Sends a small request with the selected account and model. It uses that account’s credits "
-                                + "or ChatGPT allowance, but saves no project captions."
-                        )
-                        if testingConnection {
-                            ProgressView().controlSize(.small)
-                            Button("Cancel test") { session.cancel() }
-                                .help("Cancels the request. The test never writes project captions.")
-                        } else if let connectionTestStatus {
-                            Label(
-                                connectionTestStatus,
-                                systemImage: connectionTestStatus == "Connection succeeded."
-                                    ? "checkmark.circle"
-                                    : "exclamationmark.triangle"
-                            )
-                            .font(.callout)
-                            .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    if session.demoMode {
-                        Text("The demo uses prepared FLUX captions, so its format stays fixed. "
-                            + "In a real project, choose the format your training model expects.")
-                            .font(.callout).foregroundStyle(StudioStyle.supportingText)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    if session.endpointKind == "openai" || (session.useCritic && session.criticKind == "openai") {
-                        ChatGPTCaptioningControls(session: session)
-                    }
-                    Text(
-                        "The captioning model describes each selected image or clip according to your concept. "
-                            + "The caption format is the text structure expected by the diffusion model you will train."
-                    )
-                    .font(.callout).foregroundStyle(StudioStyle.supportingText)
-                    Toggle("Have a second model check the caption", isOn: $session.useCritic)
-                        .disabled(session.busy)
-                    if session.useCritic {
+        HStack(alignment: .top, spacing: 20) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) { results }.padding(.trailing, 4)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    StudioSection(
+                        title: "How captions are written",
+                        subtitle: "Choose a model and the format your training model needs."
+                    ) {
                         Form {
-                            Picker("Reviewer provider", selection: $session.criticKind) {
+                            Picker("Captioning provider", selection: $session.endpointKind) {
                                 ForEach(ProviderChoices.kinds, id: \.self) { Text(ProviderChoices.title($0)).tag($0) }
                             }.disabled(session.busy)
-                            if session.criticKind == "openai", session.openAIUsesChatGPT, !session.demoMode {
+                            if session.endpointKind == "openai", session.openAIUsesChatGPT, !session.demoMode {
                                 ChatGPTModelPicker(
-                                    title: "Reviewer model", model: $session.criticModel,
-                                    models: session.chatGPT.availableModels
+                                    title: "Model", model: $session.modelName, models: session.chatGPT.availableModels
                                 ).disabled(session.busy)
                             } else {
-                                TextField("Reviewer model", text: $session.criticModel)
+                                ProviderModelPicker(
+                                    title: "Model",
+                                    providerKind: session.endpointKind,
+                                    model: $session.modelName,
+                                    choices: availableModels,
+                                    isRefreshing: refreshingModels,
+                                    refresh: { Task { await refreshModels(force: true) } }
+                                ).disabled(session.busy)
                             }
-                            if session.criticKind == "vllm" {
-                                TextField(
-                                    "Reviewer server URL (blank uses Settings)",
-                                    text: $session.criticRequestBaseURL
-                                )
-                            }
+                            Picker("Caption format", selection: captionFormatSelection) {
+                                ForEach(profiles, id: \.self) { Text(Self.profileTitle($0)).tag($0) }
+                            }.disabled(session.demoMode)
                         }.formStyle(.columns).disabled(session.busy)
-                        Text(
-                            "The reviewer can reject a caption with notes. "
-                                + "It reads the same target, can request a revision and check it again, "
-                                + "and uses additional account credits."
-                        )
-                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
-                    }
-                    DisclosureGroup("Caption instructions and custom skills") {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text(session.project?.job.skill == nil
-                                ? "Using the bundled concept-boundary instructions."
-                                : "Using your selected instruction folder:")
-                            if let path = session.project?.job.skill {
-                                Text(path).font(.callout).textSelection(.enabled)
+                        if !session.demoMode && !(session.endpointKind == "openai" && session.openAIUsesChatGPT) {
+                            if let modelCatalogStatus {
+                                Text(modelCatalogStatus)
+                                    .font(.callout)
+                                    .foregroundStyle(StudioStyle.supportingText)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
-                            HStack {
-                                Button("Choose skill folder…") {
-                                    if let url = ProjectAccess.chooseFolder(prompt: "Choose skill") {
-                                        session.chooseSkill(url)
-                                    }
-                                }
-                                if session.project?.job.skill != nil {
-                                    Button("Use bundled") { session.useBundledSkill() }
-                                }
+                        }
+                        HStack(spacing: 12) {
+                            Button(testingConnection ? "Testing connection…" : "Test captioning connection") {
+                                testConnection()
                             }
-                            Text("A skill folder supplies the caption-writing instructions and its available formats.")
+                            .disabled(session.busy || session.editing || refreshingModels)
+                            .help(
+                                "Sends a small request with the selected account and model. "
+                                    + "It uses that account’s credits or ChatGPT allowance, "
+                                    + "but saves no project captions."
+                            )
+                            if testingConnection {
+                                ProgressView().controlSize(.small)
+                                Button("Cancel test") { session.cancel() }
+                                    .help("Cancels the request. The test never writes project captions.")
+                            } else if let connectionTestStatus {
+                                Label(
+                                    connectionTestStatus,
+                                    systemImage: connectionTestStatus == "Connection succeeded."
+                                        ? "checkmark.circle"
+                                        : "exclamationmark.triangle"
+                                )
+                                .font(.callout)
+                                .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        if session.demoMode {
+                            Text("The demo uses prepared FLUX captions, so its format stays fixed. "
+                                + "In a real project, choose the format your training model expects.")
                                 .font(.callout).foregroundStyle(StudioStyle.supportingText)
-                        }.padding(.top, 12)
-                    }.disabled(session.busy)
-                    if !session.advancedUser {
-                        let overrides = session.advancedCaptionOverrides
-                            + (overwrite ? ["Re-caption existing model captions"] : [])
-                        if !overrides.isEmpty {
-                            StudioNotice("Advanced settings still in force: " + overrides.joined(separator: "; ")
-                                + ". Turn on Advanced user to edit them.")
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                    }
-                    if session.advancedUser {
-                        DisclosureGroup("Advanced model and batch controls") {
-                            Form {
-                                Picker("Thinking effort", selection: $session.modelThinking) {
-                                    ForEach(ThinkingLevel.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                                }
-                                if session.useCritic {
-                                    Picker("Reviewer thinking effort", selection: $session.criticThinking) {
-                                        ForEach(ThinkingLevel.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                                    }
-                                }
-                                Picker("Structured response mode", selection: $session.outputMode) {
-                                    ForEach(OutputMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                                }
-                                Stepper(
-                                    "\(session.concurrency) samples at once",
-                                    value: $session.concurrency,
-                                    in: 1 ... 16
-                                )
-                                if session.endpointKind == "vllm" {
-                                    TextField(
-                                        "Server URL for this project (blank uses Settings)",
-                                        text: $session.requestBaseURL
-                                    )
-                                }
-                                Toggle("Re-caption existing model captions", isOn: $overwrite)
-                                Text(
-                                    "Final captions are always protected. "
-                                        + "Turn this on to replace earlier model captions."
-                                )
-                                .font(.caption).foregroundStyle(StudioStyle.supportingText)
-                            }.formStyle(.columns).padding(.top, 12)
-                        }.disabled(session.busy)
-                    }
-                }
-                Divider()
-                DisclosureGroup("Optional: caption on a rented computer") {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text("Hosted captioning needs no rented GPU. To use a local model, rent a computer, "
-                            + "caption on GPU 0, then review and publish before training.")
-                            .foregroundStyle(StudioStyle.supportingText)
-                        Button("Rent or choose a captioning computer") { session.step = .pods }
-                        Button("Start caption server and use this computer") { session.usePodCaptionServer() }
-                            .disabled(session.busy || !session.gpu.hasRunningPod)
-                        if session.usingPodCaptioner {
-                            StudioNotice("Using your authenticated computer’s caption server.", symbol: "server.rack")
-                            Button("Use my Settings server instead") {
-                                session.usingPodCaptioner = false
-                                session.requestBaseURL = ""
-                            }
-                        }
-                    }.padding(.top, 12)
-                }.disabled(session.busy)
-                Divider()
-                StudioSection(title: "Captioning results") {
-                    if session.demoMode {
-                        Picker("Simulated outcome", selection: $session.scenario) {
-                            ForEach(DemoScenario.allCases) { Text($0.rawValue.capitalized).tag($0) }
+                        if session.endpointKind == "openai" || (session.useCritic && session.criticKind == "openai") {
+                            ChatGPTCaptioningControls(session: session)
                         }
                         Text(
-                            "These are prepared FLUX captions for the 24 synthetic demo photos. "
-                                + "No captioning model is called. Enable the reviewer to simulate rejection, "
-                                + "or choose Failed or Unusable to inspect those outcomes."
+                            "The captioning model describes each selected image or clip according to your concept. "
+                                + "The caption format is the text structure expected by the diffusion model "
+                                + "you will train."
                         )
                         .font(.callout).foregroundStyle(StudioStyle.supportingText)
-                    }
-                    if session.unmappedCount > 0 {
-                        StudioNotice(
-                            "\(session.unmappedCount) samples still need concept assignments. "
-                                + "They will be skipped until you confirm them.",
-                            symbol: "person.crop.rectangle"
-                        )
-                    }
-                    if session.unprotectedImportedCount > 0 {
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Toggle("Have a second model check the caption", isOn: $session.useCritic)
+                            .disabled(session.busy)
+                        if session.useCritic {
+                            Form {
+                                Picker("Reviewer provider", selection: $session.criticKind) {
+                                    ForEach(ProviderChoices.kinds, id: \.self) {
+                                        Text(ProviderChoices.title($0)).tag($0)
+                                    }
+                                }.disabled(session.busy)
+                                if session.criticKind == "openai", session.openAIUsesChatGPT, !session.demoMode {
+                                    ChatGPTModelPicker(
+                                        title: "Reviewer model", model: $session.criticModel,
+                                        models: session.chatGPT.availableModels
+                                    ).disabled(session.busy)
+                                } else {
+                                    TextField("Reviewer model", text: $session.criticModel)
+                                }
+                                if session.criticKind == "vllm" {
+                                    TextField(
+                                        "Reviewer server URL (blank uses Settings)",
+                                        text: $session.criticRequestBaseURL
+                                    )
+                                }
+                            }.formStyle(.columns).disabled(session.busy)
                             Text(
-                                "\(session.unprotectedImportedCount) imported captions can be replaced "
-                                    + "when overwrite is on."
+                                "The reviewer can reject a caption with notes. "
+                                    + "It reads the same target, can request a revision and check it again, "
+                                    + "and uses additional account credits."
                             )
                             .font(.callout).foregroundStyle(StudioStyle.supportingText)
-                            .fixedSize(horizontal: false, vertical: true)
-                            Button("Protect imported captions", systemImage: "lock") {
-                                session.protectImportedCaptions()
-                            }
-                            .disabled(session.busy || session.editing || session.demoMode)
-                            .help("Mark all imported captions as final so captioning runs skip them.")
                         }
-                    }
-                    if session.project?.images.isEmpty == true {
-                        ContentUnavailableView(
-                            "Import images or clips first",
-                            systemImage: "photo.on.rectangle",
-                            description: Text("Use Images to add the training data for your concept.")
-                        )
-                    }
-                    LazyVStack(alignment: .leading, spacing: 14) {
-                        ForEach(session.project?.images ?? []) { image in
-                            HStack(alignment: .top, spacing: 14) {
-                                PhotoView(url: image.url).frame(width: 72, height: 64)
-                                    .background(StudioStyle.surface, in: RoundedRectangle(cornerRadius: 6))
-                                VStack(alignment: .leading, spacing: 5) {
-                                    Text(image.id).font(.headline).textSelection(.enabled)
+                        DisclosureGroup("Caption instructions and custom skills") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text(session.project?.job.skill == nil
+                                    ? "Using the bundled concept-boundary instructions."
+                                    : "Using your selected instruction folder:")
+                                if let path = session.project?.job.skill {
+                                    Text(path).font(.callout).textSelection(.enabled)
                                         .fixedSize(horizontal: false, vertical: true)
-                                    Label(
-                                        image.captionState.label,
-                                        systemImage: image.captionState.symbol
-                                    )
-                                    .font(.callout)
-                                    if let partial = session.partialCaptions[image.id], !partial.isEmpty {
-                                        Text("Writing — not saved yet").font(.caption)
-                                            .foregroundStyle(StudioStyle.supportingText)
-                                        Text(partial).textSelection(.enabled)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                            .accessibilityLabel("Caption in progress. Not saved yet. \(partial)")
+                                }
+                                HStack {
+                                    Button("Choose skill folder…") {
+                                        if let url = ProjectAccess.chooseFolder(prompt: "Choose skill") {
+                                            session.chooseSkill(url)
+                                        }
                                     }
-                                    if !image.notes.isEmpty {
-                                        Text(image.notes.joined(separator: "; "))
-                                            .foregroundStyle(StudioStyle.supportingText)
-                                            .fixedSize(horizontal: false, vertical: true)
+                                    if session.project?.job.skill != nil {
+                                        Button("Use bundled") { session.useBundledSkill() }
                                     }
-                                }.frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                Text(
+                                    "A skill folder supplies the caption-writing instructions "
+                                        + "and its available formats."
+                                )
+                                .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                            }.padding(.top, 12)
+                        }.disabled(session.busy)
+                        if !session.advancedUser {
+                            let overrides = session.advancedCaptionOverrides
+                                + (overwrite ? ["Re-caption existing model captions"] : [])
+                            if !overrides.isEmpty {
+                                StudioNotice("Advanced settings still in force: " + overrides.joined(separator: "; ")
+                                    + ". Turn on Advanced user to edit them.")
                             }
-                            Divider()
                         }
-                    }.padding(.top, 8)
-                }
+                        if session.advancedUser {
+                            DisclosureGroup("Advanced model and batch controls") {
+                                Form {
+                                    Picker("Thinking effort", selection: $session.modelThinking) {
+                                        ForEach(ThinkingLevel.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                                    }
+                                    if session.useCritic {
+                                        Picker("Reviewer thinking effort", selection: $session.criticThinking) {
+                                            ForEach(ThinkingLevel.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                                        }
+                                    }
+                                    Picker("Structured response mode", selection: $session.outputMode) {
+                                        ForEach(OutputMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                                    }
+                                    Stepper(
+                                        "\(session.concurrency) samples at once",
+                                        value: $session.concurrency,
+                                        in: 1 ... 16
+                                    )
+                                    if session.endpointKind == "vllm" {
+                                        TextField(
+                                            "Server URL for this project (blank uses Settings)",
+                                            text: $session.requestBaseURL
+                                        )
+                                    }
+                                    Toggle("Re-caption existing model captions", isOn: $overwrite)
+                                    Text(
+                                        "Final captions are always protected. "
+                                            + "Turn this on to replace earlier model captions."
+                                    )
+                                    .font(.caption).foregroundStyle(StudioStyle.supportingText)
+                                }.formStyle(.columns).padding(.top, 12)
+                            }.disabled(session.busy)
+                        }
+                    }
+                    Divider()
+                    VStack {
+                        DisclosureGroup("Optional: caption on a rented computer") {
+                            VStack(alignment: .leading, spacing: 14) {
+                                Text("Hosted captioning needs no rented GPU. To use a local model, rent a computer, "
+                                    + "caption on GPU 0, then review and publish before training.")
+                                    .foregroundStyle(StudioStyle.supportingText)
+                                Button("Rent or choose a captioning computer") { session.step = .pods }
+                                Button("Start caption server and use this computer") { session.usePodCaptionServer() }
+                                    .disabled(session.busy || !session.gpu.hasRunningPod)
+                                if session.usingPodCaptioner {
+                                    StudioNotice(
+                                        "Using your authenticated computer’s caption server.",
+                                        symbol: "server.rack"
+                                    )
+                                    Button("Use my Settings server instead") {
+                                        session.usingPodCaptioner = false
+                                        session.requestBaseURL = ""
+                                    }
+                                }
+                            }.padding(.top, 12)
+                        }.disabled(session.busy)
+                    }
+                }.padding(.bottom, 4)
             }
+            .frame(width: 370)
+            .padding(.leading, 20)
+            .overlay(alignment: .leading) { Rectangle().fill(.separator).frame(width: 1) }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { captionAction }
         .task(id: session.usesChatGPTForThisRun) { await session.prepareChatGPTModels() }
@@ -309,6 +256,115 @@ struct CaptioningView: View {
         .task(id: modelCatalogTaskID) { await refreshModels() }
     }
 
+    /// The contact sheet developing live: each print shows its first caption lines as they arrive.
+    @ViewBuilder private var results: some View {
+        if session.demoMode {
+            Picker("Simulated outcome", selection: $session.scenario) {
+                ForEach(DemoScenario.allCases) { Text($0.rawValue.capitalized).tag($0) }
+            }
+            Text(
+                "These are prepared FLUX captions for the 24 synthetic demo photos. "
+                    + "No captioning model is called. Enable the reviewer to simulate rejection, "
+                    + "or choose Failed or Unusable to inspect those outcomes."
+            )
+            .font(.callout).foregroundStyle(StudioStyle.supportingText)
+        }
+        if session.unmappedCount > 0 {
+            StudioNotice(
+                "\(session.unmappedCount) samples still need concept assignments. "
+                    + "They will be skipped until you confirm them.",
+                symbol: "person.crop.rectangle"
+            )
+        }
+        if session.unprotectedImportedCount > 0 {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(
+                    "\(session.unprotectedImportedCount) imported captions can be replaced "
+                        + "when overwrite is on."
+                )
+                .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                .fixedSize(horizontal: false, vertical: true)
+                Button("Protect imported captions", systemImage: "lock") {
+                    session.protectImportedCaptions()
+                }
+                .disabled(session.busy || session.editing || session.demoMode)
+                .help("Mark all imported captions as final so captioning runs skip them.")
+            }
+        }
+        if session.project?.images.isEmpty == true {
+            ContentUnavailableView(
+                "Import images or clips first",
+                systemImage: "photo.on.rectangle",
+                description: Text("Use Images to add the training data for your concept.")
+            )
+        }
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 165), spacing: 15, alignment: .top)],
+            alignment: .leading, spacing: 16
+        ) {
+            ForEach(session.project?.images ?? []) { image in developingPrint(image) }
+        }
+    }
+
+    private var triggers: [String] {
+        session.project?.job.concepts.map(\.trigger) ?? []
+    }
+
+    private func developingPrint(_ image: ProjectImage) -> some View {
+        let partial = session.partialCaptions[image.id] ?? ""
+        let state = image.captionState
+        let failed: Bool = switch state {
+        case let .outcome(status), let .importedOutcome(status): ![.written, .skipped].contains(status)
+        default: false
+        }
+        return VStack(alignment: .leading, spacing: 0) {
+            TrainingTargetPreview(url: image.url, fill: true)
+                .frame(maxWidth: .infinity).frame(height: 160).clipped()
+            VStack(alignment: .leading, spacing: 6) {
+                Group {
+                    if !partial.isEmpty {
+                        Text(partial).font(.system(size: 12.5)).foregroundStyle(InstantPrint.inkSecondary)
+                            .lineLimit(2).accessibilityLabel("Caption in progress. Not saved yet. \(partial)")
+                    } else if image.caption.isEmpty {
+                        Color.clear
+                    } else {
+                        TriggerCaption(text: image.caption, triggers: triggers)
+                    }
+                }
+                .frame(height: 32, alignment: .topLeading)
+                if !partial.isEmpty {
+                    PrintStateChip(state: .other("Writing…"))
+                } else if failed {
+                    PrintStateChip(state: .attention(nil))
+                } else if state == .ready {
+                    PrintStateChip(state: .other(session.busy ? "Waiting" : "Not captioned yet"))
+                } else {
+                    PrintStateChip(state: .other(state.label))
+                }
+                if failed || !image.notes.isEmpty {
+                    Text(([state.label] + image.notes).joined(separator: ". "))
+                        .font(.system(size: 11.5)).foregroundStyle(InstantPrint.ink)
+                        .lineLimit(4).fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 7).padding(.vertical, 5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            failed ? InstantPrint.attention : InstantPrint.filterTrack,
+                            in: RoundedRectangle(cornerRadius: 5)
+                        )
+                }
+            }
+            .padding(.horizontal, 6).padding(.top, 6).padding(.bottom, 8)
+        }
+        .padding([.horizontal, .top], 6)
+        .background(failed ? InstantPrint.attentionWash : InstantPrint.paper)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .shadow(color: .black.opacity(0.10), radius: 3, x: 0, y: 1.5)
+        .environment(\.colorScheme, .light)
+        .help(image.id)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(image.id), \(state.label)")
+    }
+
     private var captionAction: some View {
         VStack(spacing: 12) {
             Divider()
@@ -325,7 +381,7 @@ struct CaptioningView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }.padding(.vertical, 10)
-        }.background(StudioStyle.canvas)
+        }.background(InstantPrint.ground)
     }
 
     private var captionCost: String {

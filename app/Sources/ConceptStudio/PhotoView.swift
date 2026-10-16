@@ -99,7 +99,16 @@ struct PhotoView: View {
     @ViewBuilder private func content(for key: PhotoThumbnails.Key) -> some View {
         if let image = PhotoThumbnails.cached(key) ?? (loaded?.key == key ? loaded?.image : nil) {
             if fill {
-                Image(nsImage: image).resizable().scaledToFill()
+                // When a print trims height, it keeps the top of the photo, where people's faces are.
+                GeometryReader { geometry in
+                    let trimsHeight = geometry.size.width * image.size.height
+                        > geometry.size.height * image.size.width
+                    Image(nsImage: image).resizable().scaledToFill()
+                        .frame(
+                            width: geometry.size.width, height: geometry.size.height,
+                            alignment: trimsHeight ? .top : .center
+                        )
+                }
             } else {
                 Image(nsImage: image).resizable().scaledToFit()
                     .overlay { faceBoxes }
@@ -114,10 +123,10 @@ struct PhotoView: View {
     private var faceBoxes: some View {
         GeometryReader { geometry in
             ForEach(Array(faces.enumerated()), id: \.offset) { index, face in
-                RoundedRectangle(cornerRadius: 5).stroke(StudioStyle.accent, lineWidth: 2)
+                RoundedRectangle(cornerRadius: 4).stroke(InstantPrint.developer, lineWidth: 2)
                     .overlay(alignment: .topLeading) {
-                        Text("\(index + 1)").font(.caption.bold()).padding(3)
-                            .foregroundStyle(.primary).background(StudioStyle.surface)
+                        Text("\(index + 1)").font(.caption.bold()).padding(.horizontal, 4).padding(.vertical, 1)
+                            .foregroundStyle(.white).background(InstantPrint.developer)
                     }
                     .frame(width: face.width * geometry.size.width, height: face.height * geometry.size.height)
                     .position(x: face.midX * geometry.size.width, y: (1 - face.midY) * geometry.size.height)

@@ -208,3 +208,58 @@ struct PrintButtonStyle: ButtonStyle {
         }
     }
 }
+
+/// A sheet of print paper on the work surface: forms and lists sit on it the way prints sit on a
+/// table. Paper stays white in both appearances, so what is written on it is always dark ink.
+struct PrintPanel<Content: View>: View {
+    var padding: CGFloat = 18
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        content
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(InstantPrint.paper, in: RoundedRectangle(cornerRadius: 6))
+            .shadow(color: .black.opacity(0.10), radius: 3, x: 0, y: 1.5)
+            .environment(\.colorScheme, .light)
+    }
+}
+
+/// One large plain value with its label beneath, for the few numbers a screen leads with.
+struct PrintFigure: View {
+    let value: String
+    let label: String
+    var size: CGFloat = 40
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value).font(InstantPrint.display(size: size)).monospacedDigit()
+                .lineLimit(1).minimumScaleFactor(0.6)
+            Text(label).font(.system(size: 13.5)).foregroundStyle(InstantPrint.inkSecondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// The definitions for a screen, opened from the title strip.
+struct StudioDefinitionsList: View {
+    let terms: [StudioTerm]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(terms) { term in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(term.title).font(.headline)
+                        Text(term.definition).foregroundStyle(StudioStyle.supportingText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .padding(18)
+            .frame(width: 420, alignment: .leading)
+            .textSelection(.enabled)
+        }
+        .frame(maxHeight: 480)
+    }
+}

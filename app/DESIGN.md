@@ -24,10 +24,9 @@ an image paired with its editable caption. Every visual detail should help the c
 - Use the system font and SF Symbols. Page titles, section titles, field labels and supporting
   text have distinct, consistent roles. Reserve monospaced text for logs and monospaced
   numerals for prices and counts. Use sentence case.
-- Use semantic macOS backgrounds and label colors in both appearances. One adaptive teal tint
-  identifies actions and selection; filled buttons use a darker role so white labels retain
-  contrast in dark appearance. Pair every status with words or an icon; color alone
-  never identifies a warning, a final caption or a selected item.
+- Colour follows the Instant Print language below (it replaced the adaptive teal tint in 2026-10).
+  Pair every status with words or an icon; colour alone never identifies a warning, a final
+  caption or a selected item.
 - Group related controls tightly and leave more room between sections. Prefer headings and
   dividers over a stack of decorative cards. Use a contained surface for an image, a meaningful
   example or a notice, not around every paragraph.
@@ -43,6 +42,38 @@ an image paired with its editable caption. Every visual detail should help the c
 - Layout must work at the supported 980 × 680 minimum and 1240 × 820 default window sizes,
   and expand naturally. Allow scrolling and wrapping; long filenames, notes and user text
   must not force the window wider. Avoid decorative animation.
+
+## Instant Print (owner's choice, 2026-10-15)
+
+The owner chose the Instant Print direction and approved its Review comp
+(`.impeccable/mocks/review-approved.png`). The user's photos are prints on a table; the app is the
+film back around them. Tokens live in `InstantPrint.swift`.
+
+- **Frame.** A film-back charcoal sidebar, title strip and footer surround a light grey work surface
+  (dark grey in dark appearance). The title strip names the screen in one sentence and opens its
+  Definitions. The footer carries the project name, the screen's progress ("19 of 24 final",
+  "24 of 24 confirmed"), GPU spend and Stop everything while a computer runs, and Next.
+- **Prints.** Wherever a photo stands for a sample (Images, Mapping, Captioning, Review, Publish,
+  generated results) it is a print: warm white paper, the photo cropped from the top so faces stay
+  in frame, and the sample's name, caption or state written in the deep bottom margin. Prints stay
+  white in both appearances. Excluded samples are struck through; never tinted.
+- **One accent.** Developing orange marks the selected print, the face box and the one primary
+  action of an area (filled buttons and Next). Links, symbols and controls are ink.
+- **State labels** are neutral grey chips. Only "Needs attention" (curation warnings, failed or
+  rejected captions) is coloured, in pink with the reason written beside it.
+- **The trigger** is set in Ubuntu Sans Bold (bundled, Ubuntu Font Licence) where it is a title,
+  and marked in peach inside caption text. Everything else uses the system font.
+- **What each screen leads with.** Images: the contact sheet with warnings stamped on prints.
+  Concepts: the concept as a print with its trigger, beside what the trigger holds and what
+  captions describe. Mapping: a strip of small prints and the open print with its face box.
+  Captioning: the contact sheet filling with captions, settings in a column beside it. Review: the
+  open print and the sheet. Publish: the included prints stacked beside three counts. GPU pods: the
+  price, spending limit and idle stop set large. Training: the plan as a receipt. Monitor: the
+  learning curve in ink, and base and trained outputs as print pairs.
+- **Sections stay flat** under the owner's layout grammar below; paper is for prints and for the
+  training plan, which is a receipt. Notices sit on a light grey slip.
+- **App icon.** A developing print on the charcoal tile, with the orange trigger mark in its margin.
+  It is drawn by `scripts/draw-app-icon.swift`; `Packaging/ConceptStudio.icns` is made from it.
 
 ## Interface rules (fix round 2026-10-11)
 

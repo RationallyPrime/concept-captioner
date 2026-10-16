@@ -43,11 +43,12 @@ struct MappingView: View {
     }
 
     private var mappingEditor: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 18) {
             StudioSection(
                 title: "Locate the concept in each image or clip",
                 subtitle: "Identify who or what is present. "
-                    + "A suggestion becomes part of your project only when you confirm it."
+                    + "A suggestion becomes part of your project only when you confirm it.",
+                paper: false
             ) {
                 HStack(spacing: 20) {
                     Text("\(confirmedCount) / \(session.project?.images.count ?? 0) confirmed")
@@ -101,34 +102,22 @@ struct MappingView: View {
                         .font(.callout).foregroundStyle(StudioStyle.supportingText)
                 }
             }
-            Divider()
-            HSplitView {
-                List(images, selection: $session.selectedImageID) { image in
-                    HStack(spacing: 10) {
-                        PhotoView(url: image.url).frame(width: 52, height: 48)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(image.id).lineLimit(1).help(image.id)
-                            rowStatus(image).font(.caption)
-                        }
-                    }.padding(.vertical, 4).tag(image.id)
-                }.listStyle(.inset).frame(minWidth: 190, idealWidth: 225, maxWidth: 280)
+            HStack(alignment: .top, spacing: 18) {
+                printStrip
                 ScrollView {
                     if let image = selectedImage {
-                        VStack(alignment: .leading, spacing: 20) {
-                            Text(image.id).font(.title3.weight(.semibold)).textSelection(.enabled)
+                        VStack(alignment: .leading, spacing: 16) {
                             suggestionResult(for: image)
-                            // In a short window the photo sits beside the subjects, so what a suggestion filled
-                            // in is in view above the pinned Confirm bar next to the photo it describes.
-                            if detailHeight < shortDetail {
-                                HStack(alignment: .top, spacing: 16) {
-                                    photo(image).frame(width: 150, height: 150)
-                                    presentSubjects
-                                }
-                            } else {
-                                photo(image).frame(height: min(300, detailHeight * 0.4)).frame(maxWidth: .infinity)
+                            // The open print sits beside the assignment, so what a suggestion filled in stays in
+                            // view above the pinned Confirm bar next to the photo it describes.
+                            HStack(alignment: .top, spacing: 18) {
+                                openPrint(
+                                    image,
+                                    photoSide: detailHeight < shortDetail ? 170 : min(360, detailHeight * 0.62)
+                                )
                                 presentSubjects
                             }
-                        }.padding(.leading, 20).padding(.bottom, 12)
+                        }.padding(.horizontal, 4).padding(.top, 2).padding(.bottom, 12)
                     } else {
                         ContentUnavailableView(
                             onlyUnmapped && images.isEmpty ? "Every sample is confirmed" : "Select an image or clip",
@@ -193,7 +182,91 @@ struct MappingView: View {
             faces: session.project?.job.concepts.contains { $0.targetConcept.isPersonIdentity } == true
                 ? session.analyses[image.id]?.faces ?? [] : []
         )
-        .background(StudioStyle.surface)
+    }
+
+    /// The open sample as a print at twice contact-sheet size, its name and state in the margin.
+    private func openPrint(_ image: ProjectImage, photoSide: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            photo(image).frame(width: photoSide, height: photoSide)
+                .background(InstantPrint.filterTrack)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(image.id).font(.system(size: 14, weight: .semibold)).foregroundStyle(InstantPrint.ink)
+                    .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                PrintStateChip(state: .other(statusTitle(image)))
+            }
+            .padding(.horizontal, 4).padding(.top, 10).padding(.bottom, 12)
+        }
+        .padding([.horizontal, .top], 8)
+        .frame(width: photoSide + 16, alignment: .leading)
+        .background(InstantPrint.paper, in: RoundedRectangle(cornerRadius: 4))
+        .shadow(color: .black.opacity(0.10), radius: 3, x: 0, y: 1.5)
+        .environment(\.colorScheme, .light)
+    }
+
+    private func statusTitle(_ image: ProjectImage) -> String {
+        if let result = suggestionConclusion(for: image.id) { return result.rowTitle }
+        return session.project?.job.mapping(for: image.id) != nil ? "Confirmed" : "Unconfirmed"
+    }
+
+    /// The samples as a slim strip of small prints; the open one is ringed. Arrow keys move through it.
+    private var printStrip: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    ForEach(images) { image in
+                        let selected = image.id == session.selectedImageID
+                        Button { session.selectedImageID = image.id } label: {
+                            HStack(spacing: 10) {
+                                TrainingTargetPreview(url: image.url, fill: true)
+                                    .frame(width: 46, height: 46).clipped()
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(image.id).font(.system(size: 12.5, weight: .semibold))
+                                        .foregroundStyle(InstantPrint.ink).lineLimit(1).truncationMode(.middle)
+                                    rowStatus(image).font(.system(size: 11.5))
+                                        .foregroundStyle(InstantPrint.inkSecondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(5)
+                            .background(InstantPrint.paper, in: RoundedRectangle(cornerRadius: 4))
+                            .shadow(color: .black.opacity(0.08), radius: 2, x: 0, y: 1)
+                            .overlay {
+                                if selected {
+                                    RoundedRectangle(cornerRadius: 5).strokeBorder(InstantPrint.developer, lineWidth: 2)
+                                        .padding(-3)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .environment(\.colorScheme, .light)
+                        .id(image.id)
+                        .help(image.id)
+                        .accessibilityLabel("\(image.id), \(statusTitle(image))")
+                        .accessibilityAddTraits(selected ? .isSelected : [])
+                    }
+                }
+                .padding(4)
+            }
+            .scrollIndicators(.automatic)
+            .focusable()
+            .focusEffectDisabled()
+            .onKeyPress(keys: [.upArrow, .downArrow]) { press in
+                moveSelection(by: press.key == .upArrow ? -1 : 1)
+                if let id = session.selectedImageID { proxy.scrollTo(id) }
+                return .handled
+            }
+            .onAppear { if let id = session.selectedImageID { proxy.scrollTo(id, anchor: .center) } }
+        }
+        .frame(width: 230)
+    }
+
+    private func moveSelection(by offset: Int) {
+        let order = images.map(\.id)
+        guard !order.isEmpty else { return }
+        let current = session.selectedImageID.flatMap { order.firstIndex(of: $0) } ?? -offset
+        session.selectedImageID = order[min(max(current + offset, 0), order.count - 1)]
     }
 
     private var presentSubjects: some View {
@@ -260,9 +333,9 @@ struct MappingView: View {
                     Button("Mark as unconfirmed") { unconfirm(image) }.disabled(session.busy)
                 }
             }
-            .padding(.leading, 20).padding(.vertical, 10)
+            .padding(.leading, 4).padding(.vertical, 10)
         }
-        .background(StudioStyle.canvas)
+        .background(InstantPrint.ground)
     }
 
     private func confirm(_ image: ProjectImage) {

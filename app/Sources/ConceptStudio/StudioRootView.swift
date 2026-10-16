@@ -3,6 +3,7 @@ import SwiftUI
 
 struct StudioRootView: View {
     @Bindable var session: StudioSession
+    @State private var showingDefinitions = false
     var body: some View {
         Group {
             if session.project == nil {
@@ -27,8 +28,7 @@ struct StudioRootView: View {
                 sidebar
                 VStack(spacing: 0) {
                     titleStrip
-                    VStack(spacing: 0) {
-                        if session.step != .review { header }
+                    Group {
                         if session.step == .review {
                             screen
                         } else {
@@ -36,7 +36,7 @@ struct StudioRootView: View {
                         }
                     }
                     .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
-                    .background(session.step == .review ? InstantPrint.ground : StudioStyle.canvas)
+                    .background(InstantPrint.ground)
                 }
             }
             footer
@@ -106,17 +106,24 @@ struct StudioRootView: View {
         .help("\(step.title) (⌘\(step.rawValue + 1))")
     }
 
-    /// Screens built in the Instant Print language explain themselves here, in one sentence; the others
-    /// still carry their own header until they are rebuilt.
+    /// Every screen explains itself here, in one sentence, with its definitions a click away.
     private var titleStrip: some View {
-        HStack(spacing: 10) {
-            if session.step == .review, let step = session.step {
-                Text(step.title).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(InstantPrint.frameText)
-                    .accessibilityAddTraits(.isHeader)
-                Text(step.explanation).font(.system(size: 13.5)).foregroundStyle(InstantPrint.frameMuted)
-                    .lineLimit(1).truncationMode(.tail)
-            }
+        let step = session.step ?? .images
+        return HStack(spacing: 10) {
+            Text(step.title).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(InstantPrint.frameText)
+                .accessibilityAddTraits(.isHeader)
+            Text(step.explanation).font(.system(size: 13.5)).foregroundStyle(InstantPrint.frameMuted)
+                .lineLimit(1).truncationMode(.tail)
             Spacer(minLength: 0)
+            if !step.definitionTerms.isEmpty {
+                Button("Definitions", systemImage: "questionmark.circle") { showingDefinitions = true }
+                    .buttonStyle(.plain).font(.system(size: 13)).foregroundStyle(InstantPrint.frameItem)
+                    .help("Definitions of the terms on this screen")
+                    .popover(isPresented: $showingDefinitions, arrowEdge: .bottom) {
+                        StudioDefinitionsList(terms: step.definitionTerms)
+                    }
+                    .padding(.trailing, 6)
+            }
             if session.demoMode { DemoBadge() }
         }
         .padding(.horizontal, 16)
@@ -125,31 +132,28 @@ struct StudioRootView: View {
         .contentShape(Rectangle()).gesture(WindowDragGesture())
     }
 
-    private var header: some View {
-        HStack(alignment: .top, spacing: 20) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text((session.step ?? .images).title).font(.largeTitle.weight(.semibold))
-                    .accessibilityAddTraits(.isHeader)
-                Text((session.step ?? .images).explanation)
-                    .foregroundStyle(StudioStyle.supportingText).fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 660, alignment: .leading)
-                StudioTermsHelp(terms: (session.step ?? .images).definitionTerms)
-                    .id(session.step)
-            }
-            Spacer(minLength: 0)
-        }.padding([.horizontal, .top], 24)
-    }
-
     /// What the footer reports for the open step, beside the project name.
     private var progress: String? {
         guard let project = session.project else { return nil }
+        let count = project.images.count
         switch session.step ?? .images {
-        case .review:
-            return "\(project.images.filter(\.isFinal).count) of \(project.images.count) final"
         case .images:
-            return "\(project.images.count) samples"
-        default:
-            return nil
+            return "\(count) samples"
+        case .concepts:
+            let concepts = project.job.concepts.count
+            return concepts == 1 ? "1 concept" : "\(concepts) concepts"
+        case .mapping:
+            return "\(count - session.unmappedCount) of \(count) confirmed"
+        case .captioning:
+            return "\(project.images.count(where: { !$0.caption.isEmpty })) of \(count) captioned"
+        case .review:
+            return "\(project.images.filter(\.isFinal).count) of \(count) final"
+        case .publish:
+            return "\(count) samples to publish"
+        case .pods:
+            return session.gpu.computerStatus
+        case .training, .monitor:
+            return "Training: \(session.gpu.trainingStatus.lowercased())"
         }
     }
 

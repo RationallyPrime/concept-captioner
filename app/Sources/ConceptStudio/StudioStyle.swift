@@ -1,34 +1,40 @@
 import SwiftUI
 
 enum StudioStyle {
+    /// Links, symbols and native controls are ink, not colour: the Instant Print accent belongs to
+    /// selection and the one primary action.
     static let accent = Color(nsColor: NSColor(name: nil) { appearance in
         if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
-            NSColor(srgbRed: 0.42, green: 0.78, blue: 0.72, alpha: 1)
+            NSColor(srgbRed: 0.86, green: 0.86, blue: 0.85, alpha: 1)
         } else {
-            NSColor(srgbRed: 0.10, green: 0.38, blue: 0.35, alpha: 1)
+            NSColor(srgbRed: 0.149, green: 0.165, blue: 0.196, alpha: 1)
         }
     })
-    /// Filled native buttons use white labels; their background needs a darker role than links.
-    static let actionTint = Color(nsColor: NSColor(name: nil) { appearance in
-        if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
-            NSColor(srgbRed: 0.16, green: 0.46, blue: 0.41, alpha: 1)
-        } else {
-            NSColor(srgbRed: 0.10, green: 0.38, blue: 0.35, alpha: 1)
-        }
-    })
+    /// Filled native buttons are the screen's primary action, in developing orange with white labels.
+    static let actionTint = InstantPrint.developer
     static let canvas = Color(nsColor: .textBackgroundColor)
     static let surface = Color(nsColor: .controlBackgroundColor)
     static let supportingText = Color.primary.opacity(0.78)
     static let contentSpacing: CGFloat = 28
 }
 
-/// A consistent heading and spacing rhythm without putting every section in a card.
+/// A consistent heading and spacing rhythm without putting every section in a card (the owner's flat
+/// layout grammar). `paper: true` is for the rare section that is itself a document, such as a receipt.
 struct StudioSection<Content: View>: View {
     let title: String
     var subtitle: String?
+    var paper = false
     @ViewBuilder var content: Content
 
     var body: some View {
+        if paper {
+            PrintPanel { sectionBody }
+        } else {
+            sectionBody
+        }
+    }
+
+    private var sectionBody: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 5) {
                 Text(title).font(.title3.weight(.semibold)).accessibilityAddTraits(.isHeader)
@@ -57,12 +63,14 @@ struct StudioNotice: View {
         Label {
             Text(text).fixedSize(horizontal: false, vertical: true)
         } icon: {
-            Image(systemName: symbol).foregroundStyle(StudioStyle.accent)
+            Image(systemName: symbol).foregroundStyle(InstantPrint.inkSecondary)
         }
         .font(.callout)
+        .foregroundStyle(InstantPrint.ink)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(StudioStyle.surface, in: RoundedRectangle(cornerRadius: 8))
+        .background(InstantPrint.filterTrack, in: RoundedRectangle(cornerRadius: 6))
+        .environment(\.colorScheme, .light)
     }
 }
 

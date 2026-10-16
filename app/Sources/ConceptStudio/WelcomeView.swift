@@ -24,7 +24,7 @@ struct WelcomeView: View {
             .padding(40)
             .frame(maxWidth: .infinity, alignment: .top)
         }
-        .background(StudioStyle.canvas)
+        .background(InstantPrint.ground)
         .safeAreaInset(edge: .top, spacing: 0) {
             if session.gpu.hasRunningPod || !session.gpu.strayPods.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
