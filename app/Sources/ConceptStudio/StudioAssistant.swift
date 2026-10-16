@@ -113,10 +113,10 @@ struct StudioAssistant {
     ) async throws -> String {
         if demo {
             try await Task.sleep(for: .milliseconds(200))
-            return "Prepared demo advice: these three synthetic photos depict the same fictional adult in "
-                + "different clothes, poses and settings. The captions describe those differences while NORA7 "
-                + "names the person's identity. Three examples are enough to demonstrate the controls; "
-                + "this demo does not evaluate whether a real dataset is sufficient for training."
+            return "Prepared demo advice: these 24 synthetic photos depict the same fictional adult in "
+                + "different clothes, poses, settings and light. The captions describe those differences while "
+                + "NORA7 names the person's identity. The set demonstrates the controls; this demo does not "
+                + "evaluate whether a real dataset is sufficient for training."
         }
         let sampled = Self.critiqueSample(project.images)
         guard !sampled.isEmpty else {

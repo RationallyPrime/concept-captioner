@@ -221,7 +221,7 @@ struct CaptioningView: View {
                             ForEach(DemoScenario.allCases) { Text($0.rawValue.capitalized).tag($0) }
                         }
                         Text(
-                            "These are prepared FLUX captions for the three synthetic demo photos. "
+                            "These are prepared FLUX captions for the 24 synthetic demo photos. "
                                 + "No captioning model is called. Enable the reviewer to simulate rejection, "
                                 + "or choose Failed or Unusable to inspect those outcomes."
                         )

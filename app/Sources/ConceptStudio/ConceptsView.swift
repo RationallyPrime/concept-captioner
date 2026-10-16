@@ -33,7 +33,7 @@ struct ConceptsView: View {
                 }
                 if session.demoMode {
                     StudioNotice("The demo starts with the facial identity of one fictional adult. "
-                        + "Its original trigger is NORA7. The three synthetic photos vary the clothes, "
+                        + "Its original trigger is NORA7. The 24 synthetic photos vary the clothes, "
                         + "pose, setting and light.")
                 }
                 ForEach(concepts, id: \.trigger) { concept in
