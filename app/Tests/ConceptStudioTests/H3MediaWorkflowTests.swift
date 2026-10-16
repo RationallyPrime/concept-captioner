@@ -129,7 +129,7 @@ struct H3MediaWorkflowTests {
         try await project.importFiles([original])
         project.job.profile = "ltx-video"
         try project.save()
-        let other = try #require(project.images.first { $0.id == "garden.png" })
+        let other = try #require(project.images.first { $0.id == "garden.jpg" })
         try await project.saveCaption(id: other.id, text: "NORA7 saved caption.", final: true)
         let defaults = IsolatedDefaults()
         defer { defaults.remove() }

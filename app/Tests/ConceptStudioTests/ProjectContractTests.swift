@@ -461,8 +461,8 @@ struct DatasetAdviceTests {
         defer { try? FileManager.default.removeItem(at: project.directory) }
         project.job = try Job(concepts: [Concept(trigger: "SUBJECT8")])
         let original = try Data(contentsOf: project.images[0].url)
-        for index in 0 ..< 47 {
-            _ = try project.importData(original, name: "copy-\(index).png")
+        for index in 0 ..< 50 - project.images.count {
+            _ = try project.importData(original, name: "copy-\(index).jpg")
         }
         #expect(project.images.count == 50)
         let recorder = AdviceRecorder()

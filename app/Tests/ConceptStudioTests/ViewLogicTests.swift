@@ -127,7 +127,7 @@ struct ViewLogicTests {
 
     @Test func thumbnailsAreDownsampledAndCached() async throws {
         let url = try #require(Bundle.module.url(forResource: "Demo", withExtension: nil)?
-            .appendingPathComponent("images/garden.png"))
+            .appendingPathComponent("images/garden.jpg"))
         let key = PhotoThumbnails.Key(url: url, pixels: 128)
         let image = try #require(await PhotoThumbnails.load(key))
         #expect(max(image.size.width, image.size.height) <= 128)

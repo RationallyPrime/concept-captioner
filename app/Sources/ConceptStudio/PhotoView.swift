@@ -68,10 +68,12 @@ enum PhotoThumbnails {
     }
 }
 
-/// A photo fitted into the space its caller gives it. Never decodes the original on the main thread.
+/// A photo fitted into (or, with `fill`, cropped to cover) the space its caller gives it. Never decodes the
+/// original on the main thread.
 struct PhotoView: View {
     let url: URL
     var faces: [CGRect] = []
+    var fill = false
     @Environment(\.displayScale) private var displayScale
     @State private var loaded: (key: PhotoThumbnails.Key, image: NSImage?)?
 
@@ -96,8 +98,12 @@ struct PhotoView: View {
 
     @ViewBuilder private func content(for key: PhotoThumbnails.Key) -> some View {
         if let image = PhotoThumbnails.cached(key) ?? (loaded?.key == key ? loaded?.image : nil) {
-            Image(nsImage: image).resizable().scaledToFit()
-                .overlay { faceBoxes }
+            if fill {
+                Image(nsImage: image).resizable().scaledToFill()
+            } else {
+                Image(nsImage: image).resizable().scaledToFit()
+                    .overlay { faceBoxes }
+            }
         } else if loaded?.key == key {
             ContentUnavailableView("Cannot read this photo", systemImage: "photo")
         } else {

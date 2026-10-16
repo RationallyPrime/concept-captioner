@@ -1,0 +1,11 @@
+{
+  "prompt": "combined: review-c plus large NORA7 on the selected print, wider print margins, neutral states except needs attention (owner edit pass 2026-10-15: state chips neutral)",
+  "renderer": "owner (external diffusion model)",
+  "approved": true,
+  "approved_by": "Hákon, 2026-10-15",
+  "approval_notes": [
+    "Build prints with a wide instant-print bottom margin (the render shows card-width margins; the approved words govern).",
+    "Do not literalize: photos are demo content; caption snippet text is illustrative."
+  ],
+  "supersedes": "review-approved-v1.png"
+}

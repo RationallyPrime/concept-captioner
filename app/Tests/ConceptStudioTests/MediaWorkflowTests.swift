@@ -135,13 +135,13 @@ struct MediaWorkflowTests {
     @Test func exclusionReopenPublishAndUndoPreserveFinalCaptionAndMapping() async throws {
         var project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
-        let id = "garden.png"
+        let id = "garden.jpg"
         let mapping = project.job.mapping(for: id)
         try await project.saveCaption(id: id, text: "NORA7 protected caption.", final: true)
         try project.setIncluded(id, false)
         #expect(!project.images.contains { $0.id == id })
         #expect(project.excludedImages.first { $0.id == id }?.isFinal == true)
-        #expect(try LocalFolderSource(directory: project.imagesDirectory).files.count == 2)
+        #expect(try LocalFolderSource(directory: project.imagesDirectory).files.count == project.images.count)
         let operations = try await ProjectPublisher.operations(for: project)
         #expect(!operations.contains { [id, "garden.txt", "garden.json"].contains($0.path) })
         let reopened = try await StudioProject.open(at: project.directory)
@@ -156,7 +156,7 @@ struct MediaWorkflowTests {
     @Test func approvedCropChangesActualPixelsResetsOldCaptionAndUndoRestoresExactBytes() async throws {
         var project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
-        let id = "garden.png"
+        let id = "garden.jpg"
         let original = try Data(contentsOf: #require(project.images.first { $0.id == id }).url)
         let before = try MediaEditor.orientedImage(original)
         let mapping = project.job.mapping(for: id)
@@ -181,16 +181,17 @@ struct MediaWorkflowTests {
     @Test func nameCollisionCannotDeleteAnotherTargetOrItsCaption() async throws {
         var project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
-        let existing = try #require(project.images.first { $0.id == "window.png" })
+        let existing = try #require(project.images.first { $0.id == "window.jpg" })
         let bytes = try Data(contentsOf: existing.url)
+        let count = project.images.count
         #expect(throws: StudioError.self) {
             try project.approveTarget(
-                id: "garden.png", data: bytes, name: existing.id,
-                selection: MediaSelection(originalName: "garden.png", crop: CGRect(x: 0, y: 0, width: 1, height: 1))
+                id: "garden.jpg", data: bytes, name: existing.id,
+                selection: MediaSelection(originalName: "garden.jpg", crop: CGRect(x: 0, y: 0, width: 1, height: 1))
             )
         }
         #expect(try Data(contentsOf: existing.url) == bytes)
-        #expect(project.images.count == 3)
+        #expect(project.images.count == count)
     }
 
     @Test func selectedVideoRangeIsRealExportWithRebasedFramesAndExactPublishedBytes() async throws {
@@ -255,12 +256,12 @@ struct MediaWorkflowTests {
         var project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
         project.job.concepts = try [Concept(trigger: "NORA7", classNoun: "style", targetConcept: .style)]
-        project.job.samples = ["garden.png": nil]
-        try project.setIncluded("studio.png", false)
+        project.job.samples = ["garden.jpg": nil]
+        try project.setIncluded("studio.jpg", false)
         let opened = try await StudioProject.open(at: project.directory)
         let expected = try #require(opened.job.mappingIncludingWholeTargets(nil))
         #expect(opened.images.allSatisfy { opened.job.mapping(for: $0.id) == expected })
-        #expect(opened.job.mapping(for: "studio.png") == nil)
+        #expect(opened.job.mapping(for: "studio.jpg") == nil)
         let stored = try Job.load(contentsOf: opened.jobURL)
         #expect(opened.images.allSatisfy { stored.mapping(for: $0.id) == expected })
         let before = try opened.jobURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
@@ -401,7 +402,7 @@ struct MediaWorkflowTests {
     @Test func includingPreviouslyUnmappedSampleAfterStyleChangeIsCaptionReady() async throws {
         var project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
-        let id = "garden.png"
+        let id = "garden.jpg"
         try project.job.setMapping(nil, for: id)
         try project.setIncluded(id, false)
         project.job.concepts = try [Concept(trigger: "NORA7", classNoun: "style", targetConcept: .style)]
@@ -416,7 +417,7 @@ struct MediaWorkflowTests {
     func undoAfterConceptChangeDoesNotRestoreStalePersonMapping(category: TargetConcept) async throws {
         var project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
-        let id = "garden.png"
+        let id = "garden.jpg"
         let image = try #require(project.images.first { $0.id == id })
         try project.approveTarget(
             id: id, data: Data(contentsOf: image.url), name: id, selection: MediaSelection(originalName: id)
@@ -431,7 +432,7 @@ struct MediaWorkflowTests {
     @Test func failedApprovalRestoresOriginalMediaCaptionAndJobOnDisk() async throws {
         var project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
-        let id = "garden.png"
+        let id = "garden.jpg"
         let original = try #require(project.images.first { $0.id == id })
         let bytes = try Data(contentsOf: original.url)
         let mapping = project.job.mapping(for: id)
@@ -459,8 +460,8 @@ struct MediaWorkflowTests {
         session.project = try await makeDemoProject()
         let project = try #require(session.project)
         defer { session.stopImageAnalysis(); try? FileManager.default.removeItem(at: project.directory) }
-        let first = try #require(project.images.first { $0.id == "garden.png" })
-        let other = try #require(project.images.first { $0.id == "window.png" })
+        let first = try #require(project.images.first { $0.id == "garden.jpg" })
+        let other = try #require(project.images.first { $0.id == "window.jpg" })
         try session.project?.approveTarget(
             id: first.id, data: MediaEditor.png(MediaFixtures.image()), name: first.id,
             selection: MediaSelection(originalName: first.id)
@@ -501,13 +502,15 @@ struct MediaWorkflowTests {
         session.approveCrop(id: image.id, rectangle: CGRect(x: 0, y: 0, width: 0.5, height: 0.5))
         await session.task?.value
         #expect(session.errorMessage == nil)
-        session.approveCrop(id: image.id, rectangle: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5))
+        // An approved crop is written as PNG, so a JPEG original continues under the cropped target's name.
+        let cropped = try #require(session.selectedImageID)
+        session.approveCrop(id: cropped, rectangle: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5))
         await session.task?.value
         #expect(session.errorMessage == nil)
-        #expect(session.project?.mediaState.selections[image.id]?.crop ==
+        #expect(session.project?.mediaState.selections[cropped]?.crop ==
             CGRect(x: 0.125, y: 0.125, width: 0.25, height: 0.25))
         session.undoMediaCuration()
-        #expect(session.project?.mediaState.selections[image.id]?.crop == CGRect(x: 0, y: 0, width: 0.5, height: 0.5))
+        #expect(session.project?.mediaState.selections[cropped]?.crop == CGRect(x: 0, y: 0, width: 0.5, height: 0.5))
         session.undoMediaCuration()
         #expect(try Data(contentsOf: image.url) == bytes)
     }

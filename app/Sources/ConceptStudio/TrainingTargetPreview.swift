@@ -6,6 +6,7 @@ import SwiftUI
 struct TrainingTargetPreview: View {
     let url: URL
     var faces: [CGRect] = []
+    var fill = false
     @State private var player: AVPlayer?
 
     var body: some View {
@@ -22,7 +23,7 @@ struct TrainingTargetPreview: View {
                     player = nil
                 }
         } else {
-            PhotoView(url: url, faces: faces)
+            PhotoView(url: url, faces: faces, fill: fill)
         }
     }
 }

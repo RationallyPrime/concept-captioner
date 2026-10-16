@@ -14,7 +14,7 @@ struct MappingWorkflowTests {
             Concept(trigger: "OTHER8"), Concept(trigger: "MOVE8", targetConcept: .motion),
         ])
         let images = project.images
-        #expect(images.count == 3)
+        #expect(images.count >= 3)
         let human = project.job.mappingIncludingWholeTargets(["PERSON8": "the person on the left"])
         for image in images {
             try project.job.setMapping(human, for: image.id)

@@ -14,7 +14,7 @@ struct StudioProjectTests {
     @Test func demoUsesSharedJobAndSidecars() async throws {
         var project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
-        #expect(project.images.count == 3)
+        #expect(project.images.count == DemoProject.preparedCaptions.count)
         #expect(try Job.load(contentsOf: project.jobURL) == project.job)
         let source = try LocalFolderSource(directory: project.imagesDirectory)
         let sink = try SidecarSink(directory: project.imagesDirectory)
@@ -36,7 +36,7 @@ struct StudioProjectTests {
         let paths = operations.map(\.path)
         #expect(paths.contains("concept-captioner/job.yaml"))
         #expect(paths.contains("metadata.jsonl"))
-        #expect(paths.contains("garden.png"))
+        #expect(paths.contains("garden.jpg"))
         #expect(paths.contains("garden.txt"))
         #expect(paths.contains("garden.json"))
     }
@@ -219,7 +219,7 @@ struct StudioProjectTests {
         case .rejected: .rejected
         case .failed: .failed
         }
-        #expect(result.outcomes.count == 3)
+        #expect(result.outcomes.count == project.images.count)
         #expect(result.outcomes.allSatisfy { $0.status == expected })
     }
 
@@ -227,9 +227,10 @@ struct StudioProjectTests {
         var project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
         let data = try Data(contentsOf: project.images[0].url)
+        let count = project.images.count
         let name = try project.importData(data, name: "garden.jpg")
         #expect(name != "garden.jpg")
-        #expect(try LocalFolderSource(directory: project.imagesDirectory).files.count == 4)
+        #expect(try LocalFolderSource(directory: project.imagesDirectory).files.count == count + 1)
     }
 }
 
@@ -254,7 +255,7 @@ struct ConceptCategoryTests {
         }
         #expect(style.attributesToDescribe.contains("subject matter"))
         #expect(!style.traitsToLearn.contains("distinctive facial identity"))
-        session.mappingProposals = ["garden.png": ["INKSTYLE": "stale style assignment"]]
+        session.mappingProposals = ["garden.jpg": ["INKSTYLE": "stale style assignment"]]
         try session.saveConcept(Concept(trigger: "NORA7"), replacing: "INKSTYLE")
         #expect(session.unmappedCount == project.images.count)
         #expect(session.mappingProposals.isEmpty)

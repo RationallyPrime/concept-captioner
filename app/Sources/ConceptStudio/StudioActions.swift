@@ -427,6 +427,11 @@ extension StudioSession {
         runPendingIDs.remove(outcome.sampleID)
         partialCaptions.removeValue(forKey: outcome.sampleID)
         project?.apply(outcome)
+        // A new model caption replaces the user's edit, so the sample is no longer "edited".
+        if outcome.status == .written, let project, project.mediaState.editedCaptions.contains(outcome.sampleID) {
+            self.project?.mediaState.editedCaptions.remove(outcome.sampleID)
+            try? self.project?.mediaState.save(in: project.directory)
+        }
         completed += 1
         message = "\(completed) samples processed · \(outcome.sampleID): \(outcome.status.rawValue)"
     }
@@ -455,6 +460,12 @@ extension StudioSession {
                 skill: project.skillName, profile: project.job.profile
             )
             self.project?.applySavedCaption(id: id, text: text, final: final)
+            if final {
+                self.project?.mediaState.editedCaptions.remove(id)
+            } else {
+                self.project?.mediaState.editedCaptions.insert(id)
+            }
+            try self.project?.mediaState.save(in: project.directory)
             self.clearSavedCaptionDraft(CaptionDraft(text: text, isFinal: final), for: id)
             self.message = final ? "Final caption saved. Model runs will skip it." : "Caption saved."
         }

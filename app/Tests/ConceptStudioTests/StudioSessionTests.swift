@@ -130,7 +130,7 @@ struct StudioSessionTests {
         await session.task?.value
         #expect(session.errorMessage == nil)
         #expect(session.demoMode)
-        #expect(session.project?.images.count == 3)
+        #expect(session.project?.images.count == DemoProject.preparedCaptions.count)
         let directory = try #require(session.project?.directory)
         defer { try? FileManager.default.removeItem(at: directory) }
         session.datasetCritique()
@@ -138,7 +138,7 @@ struct StudioSessionTests {
         #expect(!session.datasetAdvice.isEmpty)
         session.proposeMappings(useModel: true)
         await session.task?.value
-        #expect(session.mappingProposals.count == 3)
+        #expect(session.mappingProposals.count == session.project?.images.count)
         for (id, mapping) in session.mappingProposals {
             session.confirmMapping(id: id, mapping: mapping)
         }

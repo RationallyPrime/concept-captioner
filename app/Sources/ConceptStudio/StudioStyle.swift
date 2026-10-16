@@ -68,11 +68,11 @@ struct StudioNotice: View {
 
 struct DemoBadge: View {
     var body: some View {
-        Label("Demo · no charges", systemImage: "leaf")
-            .font(.callout.weight(.semibold))
-            .foregroundStyle(StudioStyle.accent)
-            .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(StudioStyle.accent.opacity(0.10), in: Capsule())
+        Text("Demo, no charges")
+            .font(.system(size: 13.5, weight: .semibold))
+            .foregroundStyle(InstantPrint.demoText)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(InstantPrint.demo, in: RoundedRectangle(cornerRadius: 8))
             .accessibilityLabel("Offline demo. No charges.")
     }
 }
