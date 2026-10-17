@@ -54,34 +54,82 @@ struct StudioRootView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle()).gesture(WindowDragGesture())
             Rectangle().fill(InstantPrint.frameRule).frame(height: 1).padding(.trailing, 1)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    stepGroup("Prepare training data", session.journeySteps.filter { $0.rawValue < 3 }, top: 22)
-                    if session.project?.job.concepts.isEmpty != true {
-                        stepGroup("Write captions", Array(StudioStep.allCases.dropFirst(3).prefix(3)), top: 36)
-                        stepGroup("Train your model", Array(StudioStep.allCases.suffix(3)), top: 36)
-                    }
-                }
-                .padding(.bottom, 16)
+            // A short window tightens the spacing before any step has to scroll out of sight.
+            ViewThatFits(in: .vertical) {
+                stepList(compact: false)
+                stepList(compact: true)
+                ScrollView { stepList(compact: true) }.scrollIndicators(.never)
             }
-            .scrollIndicators(.never)
+            .frame(maxHeight: .infinity, alignment: .top)
+            Rectangle().fill(InstantPrint.frameRule).frame(height: 1).padding(.trailing, 1)
+            VStack(alignment: .leading, spacing: 2) {
+                SettingsLink { sidebarAction("Settings", symbol: "gearshape") }
+                    .buttonStyle(.plain)
+                    .help("Accounts and settings (⌘,)")
+                Button { session.requestClose() } label: {
+                    sidebarAction(
+                        session.demoMode ? "Leave the demo" : "Close project",
+                        symbol: "rectangle.portrait.and.arrow.right"
+                    )
+                }
+                .buttonStyle(.plain)
+                .help(session.demoMode ? "Return to the Welcome screen (⇧⌘W)" : "Close this project (⇧⌘W)")
+            }
+            .padding(.vertical, 10)
         }
         .frame(width: 220)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(InstantPrint.frame)
     }
 
-    private func stepGroup(_ title: String, _ steps: [StudioStep], top: CGFloat) -> some View {
+    private func sidebarAction(_ title: String, symbol: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: symbol).font(.system(size: 16, weight: .light)).frame(width: 26)
+            Text(title).font(.system(size: 14))
+        }
+        .foregroundStyle(InstantPrint.frameItem)
+        .padding(.leading, 24)
+        .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    private func stepList(compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            stepGroup(
+                "Prepare training data",
+                session.journeySteps.filter { $0.rawValue < 3 },
+                top: compact ? 14 : 22,
+                compact: compact
+            )
+            if session.project?.job.concepts.isEmpty != true {
+                stepGroup(
+                    "Write captions",
+                    Array(StudioStep.allCases.dropFirst(3).prefix(3)),
+                    top: compact ? 18 : 36,
+                    compact: compact
+                )
+                stepGroup(
+                    "Train your model",
+                    Array(StudioStep.allCases.suffix(3)),
+                    top: compact ? 18 : 36,
+                    compact: compact
+                )
+            }
+        }
+        .padding(.bottom, compact ? 8 : 16)
+    }
+
+    private func stepGroup(_ title: String, _ steps: [StudioStep], top: CGFloat, compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title).font(.system(size: 14.5, weight: .semibold)).foregroundStyle(InstantPrint.frameMuted)
-                .padding(.leading, 23).padding(.bottom, 10)
+                .padding(.leading, 23).padding(.bottom, compact ? 6 : 10)
                 .accessibilityAddTraits(.isHeader)
-            ForEach(steps) { step in stepRow(step) }
+            ForEach(steps) { step in stepRow(step, height: compact ? 36 : 44) }
         }
         .padding(.top, top)
     }
 
-    private func stepRow(_ step: StudioStep) -> some View {
+    private func stepRow(_ step: StudioStep, height: CGFloat) -> some View {
         let selected = (session.step ?? .images) == step
         return Button { session.step = step } label: {
             HStack(spacing: 14) {
@@ -90,7 +138,7 @@ struct StudioRootView: View {
             }
             .foregroundStyle(selected ? Color.white : InstantPrint.frameItem)
             .padding(.leading, 14)
-            .frame(width: 197, height: 44, alignment: .leading)
+            .frame(width: 197, height: height, alignment: .leading)
             .background { if selected { RoundedRectangle(cornerRadius: 8).fill(InstantPrint.selectedStep) } }
             .contentShape(Rectangle())
         }
@@ -98,7 +146,7 @@ struct StudioRootView: View {
         .padding(.leading, 10)
         .overlay(alignment: .leading) {
             if selected { UnevenRoundedRectangle(bottomTrailingRadius: 3, topTrailingRadius: 3)
-                .fill(InstantPrint.developer).frame(width: 8, height: 44)
+                .fill(InstantPrint.developer).frame(width: 8, height: height)
             }
         }
         .accessibilityLabel("\(step.title), step \(step.rawValue + 1) of \(StudioStep.allCases.count)")
