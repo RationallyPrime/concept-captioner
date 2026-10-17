@@ -15,6 +15,7 @@ struct ConceptStudioApp: App {
             }
         }
         .defaultSize(width: 1240, height: 820)
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New project…") {

@@ -33,6 +33,8 @@ for resource in "$bin_dir"/*.bundle; do
     [ -d "$resource" ] || continue
     cp -R "$resource" "$bundle/Contents/Resources/"
 done
+# Drawn by scripts/draw-app-icon.swift; regenerate the .icns from it when the icon changes.
+cp "$repo_dir/app/Packaging/ConceptStudio.icns" "$bundle/Contents/Resources/ConceptStudio.icns"
 cat > "$bundle/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -41,6 +43,7 @@ cat > "$bundle/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>ConceptStudio</string>
 <key>CFBundleDisplayName</key><string>ConceptStudio</string>
 <key>CFBundleExecutable</key><string>ConceptStudio</string>
+<key>CFBundleIconFile</key><string>ConceptStudio</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>0.2.0</string>
 <key>CFBundleVersion</key><string>1</string>

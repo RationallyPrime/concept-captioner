@@ -1,0 +1,11 @@
+{
+  "prompt": "combined: review-c plus large NORA7 on the selected print, wider print margins, neutral states except needs attention",
+  "renderer": "owner (external diffusion model)",
+  "approved": true,
+  "approved_by": "H\u00e1kon, 2026-10-15",
+  "approval_notes": [
+    "Build states neutral except Needs attention (the render shows green/blue state chips; the approved words govern).",
+    "Build prints with a wide instant-print bottom margin (the render shows card-width margins; the approved words govern).",
+    "Do not literalize: photos are demo content; caption snippet text is illustrative."
+  ]
+}

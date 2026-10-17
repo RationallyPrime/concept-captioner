@@ -33,12 +33,11 @@ struct ConceptsView: View {
                 }
                 if session.demoMode {
                     StudioNotice("The demo starts with the facial identity of one fictional adult. "
-                        + "Its original trigger is NORA7. The three synthetic photos vary the clothes, "
+                        + "Its original trigger is NORA7. The 24 synthetic photos vary the clothes, "
                         + "pose, setting and light.")
                 }
                 ForEach(concepts, id: \.trigger) { concept in
                     conceptSummary(concept)
-                    Divider()
                 }
                 if !session.advancedUser, !session.advancedConceptOverrides.isEmpty {
                     StudioNotice("Advanced settings still in force: "
@@ -64,7 +63,7 @@ struct ConceptsView: View {
                         }.padding(.top, 10)
                     }
                 }
-            }.frame(maxWidth: 820, alignment: .leading)
+            }.frame(maxWidth: 1000, alignment: .leading)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
@@ -77,7 +76,7 @@ struct ConceptsView: View {
                 .help("Save these concepts and open \(session.nextStep?.title ?? "the next step") (⌘↩)")
                 .disabled(session.project == nil || concepts.isEmpty || session.busy || session.editing)
             }.padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading)
-                .background(StudioStyle.canvas)
+                .background(InstantPrint.ground)
         }
         .sheet(item: $editor) { ConceptEditor(session: session, existing: $0.existing) }
         .onAppear { multipleConcepts = concepts.count > 1 }
@@ -88,21 +87,32 @@ struct ConceptsView: View {
         let existing: Concept?
     }
 
+    /// The concept boundary made visible: the concept as a print with its trigger, beside what the trigger
+    /// holds and what the captions describe instead.
     private func conceptSummary(_ concept: Concept) -> some View {
-        StudioSection(title: concept.targetConcept.title) {
-            Text(concept.traitsToLearn.joined(separator: "; "))
-                .font(.title3).textSelection(.enabled)
-            LabeledContent("Trigger", value: concept.trigger)
-            LabeledContent("Class noun", value: concept.classNoun)
-            Text(concept.targetConcept.captionExplanation)
-                .foregroundStyle(StudioStyle.supportingText).fixedSize(horizontal: false, vertical: true)
-            HStack(alignment: .top, spacing: 20) {
-                if concept.targetConcept.requiresLocator,
-                   let reference = session.references[concept.trigger] {
-                    PhotoView(url: reference).frame(width: 110, height: 120)
-                        .accessibilityLabel("Reference for \(concept.trigger)")
+        HStack(alignment: .top, spacing: 22) {
+            conceptPrint(concept).frame(width: 300)
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top, spacing: 0) {
+                        boundaryColumn("\(concept.trigger) holds", concept.traitsToLearn)
+                        Rectangle().fill(InstantPrint.rule).frame(width: 1).padding(.horizontal, 18)
+                        boundaryColumn("Captions describe", concept.attributesToDescribe)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                    if !concept.explicitBoundaryDecisions.isEmpty {
+                        Divider()
+                        ForEach(Array(concept.explicitBoundaryDecisions), id: \.key) { detail, decision in
+                            Text("\(detail): \(decision)").font(.callout)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    Divider()
+                    Text(concept.targetConcept.captionExplanation)
+                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
                     Button("Edit concept…", systemImage: "pencil") { editor = EditorSelection(existing: concept) }
                         .disabled(session.busy || session.editing)
                     if concept.targetConcept.requiresLocator {
@@ -112,15 +122,62 @@ struct ConceptsView: View {
                                     session.chooseReference(trigger: concept.trigger, from: url)
                                 }
                             }.disabled(session.busy || session.editing)
-                        Text(concept.targetConcept.isPersonIdentity
-                            ? "Use a clear reference to help identify the same person in each sample."
-                            :
-                            "A reference helps the model locate this object or character in each sample.")
-                            .font(.callout).foregroundStyle(StudioStyle.supportingText)
                     }
+                }
+                if concept.targetConcept.requiresLocator {
+                    Text(concept.targetConcept.isPersonIdentity
+                        ? "Use a clear reference to help identify the same person in each sample."
+                        : "A reference helps the model locate this object or character in each sample.")
+                        .font(.callout).foregroundStyle(StudioStyle.supportingText)
                 }
             }
         }
+    }
+
+    /// The reference as a print, its trigger set large in the bottom margin.
+    private func conceptPrint(_ concept: Concept) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Group {
+                if concept.targetConcept.requiresLocator, let reference = session.references[concept.trigger] {
+                    TrainingTargetPreview(url: reference, fill: true)
+                        .accessibilityLabel("Reference for \(concept.trigger)")
+                } else {
+                    ZStack {
+                        InstantPrint.filterTrack
+                        Image(systemName: concept.targetConcept.requiresLocator ? "person.crop.square" : "sparkles")
+                            .font(.system(size: 44, weight: .light)).foregroundStyle(InstantPrint.inkSecondary)
+                    }
+                    .accessibilityLabel(concept.targetConcept.requiresLocator ? "No reference chosen" : "")
+                }
+            }
+            .frame(maxWidth: .infinity).frame(height: 300).clipped()
+            VStack(alignment: .leading, spacing: 4) {
+                Text(concept.trigger).font(InstantPrint.display(size: 38)).tracking(2.5)
+                    .foregroundStyle(InstantPrint.ink).lineLimit(1).minimumScaleFactor(0.5)
+                    .textSelection(.enabled)
+                Text(concept.classNoun.caseInsensitiveCompare(concept.targetConcept.title) == .orderedSame
+                    ? concept.targetConcept.title
+                    : "\(concept.targetConcept.title) · class noun \(concept.classNoun)")
+                    .font(.system(size: 13.5)).foregroundStyle(InstantPrint.inkSecondary)
+            }
+            .padding(.horizontal, 6).padding(.top, 10).padding(.bottom, 14)
+        }
+        .padding([.horizontal, .top], 8)
+        .background(InstantPrint.paper, in: RoundedRectangle(cornerRadius: 4))
+        .shadow(color: .black.opacity(0.10), radius: 3, x: 0, y: 1.5)
+        .environment(\.colorScheme, .light)
+    }
+
+    private func boundaryColumn(_ title: String, _ lines: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.system(size: 13.5, weight: .semibold))
+                .accessibilityAddTraits(.isHeader)
+            ForEach(lines, id: \.self) { line in
+                Text(line).font(.system(size: 14))
+                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

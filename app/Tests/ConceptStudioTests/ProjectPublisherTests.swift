@@ -31,10 +31,9 @@ struct ProjectPublisherTests {
         var project = try await makeDemoProject()
         defer { try? FileManager.default.removeItem(at: project.directory) }
         let previousRows = project.images.map { MetadataRow(fileName: $0.id) }
-        project.images.removeAll { $0.id == "garden.png" }
-        let remotePaths: Set = [
-            "garden.png", "garden.txt", "garden.json", "studio.png", "window.png", "unrelated.jpg", "README.md",
-        ]
+        project.images.removeAll { $0.id == "garden.jpg" }
+        let remotePaths = Set(previousRows.map(\.fileName))
+            .union(["garden.txt", "garden.json", "unrelated.jpg", "README.md"])
         let operations = try await ProjectPublisher.operations(
             for: project, previousRows: previousRows, remotePaths: remotePaths
         )
@@ -42,13 +41,13 @@ struct ProjectPublisherTests {
             if case let .delete(path) = operation { return path }
             return nil
         }
-        #expect(Set(deleted) == ["garden.png", "garden.txt", "garden.json"])
+        #expect(Set(deleted) == ["garden.jpg", "garden.txt", "garden.json"])
         #expect(!operations.contains { $0.path == "unrelated.jpg" || $0.path == "README.md" })
         let metadata = try #require(operations.compactMap { operation -> Data? in
             if case let .add(path, data) = operation, path == ImageFolderMetadata.fileName { return data }
             return nil
         }.first)
-        #expect(try ImageFolderMetadata.parse(metadata).map(\.fileName) == ["studio.png", "window.png"])
+        #expect(try ImageFolderMetadata.parse(metadata).map(\.fileName) == project.images.map(\.id))
     }
 
     @Test func publishedDatasetReplaysThroughHubAndRunner() async throws {
@@ -58,7 +57,7 @@ struct ProjectPublisherTests {
         let localSink = try SidecarSink(directory: project.imagesDirectory)
         let endpoint = ResolvedEndpoint(client: DemoModelClient())
         _ = try await Runner(job: project.job, captioner: endpoint).run(source: localSource, sink: localSink)
-        try await project.saveCaption(id: "garden.png", text: "NORA7 final caption.", final: true)
+        try await project.saveCaption(id: "garden.jpg", text: "NORA7 final caption.", final: true)
         let operations = try await ProjectPublisher.operations(for: project)
         var files: [String: Data] = [:]
         for operation in operations {
@@ -71,7 +70,7 @@ struct ProjectPublisherTests {
         let hub = HubClient(token: nil, transport: PublishedDatasetTransport(files: files))
         let source = try await HubFolderSource.open(client: hub, repo: RepoID("demo/project"))
         #expect(try await source.sampleIDs() == localSource.files.map(\.lastPathComponent))
-        #expect(try await source.count() == 3)
+        #expect(try await source.count() == DemoProject.preparedCaptions.count)
         let yaml = try #require(files["concept-captioner/job.yaml"])
         let job = try Job.load(yaml: #require(String(data: yaml, encoding: .utf8)))
         for id in try await source.sampleIDs() {
@@ -82,8 +81,8 @@ struct ProjectPublisherTests {
         }
         let sink = try HubFolderSink(client: hub, origin: .hub(source), push: false)
         let replay = try await Runner(job: job, captioner: endpoint, overwrite: true).run(source: source, sink: sink)
-        #expect(replay.outcomes.count(where: { $0.status == .written }) == 2)
-        #expect(replay.outcomes.first { $0.sampleID == "garden.png" }?.notes == ["human-final"])
+        #expect(replay.outcomes.count(where: { $0.status == .written }) == DemoProject.preparedCaptions.count - 1)
+        #expect(replay.outcomes.first { $0.sampleID == "garden.jpg" }?.notes == ["human-final"])
         #expect(!files.keys.contains { $0.hasPrefix("references/") })
 
         // A caller can retain this exact synthetic snapshot to exercise the Python pod reader too.

@@ -23,7 +23,7 @@ let package = Package(
             dependencies: ["ConceptCore", .product(name: "Yams", package: "Yams")],
             resources: [
                 .copy("Resources/Demo"), .process("Resources/OpenAI"), .copy("Resources/Training"),
-                .copy("Resources/Glossary"),
+                .copy("Resources/Glossary"), .copy("Resources/Fonts"),
             ],
             swiftSettings: [.swiftLanguageMode(.v6)],
             linkerSettings: [.linkedFramework("AVKit")]

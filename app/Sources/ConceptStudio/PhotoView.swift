@@ -68,10 +68,12 @@ enum PhotoThumbnails {
     }
 }
 
-/// A photo fitted into the space its caller gives it. Never decodes the original on the main thread.
+/// A photo fitted into (or, with `fill`, cropped to cover) the space its caller gives it. Never decodes the
+/// original on the main thread.
 struct PhotoView: View {
     let url: URL
     var faces: [CGRect] = []
+    var fill = false
     @Environment(\.displayScale) private var displayScale
     @State private var loaded: (key: PhotoThumbnails.Key, image: NSImage?)?
 
@@ -96,8 +98,21 @@ struct PhotoView: View {
 
     @ViewBuilder private func content(for key: PhotoThumbnails.Key) -> some View {
         if let image = PhotoThumbnails.cached(key) ?? (loaded?.key == key ? loaded?.image : nil) {
-            Image(nsImage: image).resizable().scaledToFit()
-                .overlay { faceBoxes }
+            if fill {
+                // When a print trims height, it keeps the top of the photo, where people's faces are.
+                GeometryReader { geometry in
+                    let trimsHeight = geometry.size.width * image.size.height
+                        > geometry.size.height * image.size.width
+                    Image(nsImage: image).resizable().scaledToFill()
+                        .frame(
+                            width: geometry.size.width, height: geometry.size.height,
+                            alignment: trimsHeight ? .top : .center
+                        )
+                }
+            } else {
+                Image(nsImage: image).resizable().scaledToFit()
+                    .overlay { faceBoxes }
+            }
         } else if loaded?.key == key {
             ContentUnavailableView("Cannot read this photo", systemImage: "photo")
         } else {
@@ -108,10 +123,10 @@ struct PhotoView: View {
     private var faceBoxes: some View {
         GeometryReader { geometry in
             ForEach(Array(faces.enumerated()), id: \.offset) { index, face in
-                RoundedRectangle(cornerRadius: 5).stroke(StudioStyle.accent, lineWidth: 2)
+                RoundedRectangle(cornerRadius: 4).stroke(InstantPrint.developer, lineWidth: 2)
                     .overlay(alignment: .topLeading) {
-                        Text("\(index + 1)").font(.caption.bold()).padding(3)
-                            .foregroundStyle(.primary).background(StudioStyle.surface)
+                        Text("\(index + 1)").font(.caption.bold()).padding(.horizontal, 4).padding(.vertical, 1)
+                            .foregroundStyle(.white).background(InstantPrint.developer)
                     }
                     .frame(width: face.width * geometry.size.width, height: face.height * geometry.size.height)
                     .position(x: face.midX * geometry.size.width, y: (1 - face.midY) * geometry.size.height)

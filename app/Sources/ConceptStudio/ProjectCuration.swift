@@ -3,6 +3,18 @@ import Foundation
 
 struct ProjectMediaState: Codable {
     var selections: [String: MediaSelection] = [:]
+    /// Samples whose caption the user changed and saved without marking it final. App-only: the response
+    /// record keeps the shared contract's two sources (model, human final).
+    var editedCaptions: Set<String> = []
+
+    init() {}
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        selections = try container.decodeIfPresent([String: MediaSelection].self, forKey: .selections) ?? [:]
+        editedCaptions = try container.decodeIfPresent(Set<String>.self, forKey: .editedCaptions) ?? []
+    }
+
     static func url(in directory: URL) -> URL {
         ProjectAppState.folder(in: directory).appendingPathComponent("media.json")
     }

@@ -19,3 +19,7 @@ captions/
 # Swift
 .build/
 app/build/
+
+# Impeccable review captures and plate copies are regenerated from the demo set
+app/.impeccable/review/
+app/assets/plates/

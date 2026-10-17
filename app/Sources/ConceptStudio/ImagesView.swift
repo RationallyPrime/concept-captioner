@@ -26,15 +26,7 @@ struct ImagesView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: StudioStyle.contentSpacing) {
-                StudioSection(
-                    title: "Add training images or clips",
-                    subtitle: "Choose the images or clips you want to use for this project."
-                ) {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 10) { importButtons }
-                        VStack(alignment: .leading, spacing: 10) { importButtons }
-                    }.disabled(session.busy)
-                }
+                importBar
                 Divider()
                 if images.isEmpty {
                     ContentUnavailableView(
@@ -101,7 +93,7 @@ struct ImagesView: View {
             if let folder = ProjectAccess
                 .chooseFolder(prompt: "Import images or clips") { session.importFolder(folder) }
         }
-        .buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
+        .modifier(PrimaryWhenEmpty(empty: images.isEmpty))
         .keyboardShortcut(.return, modifiers: .command)
         .help("Import a folder of images or clips (⌘↩)")
         Button("Choose images or clips…") { session.importImages(ProjectAccess.chooseMedia()) }
@@ -150,14 +142,28 @@ struct ImagesView: View {
         }
     }
 
+    /// A slim row of quiet import buttons above the sheet; the first import is the screen's one primary action.
+    private var importBar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Add training images or clips").font(.system(size: 13.5, weight: .semibold))
+                .accessibilityAddTraits(.isHeader)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) { importButtons }
+                VStack(alignment: .leading, spacing: 10) { importButtons }
+            }.disabled(session.busy)
+        }
+    }
+
+    /// The contact sheet: every sample as a print, curation warnings stamped in its margin.
     private var gallery: some View {
-        StudioSection(title: "Your training set") {
+        VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 18) {
                 Text(
                     "\(session.project?.images.count ?? 0) included · "
                         + "\(session.project?.excludedImages.count ?? 0) excluded"
+                        + (warningCount > 0 ? " · \(warningCount) with warnings" : "")
                 )
-                .fontWeight(.medium)
+                .font(.system(size: 13.5, weight: .semibold)).monospacedDigit()
                 Button("Undo curation") {
                     let replaced = session.project?.curationUndo.last?.replacedIDs ?? []
                     if images.contains(where: { replaced.contains($0.id) && session.hasUnsavedCaption(for: $0) }) {
@@ -165,50 +171,101 @@ struct ImagesView: View {
                     } else { session.undoMediaCuration() }
                 }
                 .disabled(session.busy || session.editing || session.project?.curationUndo.isEmpty != false)
-                if warningCount > 0 {
-                    Label("\(warningCount) with warnings", systemImage: "exclamationmark.triangle")
-                }
                 Spacer()
                 Toggle("Show warnings only", isOn: $warningsOnly)
-                    .toggleStyle(.checkbox)
+                    .toggleStyle(.checkbox).disabled(warningCount == 0 && !warningsOnly)
             }.font(.callout)
             if visibleImages.isEmpty {
                 ContentUnavailableView("No media with warnings to show", systemImage: "photo.on.rectangle")
             } else {
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 200), alignment: .top)],
+                    columns: [GridItem(.adaptive(minimum: 190), spacing: 16, alignment: .top)],
                     alignment: .leading,
-                    spacing: 24
+                    spacing: 18
                 ) {
-                    ForEach(visibleImages) { image in
-                        VStack(alignment: .leading, spacing: 9) {
-                            PhotoView(url: image.url).frame(height: 190)
-                                .frame(maxWidth: .infinity)
-                                .background(StudioStyle.surface)
-                            Toggle("Include in training", isOn: Binding(
-                                get: { session.project?.isIncluded(image.id) == true },
-                                set: { session.includeMedia(image.id, included: $0) }
-                            )).toggleStyle(.checkbox).disabled(session.busy || session.editing)
-                            Button(Sources
-                                .isVideo(Sources.suffix(of: image.id)) ? "Preview and trim clip…" :
-                                "Inspect and crop…") {
-                                    editingMedia = image
-                                }
-                                .disabled(session.busy || session.editing || session.project?
-                                    .isIncluded(image.id) != true)
-                            Divider()
-                            Text(image.id).font(.callout.weight(.medium)).lineLimit(1).help(image.id)
-                            ForEach(session.analyses[image.id]?.warnings ?? [], id: \.self) { warning in
-                                Label {
-                                    Text(warning).fixedSize(horizontal: false, vertical: true)
-                                } icon: {
-                                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
-                                }.font(.callout).foregroundStyle(StudioStyle.supportingText)
-                            }
-                        }.frame(maxWidth: .infinity, alignment: .topLeading)
-                    }
+                    ForEach(visibleImages) { image in curationPrint(image) }
                 }
             }
+        }
+    }
+
+    private func curationPrint(_ image: ProjectImage) -> some View {
+        let included = session.project?.isIncluded(image.id) == true
+        let warnings = session.analyses[image.id]?.warnings ?? []
+        let isVideo = Sources.isVideo(Sources.suffix(of: image.id))
+        let locked = session.busy || session.editing
+        return VStack(alignment: .leading, spacing: 0) {
+            TrainingTargetPreview(url: image.url, fill: true)
+                .frame(maxWidth: .infinity).frame(height: 150).clipped()
+                .opacity(included ? 1 : 0.55)
+                .overlay { if !included { StrikeLine() } }
+                .overlay(alignment: .topTrailing) {
+                    if isVideo {
+                        Image(systemName: "video.fill").font(.system(size: 11)).foregroundStyle(.white)
+                            .padding(5).background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 4))
+                            .padding(6).accessibilityLabel("Clip")
+                    }
+                }
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 6) {
+                    Text(image.id).font(.system(size: 13, weight: .semibold)).foregroundStyle(InstantPrint.ink)
+                        .lineLimit(1).truncationMode(.middle).help(image.id)
+                    Spacer(minLength: 4)
+                    Button {
+                        editingMedia = image
+                    } label: {
+                        Image(systemName: isVideo ? "timeline.selection" : "crop")
+                    }
+                    .buttonStyle(.plain).foregroundStyle(InstantPrint.inkSecondary)
+                    .disabled(locked || !included)
+                    .help(isVideo ? "Preview and trim clip…" : "Inspect and crop…")
+                    .accessibilityLabel(isVideo ? "Preview and trim \(image.id)" : "Inspect and crop \(image.id)")
+                }
+                Toggle("Include in training", isOn: Binding(
+                    get: { included },
+                    set: { session.includeMedia(image.id, included: $0) }
+                ))
+                .toggleStyle(.checkbox).font(.system(size: 12.5)).foregroundStyle(InstantPrint.ink)
+                .disabled(locked)
+                ForEach(warnings, id: \.self) { warning in
+                    VStack(alignment: .leading, spacing: 4) {
+                        PrintStateChip(state: .attention(nil))
+                        Text(warning).font(.system(size: 11.5)).foregroundStyle(InstantPrint.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 7).padding(.vertical, 5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(InstantPrint.attention.opacity(0.55), in: RoundedRectangle(cornerRadius: 5))
+                }
+            }
+            .padding(.horizontal, 6).padding(.top, 8).padding(.bottom, 8)
+        }
+        .padding([.horizontal, .top], 6)
+        .background(warnings.isEmpty ? InstantPrint.paper : InstantPrint.attentionWash)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .shadow(color: .black.opacity(0.10), radius: 3, x: 0, y: 1.5)
+        .environment(\.colorScheme, .light)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { if included, !locked { editingMedia = image } }
+        .contextMenu {
+            Button(isVideo ? "Preview and trim clip…" : "Inspect and crop…") { editingMedia = image }
+                .disabled(locked || !included)
+            Button(included ? "Exclude from training" : "Include in training") {
+                session.includeMedia(image.id, included: !included)
+            }.disabled(locked)
+        }
+    }
+}
+
+/// The import button is the screen's primary action only while there is nothing to curate yet.
+private struct PrimaryWhenEmpty: ViewModifier {
+    let empty: Bool
+
+    func body(content: Content) -> some View {
+        if empty {
+            content.buttonStyle(.borderedProminent).tint(StudioStyle.actionTint)
+        } else {
+            content
         }
     }
 }

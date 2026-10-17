@@ -52,7 +52,7 @@ struct PreviewRenderTests {
         defer { NSApplication.shared.appearance = originalAppearance }
         var captures: [[String: String]] = []
         if let garden = Bundle.module.url(forResource: "Demo", withExtension: nil)?
-            .appendingPathComponent("images/garden.png") {
+            .appendingPathComponent("images/window.jpg") {
             await prewarmThumbnails([garden])
         }
         try await captureWelcome(session: session, output: output, filter: filter, captures: &captures)
@@ -162,6 +162,14 @@ struct PreviewRenderTests {
             let ids = session.project?.images.map(\.id) ?? []
             session.reviewSelection = Set(ids.prefix(2))
             try await capture("review-several", view: root, output: output, filter: filter, captures: &captures)
+            try reviewCompState(session)
+            try await capture(
+                "review-comp", view: root, output: output, filter: filter, captures: &captures,
+                renderSizes: [
+                    ("comp", CGSize(width: 1536, height: 1024)),
+                    ("default", CGSize(width: 1240, height: 820)),
+                ]
+            )
             session.reviewSelection = Set(ids.prefix(1))
         case .training:
             session.step = .pods
@@ -409,6 +417,29 @@ struct PreviewRenderTests {
 }
 
 extension PreviewRenderTests {
+    /// The approved Review comp's situation: most captions final, a few edited, one flagged by the critic,
+    /// three excluded, and the window photo open.
+    private func reviewCompState(_ session: StudioSession) throws {
+        let edited = ["kitchen.jpg", "gym.jpg", "brick-wall.jpg", "bed.jpg"]
+        let excluded = ["looking-down.jpg", "eyes-closed.jpg", "smiling.jpg"]
+        guard var project = session.project else { return }
+        for index in project.images.indices {
+            let id = project.images[index].id
+            if id == "studio.jpg" {
+                project.images[index].status = .rejected
+                project.images[index].notes = ["Describes the concept itself: remove curly dark hair."]
+            } else if id != "window.jpg", !edited.contains(id) {
+                project.images[index].isFinal = true
+            }
+        }
+        project.mediaState.editedCaptions = Set(edited)
+        for id in excluded {
+            try project.setIncluded(id, false, recordUndo: false)
+        }
+        session.project = project
+        session.reviewSelection = ["window.jpg"]
+    }
+
     private func captureAdvancedModes(
         session: StudioSession, output: URL, filter: Set<String>, captures: inout [[String: String]]
     ) async throws {

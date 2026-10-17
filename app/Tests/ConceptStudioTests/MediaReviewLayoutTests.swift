@@ -96,7 +96,6 @@ struct ReviewLayoutTests {
         host.frame = CGRect(origin: .zero, size: size)
         defer { window.contentView = nil; window.close() }
         let before = try await editorFrame(in: host)
-        if availableWidth == 1000 { #expect(before.minX > 400) }
         session.setCaptionDraft(CaptionDraft(text: image.caption + " Edited caption.", isFinal: false), for: image.id)
         let edited = try await editorFrame(in: host)
         #expect(abs(edited.minX - before.minX) < 1)

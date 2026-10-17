@@ -78,6 +78,7 @@ struct GPUJourneyView: View {
 
     private var pods: some View {
         VStack(alignment: .leading, spacing: StudioStyle.contentSpacing) {
+            costFigures
             StudioSection(
                 title: "Choose a training computer",
                 subtitle: workspace.computerSubtitle
@@ -250,21 +251,29 @@ struct GPUJourneyView: View {
 
     private var training: some View {
         VStack(alignment: .leading, spacing: StudioStyle.contentSpacing) {
-            StudioSection(title: "Your training plan") {
+            StudioSection(title: "Your training plan", paper: true) {
                 Text(session.trainingPlanExplanation)
                     .fixedSize(horizontal: false, vertical: true)
-                LabeledContent(
-                    workspace.usesLocalDataset ? "Training inputs" : "Published dataset",
-                    value: workspace.usesLocalDataset ? "Included media and saved captions in this project"
-                        : trainingDatasetRepo.isEmpty
-                        ? "Publish your training media first" : trainingDatasetRepo
-                )
-                LabeledContent(
-                    workspace.usesLocalDataset ? "Transfer" : "Published revision",
-                    value: workspace.usesLocalDataset ? "Direct authenticated upload when training starts"
-                        : trainingDatasetRevision ?? "Latest revision on first download"
-                )
-                .font(.callout).textSelection(.enabled)
+                VStack(spacing: 0) {
+                    receiptRow(
+                        "Training model",
+                        workspace.trainingModelOptions(advancedUser: session.advancedUser)
+                            .first { $0.tag == workspace.baseModel }?.label ?? workspace.baseModel
+                    )
+                    receiptRow(
+                        workspace.usesLocalDataset ? "Training inputs" : "Published dataset",
+                        workspace.usesLocalDataset ? "Included media and saved captions in this project"
+                            : trainingDatasetRepo.isEmpty
+                            ? "Publish your training media first" : trainingDatasetRepo
+                    )
+                    receiptRow(
+                        workspace.usesLocalDataset ? "Transfer" : "Published revision",
+                        workspace.usesLocalDataset ? "Direct authenticated upload when training starts"
+                            : trainingDatasetRevision ?? "Latest revision on first download"
+                    )
+                    receiptRow(workspace.trainingLengthLabel, "\(workspace.steps)")
+                    receiptRow("Spending limit", StudioMoney.format(workspace.activeBudget ?? workspace.budget))
+                }
                 Text(workspace.usesLocalDataset
                     ? "Training uploads the included media, selected segments and saved captions "
                     + "directly from this project."
@@ -411,7 +420,8 @@ struct GPUJourneyView: View {
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.bottom, for: .sizeChanges)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(StudioStyle.surface, in: RoundedRectangle(cornerRadius: 8))
+        .background(InstantPrint.paper, in: RoundedRectangle(cornerRadius: 6))
+        .environment(\.colorScheme, .light)
         .accessibilityLabel("Training log")
     }
 }
@@ -533,26 +543,31 @@ extension StudioSession {
 extension GPUJourneyView {
     /// Inline status: progress and recoverable states. Blocking failures go to the window alert.
     private var status: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                LabeledContent("Computer", value: workspace.computerStatus).font(.headline)
-                if step == .training || step == .monitor {
-                    LabeledContent("Training", value: workspace.trainingStatus)
-                }
-                Text(workspace.message).font(.callout).foregroundStyle(StudioStyle.supportingText)
-                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+        HStack(alignment: .center, spacing: 16) {
+            statusChip("Computer", workspace.computerStatus)
+            if step == .training || step == .monitor {
+                statusChip("Training", workspace.trainingStatus)
             }
+            Text(workspace.message).font(.callout).foregroundStyle(StudioStyle.supportingText)
+                .lineLimit(2).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
             Spacer(minLength: 0)
             if workspace.isBusy || workspace.isStopping { ProgressView().controlSize(.small) }
             if showsSpendControls, workspace.hasRunningPod {
-                VStack(alignment: .trailing, spacing: 8) {
-                    Text("GPU spend · \(StudioMoney.format(workspace.elapsedCost))")
-                        .font(.headline).monospacedDigit()
-                    Button(workspace.isStopping ? "Stopping…" : "Stop everything", systemImage: "stop.circle") {
-                        session.requestStopEverything()
-                    }.disabled(workspace.isStopping)
-                }
+                Text("GPU spend · \(StudioMoney.format(workspace.elapsedCost))")
+                    .font(.headline).monospacedDigit()
+                Button(workspace.isStopping ? "Stopping…" : "Stop everything", systemImage: "stop.circle") {
+                    session.requestStopEverything()
+                }.disabled(workspace.isStopping)
             }
         }
+    }
+
+    private func statusChip(_ title: String, _ value: String) -> some View {
+        HStack(spacing: 7) {
+            Text(title).font(.system(size: 13.5, weight: .semibold))
+            PrintStateChip(state: .other(value)).environment(\.colorScheme, .light)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title): \(value)")
     }
 }
