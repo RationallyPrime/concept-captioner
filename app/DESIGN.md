@@ -70,6 +70,9 @@ film back around them. Tokens live in `InstantPrint.swift`.
   open print and the sheet. Publish: the included prints stacked beside three counts. GPU pods: the
   price, spending limit and idle stop set large. Training: the plan as a receipt. Monitor: the
   learning curve in ink, and base and trained outputs as print pairs.
+- **Welcome** uses the same frame: a charcoal panel with the name, the three ways in (New project
+  as the primary action) and Settings and Help, beside the work surface with the three steps, a strip
+  of demo prints that opens the demo, and recent projects.
 - **Sections stay flat** under the owner's layout grammar below; paper is for prints and for the
   training plan, which is a receipt. Notices sit on a light grey slip.
 - **App icon.** A developing print on the charcoal tile, with the orange trigger mark in its margin.
