@@ -245,7 +245,9 @@ struct GPUWorkflowTests {
         #expect(workspace.plan?.train?.gpus == [1])
         await workspace.train(datasetRepo: "demo/images", output: HubDestination(repo: "demo/result"))
         #expect(!workspace.runID.isEmpty)
-        for _ in 0 ..< 10 {
+        // The demo run ends after eight progress reads. A slow CI machine can spend a refresh elsewhere,
+        // so refresh until the run has ended and its result settled, within a fixed bound.
+        for _ in 0 ..< 50 where workspace.trainingState != "exited" || workspace.result?.state == .training {
             await workspace.refresh()
         }
         #expect(!workspace.points.isEmpty)
